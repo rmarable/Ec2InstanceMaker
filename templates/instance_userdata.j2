@@ -1,0 +1,23 @@
+#cloud-config
+{% if hyperthreading == "false" %}
+bootcmd:
+ - for cpunum in $(cat /sys/devices/system/cpu/cpu*/topology/thread_siblings_list | cut -s -d, -f2- | tr ',' '\n' | sort -un); do echo 0 > /sys/devices/system/cpu/cpu$cpunum/online; done 
+{% endif %}
+{% if base_os == "centos6" %}
+runcmd:
+    - yum install -y epel-release
+    - yum install -y cloud-utils-growpart parted dracut-modules-growroot perl
+    - mkinitrd -f -v /boot/initrd-$(uname -r).img $(uname -r)
+growpart:
+    mode: auto
+    devices: ["/"]
+    ignore_rootfs_disabled: false
+{% endif %}
+
+###############################################################
+## Starting point for user-added EC2 instance customizations ##
+###############################################################
+
+#############################################################
+## Ending point for user-added EC2 instance customizations ##
+#############################################################

@@ -1,0 +1,168 @@
+################################################################################
+# Name:		access_instance.{{ instance_name }}.j2
+# Author:       Rodney Marable <rodney.marable@gmail.com>
+# Created On:   June 8, 2019
+# Last Changed: June 13, 2019
+# Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
+{% if base_os == 'windows2019' %}
+# Purpose:	Provide a quick reference for Windows Administrator passwords
+{% else %}
+# Purpose:	Provide a quick mechanism for SSH-ing into EC2 instances
+{% endif %}
+################################################################################
+
+# Import some critical Python libraries.
+
+import csv
+import os
+import subprocess
+import sys
+from prettytable import from_csv
+
+# Function: menuCount()
+# Purpose: Iterate through a list from item_value=low to item_value=high
+#
+# This function would noramlly be defined within aux_data.py but importing
+# from non-local directories is ugly and unPythonic.
+
+def menuCount(low, high):
+    counter = 0
+    def tmp():
+        nonlocal counter
+        item_value = low + counter
+        if item_value < high:
+            counter += 1
+            return item_value
+        return None
+    return iter(tmp, None)
+
+# Define some important parameters.
+
+base_os = '{{ base_os }}'
+ec2_keypair = '{{ ec2_keypair }}'
+instance_name = '{{ instance_name }}'
+instance_data_dir = '{{ instance_data_dir }}'
+instance_serial_number = '{{ instance_serial_number }}'
+region = '{{ region }}'
+
+{% if 'windows2019' not in base_os  %}
+{% if count > 1 %}
+# Parse the Ids, hostnames, and IP addresses of the instance family.
+{% else %}
+# Parse the instance Id, hostname, and IP address.
+{% endif %}
+{% else %}
+{% if count > 1 %}
+# Parse the IP addresses and decrypted Windows Administrator passwords of the
+# instance family.
+{% else %}
+# Parse the IP address and decrypted Windows Administrator password.
+{% endif %}
+{% endif %}
+
+ec2_instance_id_tf = subprocess.run('terraform show | grep instance_id | awk \'{print $3}\'',  stdout=subprocess.PIPE, shell=True, stderr=subprocess.DEVNULL, cwd=instance_data_dir)
+ec2_InstanceId = ec2_instance_id_tf.stdout.decode('utf-8').replace('\"', '').strip()
+
+ec2_instance_name_tf = subprocess.run('terraform show | grep instance_name_index | awk \'{print $3}\'',  stdout=subprocess.PIPE, shell=True, stderr=subprocess.DEVNULL, cwd=instance_data_dir)
+ec2_InstanceName = ec2_instance_name_tf.stdout.decode('utf-8').replace('\"', '').strip()
+
+{% if base_os == 'windows2019' %}
+winItemAdminPw_tf = []
+for winItemId_tf in str(ec2_InstanceId).split(","):
+    winItemPw_tf = subprocess.run('aws ec2 get-password-data --instance-id ' + winItemId_tf + str(' --priv-launch-key ') + ec2_keypair + '.pem | jq \'..|.PasswordData?\'', stdout=subprocess.PIPE, shell=True, stderr=subprocess.DEVNULL, cwd=instance_data_dir)
+    adminpw_tf = winItemPw_tf.stdout.decode('utf-8').replace('\"', '').strip()
+    winItemAdminPw_tf.append(adminpw_tf)
+windows_AdministratorPassword = ','.join(winItemAdminPw_tf)
+{% endif %}
+
+ec2_ip_addr_tf = subprocess.run('terraform show | grep instance_ip_addresses | awk \'{print $3}\'', stdout=subprocess.PIPE, shell=True, stderr=subprocess.DEVNULL, cwd=instance_data_dir)
+ec2_IpAddress = ec2_ip_addr_tf.stdout.decode('utf-8').replace('\"', '').strip()
+
+# Create a temporary CSV file and table header for the instance state data.
+
+csvTempFile = '/tmp/_csvTempFile_' + instance_serial_number + '.csv'
+csv_file = open(csvTempFile, 'w')
+
+{% if base_os == 'windows2019' %}
+csv_file.write('Instance Name,IP Address,Adminstrator Password\n')
+{% else %}
+csv_file.write('Item,Instance Name,IP Address\n')
+{% endif %}
+
+csv_file.close()
+csv_file = open(csvTempFile, 'a')
+
+{% if base_os == 'windows2019' %}
+for x, y, z in zip(ec2_InstanceName.split(','), ec2_IpAddress.split(','), windows_AdministratorPassword.split(',')):
+    element = x + ',' + y + ',' + z + '\n'
+    csv_file.write(element)
+csv_file.close()
+csv_file = open(csvTempFile, 'r')
+windows_InstanceTable = from_csv(csv_file)
+csv_file.close()
+{% if count == 1 %}
+print('Access the new instance via Windows Remote Desktop with this information:')
+{% else %}
+print('Access the new instance family members with Windows Remote Desktop:')
+{% endif %}
+print('')
+print(windows_InstanceTable)
+print('')
+print('Reprint this table:')
+print('$ ./access_instance -N ' + instance_name )
+print('')
+{% else %}
+
+# Compute the number of instances deployed with this instance_name.
+
+ec2_menu_items = len(ec2_IpAddress)
+
+# Append the instance state data to the temporary CSV header file.
+
+for x, y, z in zip(menuCount(1, ec2_menu_items), ec2_InstanceName.split(','), ec2_IpAddress.split(',')):
+    element = str(x) + ',' + y + ',' + z + '\n'
+    csv_file.write(element)
+csv_file.close()
+csv_file = open(csvTempFile, 'r')
+ec2_InstanceTable = from_csv(csv_file)
+csv_file.close()
+
+# Create a menu to assist the operator with creating SSH connections to the
+# new instances.
+
+print('')
+print(ec2_InstanceTable)
+print('')
+print('Select an instance to access using SSH:')
+menuchoice = int(input())
+print('')
+
+with open(csvTempFile, newline='') as infh:
+    reader = csv.reader(infh)
+    for row in reader:
+        if str(row[0]) == str(menuchoice):
+            ssh_hostname = row[1]
+            ssh_ip_address = row[2]
+            print('Opening an SSH connection to: ' + ssh_hostname)
+            print('')
+            subprocess.run('ssh -i ' + ec2_keypair + '.pem -l {{ ec2_user }} ' + ssh_ip_address,  shell=True, cwd=instance_data_dir)
+subprocess.run('ssh -i ' + ec2_keypair + '.pem -l {{ ec2_user }} ' + ec2_IpAddress, shell=True, cwd=instance_data_dir)
+
+# Print reconnection information to the console.
+
+print('')
+{% if count > 1 %}
+print('Reconnect to ' + ssh_hostname + ' by running this command:')
+{% else %}
+print('Reconnect to ' + instance_name + ' by running this command:')
+{% endif %}
+print('')
+print('$ ./access_instance.py -N {{ instance_name }}')
+{% endif %}
+
+# Cleanup and exit.
+
+{% if count > 1 %}
+os.remove(csvTempFile)
+{% endif %}
+sys.exit(0)

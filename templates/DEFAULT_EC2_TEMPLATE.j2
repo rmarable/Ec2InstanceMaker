@@ -1,0 +1,162 @@
+################################################################################
+# Name:		{{ instance_name }}.tf
+# Author:	Rodney Marable <rodney.marable@gmail.com>
+# Created On:	June 3, 2019
+# Last Changed:	June 14, 2019
+# Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
+{% if count > 1 %}
+# Purpose:	Terraform template for instance family {{ instance_name }}
+{% else %}
+# Purpose:	Terraform template for instance {{ instance_name }}
+{% endif %}
+################################################################################
+
+{% if request_type == 'ondemand' %}
+resource "aws_instance"  "{{ instance_name }}" {
+{% endif %}
+{% if request_type == 'spot' %}
+resource "aws_spot_instance_request"  "{{ instance_name }}" {
+  spot_price           = "{{ spot_price }}"
+  spot_type            = "one-time"
+{% if count > 1 %}
+  launch_group         = "{{ instance_serial_number }}-lg"
+{% endif %}
+  wait_for_fulfillment = true
+{% endif %}
+  availability_zone         = "{{ az }}"
+  ami                       = "{{ aws_ami }}"
+  count                     = "{{ count }}"
+  ebs_optimized             = "{{ ebs_optimized | lower }}"
+{% if base_os == 'windows2019' %}
+  get_password_data         = "true"
+{% endif %}
+  iam_instance_profile      = "{{ ec2_iam_instance_profile }}"
+  instance_type             = "{{ instance_type }}"
+  key_name                  = "{{ ec2_keypair }}"
+  monitoring                = "true"
+  provider                  = "{{ provider }}"
+  root_block_device {
+    volume_size             = "{{ ebs_root_volume_size }}"
+    volume_type             = "{{ ebs_root_volume_type }}"
+{% if ebs_root_volume_type == 'io1' %}
+    iops                    = "{{ ebs_root_volume_iops }}"
+{% endif %}
+  }
+  vpc_security_group_ids    = ["{{ vpc_security_group_ids }}"]
+  subnet_id                 = "{{ subnet_id }}"
+  tags =  {
+{% if count > 1 %}
+    Name                    = "{{ instance_name }}-${count.index}"
+    Purpose                 = "EC2 instance family built by {{ instance_owner }}"
+{% else %}
+    Name                    = "{{ instance_name }}"
+    Purpose                 = "EC2 instance built by {{ instance_owner }}"
+{% endif %}
+    EC2InstanceBuilder      = "Terraform"
+    InstanceSerialNumber    = "{{ instance_serial_number }}"
+    InstanceOwner           = "{{ instance_owner }}"
+    InstanceOwnerEmail      = "{{ instance_owner_email }}"
+    InstanceOwnerDepartment = "{{ instance_owner_department }}"
+{% if 'UNDEFINED' not in project_id %}
+    ProjectID               = "{{ project_id }}"
+{% endif %}
+    DEPLOYMENT_DATE         = "{{ DEPLOYMENT_DATE }}"
+  }
+  volume_tags =  {
+    EC2InstanceBuilder      = "Terraform"
+{% if count > 1 %}
+    MountedBy               = "{{ instance_name }}-${count.index}"
+    Purpose                 = "EC2 instance family built by {{ instance_owner }}"
+{% else %}
+    MountedBy               = "{{ instance_name }}"
+    Purpose                 = "EC2 instance built by {{ instance_owner }}"
+{% endif %}
+    InstanceSerialNumber    = "{{ instance_serial_number }}"
+    InstanceOwner           = "{{ instance_owner }}"
+    InstanceOwnerEmail      = "{{ instance_owner_email }}"
+    InstanceOwnerDepartment = "{{ instance_owner_department }}"
+{% if 'UNDEFINED' not in project_id %}
+    ProjectID               = "{{ project_id }}"
+{% endif %}
+    DEPLOYMENT_DATE         = "{{ DEPLOYMENT_DATE }}"
+  }
+{% if 'windows2019' not in base_os %}
+  user_data     = "${file("instance_userdata.{{ instance_name }}.sh")}"
+  provisioner "file" {
+    source      = "{{ build_instance_script }}"
+    destination = "/tmp/{{ build_instance_script }}"
+  connection {
+    type        = "ssh"
+    host        = self.public_ip
+    user        = "{{ ec2_user }}"
+    agent       =  false
+    private_key = "${file("{{ ssh_keypair_file }}")}"
+    }
+  }
+  provisioner "remote-exec" {
+    inline = [
+      "chmod 0755 /tmp/{{ build_instance_script }}",
+      "/tmp/{{ build_instance_script }}",
+    ]
+  connection {
+    type        = "ssh"
+    host        = self.public_ip
+    user        = "{{ ec2_user }}"
+    agent       =  false
+    private_key = "${file("{{ ssh_keypair_file }}")}"
+    }
+  }
+{% endif %}
+{% if request_type == "spot" %}
+  provisioner "local-exec" {
+{% if count > 1 %}
+    command = "aws --region {{ region }} ec2 create-tags --resource ${self.spot_instance_id} --tags Key=Name,Value={{ instance_name }}-${count.index} Key=InstanceSerialNumber,Value={{ instance_serial_number }} Key=InstanceOwner,Value={{ instance_owner }} Key=InstanceOwnerEmail,Value={{ instance_owner_email }} Key=InstanceOwnerDepartment,Value={{ instance_owner_department }} Key=InstanceFamily,Value={{ instance_serial_number }}-{{ instance_type }} Key=EC2RequestType,Value={{ request_type }}{% if 'UNDEFINED' not in project_id %} Key=ProjectId,Value={{ project_id }}{% endif %} Key=DEPLOYMENT_DATE,Value=\"{{ DEPLOYMENT_DATE_TAG }}\""
+{% else %}
+    command = "aws --region {{ region }} ec2 create-tags --resource ${self.spot_instance_id} --tags Key=Name,Value={{ instance_name }} Key=InstanceSerialNumber,Value={{ instance_serial_number }} Key=InstanceOwner,Value={{ instance_owner }} Key=InstanceOwnerEmail,Value={{ instance_owner_email }} Key=InstanceOwnerDepartment,Value={{ instance_owner_department }} Key=InstanceFamily,Value={{ instance_serial_number }}-{{ instance_type }} Key=EC2RequestType,Value={{ request_type }}{% if 'UNDEFINED' not in project_id %} Key=ProjectId,Value={{ project_id }}{% endif %} Key=DEPLOYMENT_DATE,Value=\"{{ DEPLOYMENT_DATE_TAG }}\""
+{% endif %}
+  }
+{% endif %}
+{% if base_os == "centos6" %}
+  provisioner "remote-exec" {
+    inline = [
+      "sudo partprobe",
+      "sudo reboot",
+    ]
+  connection {
+    type        = "ssh"
+    host        = self.public_ip
+    user        = "{{ ec2_user }}"
+    agent       =  false
+    private_key = "${file("{{ ssh_keypair_file }}")}"
+    }
+  }
+{% endif %}
+}
+{% if request_type == "ondemand" %}
+output "instance_ip_addresses" {
+  value = "${join(",", aws_instance.{{ instance_name }}.*.public_ip)}"
+}
+output "instance_public_dns" {
+  value = "${join(",", aws_instance.{{ instance_name }}.*.public_dns)}"
+}
+output "instance_name_index" {
+  value = "${join(",", aws_instance.{{ instance_name }}.*.tags.Name)}"
+}
+output "instance_id_list" {
+  value = "${join(",", aws_instance.{{ instance_name }}.*.id)}"
+}
+{% endif %}
+{% if request_type == "spot" %}
+output "instance_ip_addresses" {
+  value = "${join(",", aws_spot_instance_request.{{ instance_name }}.*.public_ip)}"
+}
+output "instance_public_dns" {
+  value = "${join(",", aws_spot_instance_request.{{ instance_name }}.*.public_dns)}"
+}
+output "instance_name_index" {
+  value = "${join(",", aws_spot_instance_request.{{ instance_name }}.*.tags.Name)}"
+}
+output "instance_id_list" {
+  value = "${join(",", aws_spot_instance_request.{{ instance_name }}.*.spot_instance_id)}"
+}
+{% endif %}

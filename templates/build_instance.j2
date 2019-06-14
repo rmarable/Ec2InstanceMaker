@@ -1,0 +1,74 @@
+#!/bin/bash
+#
+################################################################################
+# Name:		build_instance.{{ instance_name }}.sh
+# Author:	Rodney Marable <rodney.marable@gmail.com>
+# Created On:	June 3, 2019
+# Last Changed:	June 11, 2019
+# Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
+# Purpose:	Perform some additional post-installation configuration steps
+#		on EC2 instance {{ instance_name }}
+################################################################################
+
+source /etc/profile
+
+# Set values for some critical variables. 
+
+EC2_HOME={{ ec2_user_home }}
+EC2_USER={{ ec2_user }}
+SRC={{ ec2_user_src }}
+
+# Set the default region for the AWS CLI. 
+
+aws configure set default.region {{ region }}
+
+# Create a local source directory for the $EC2_USER user account.
+
+if [ ! -d $SRC ]
+then
+	sudo mkdir -p $SRC
+	sudo chown -R $EC2_USER:$EC2_USER $SRC
+	sudo chmod -R 755 $SRC
+fi
+
+{% if 'ubuntu' not in base_os %}
+# Update the instance via yum.
+
+sudo yum -y update
+{% else %}
+# Update the instance via apt.
+
+sudo apt-get -y update
+{% endif %}
+
+{% if 'ubuntu' not in base_os %}
+# Install some critical packages via yum.
+
+sudo yum install -y git gcc
+{% else %}
+# Install some critical packages via yum.
+
+sudo apt-get -y git gcc
+{% endif %}
+
+# Add a 45-second keep-alive interval so that SSH doesn't logout automatically
+# and adversely affect ongoing EC2 instance activity.
+
+echo "
+# Add a 45-second keep-alive interval so that SSH doesn't logout automatically
+# and adversely affect EC2 instance activity.
+ServerAliveInterval 45" >> $EC2_HOME/.ssh/config
+chmod 0644 $EC2_HOME/.ssh/config
+
+###############################################################
+## Starting point for user-added EC2 instance customizations ##
+###############################################################
+
+
+#############################################################
+## Ending point for user-added EC2 instance customizations ##
+#############################################################
+
+# Cleanup and exit.
+
+exit 0

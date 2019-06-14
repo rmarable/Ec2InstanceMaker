@@ -1,0 +1,45 @@
+################################################################################
+# Name:		create_instance_terraform_templates.yml
+# Author:	Rodney Marable <rodney.marable@gmail.com>
+# Created On:	April 20, 2019
+# Last Changed:	June 14, 2019
+# Purpose:	Ansible playbook for new EC2 instance Terraform build templates
+################################################################################
+
+---
+
+- name: Provision Terraform templates to build new EC2 instances
+  hosts: local
+  connection: local
+  gather_facts: false
+  vars:
+    - instance_name: "{{ instance_name }}"
+    - local_workingdir: "{{ lookup('pipe','pwd') }}"
+  vars_files:
+    - vars_files/{{ instance_name }}.yml
+
+  tasks:
+    - name: Create a state directory for the EC2 instance(s) 
+      file:
+        path: "{{ instance_data_dir }}"
+        state: directory
+        mode: 0755
+
+    - name: Deploy the Terraform EC2 instance templates
+      template:
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+        mode: 0755
+      with_items:
+        - { src: '{{ access_instance_src }}', dest: '{{ instance_data_dir }}/{{ access_instance_dest }}' }
+        - { src: '{{ build_instance_src }}', dest: '{{ instance_data_dir }}/{{ build_instance_script }}' }
+        - { src: '{{ instance_userdata_src }}', dest: '{{ instance_data_dir }}/{{ instance_userdata_script }}' }
+        - { src: '{{ kill_instance_src }}', dest: '{{ instance_data_dir }}/{{ kill_instance_script }}' }
+        - { src: '{{ provider_tf_src }}', dest: '{{ instance_data_dir }}/{{ provider_tf_dest }}' }
+        - { src: '{{ tf_ec2_instance_src }}', dest: '{{ instance_data_dir }}/{{ tf_ec2_instance_dest }}' }
+
+    - name: Symlink the kill_instance script into the main src_tree
+      file:
+        src: "{{ instance_data_dir }}/{{ kill_instance_script }}"
+        path: "{{ local_workingdir }}/kill-instance.{{ instance_name }}.sh"
+        state: link
