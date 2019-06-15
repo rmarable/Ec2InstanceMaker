@@ -2,7 +2,7 @@
 # Name:		access_instance.{{ instance_name }}.j2
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   June 8, 2019
-# Last Changed: June 13, 2019
+# Last Changed: June 14, 2019
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 {% if base_os == 'windows2019' %}
 # Purpose:	Provide a quick reference for Windows Administrator passwords
@@ -127,6 +127,7 @@ csv_file = open(csvTempFile, 'r')
 ec2_InstanceTable = from_csv(csv_file)
 csv_file.close()
 
+{% if count > 1 %}
 # Create a menu to assist the operator with creating SSH connections to the
 # new instances.
 
@@ -146,7 +147,12 @@ with open(csvTempFile, newline='') as infh:
             print('Opening an SSH connection to: ' + ssh_hostname)
             print('')
             subprocess.run('ssh -i ' + ec2_keypair + '.pem -l {{ ec2_user }} ' + ssh_ip_address,  shell=True, cwd=instance_data_dir)
+
+{% else %}
+# Make an SSH connection to the new instance.
+
 subprocess.run('ssh -i ' + ec2_keypair + '.pem -l {{ ec2_user }} ' + ec2_IpAddress, shell=True, cwd=instance_data_dir)
+{% endif %}
 
 # Print reconnection information to the console.
 
