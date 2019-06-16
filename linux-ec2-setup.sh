@@ -1,16 +1,24 @@
 ################################################################################
-# Name:         ec2-setup.sh
+# Name:         linux-ec2-setup.sh
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   June 14, 2019
-# Last Changed: June 15, 2019
-# Purpose:      Setup Ec2InstanceMaker on an Ec2InstanceMaker-created instance
+# Last Changed: June 16, 2019
+# Purpose:      Setup Ec2InstanceMaker to spawn new instances from an instance
+#		created by Ec2InstanceMaker
 ################################################################################
 
 #!/bin/bash
 
-# Define some critical shell variables.
+# Define the Terraform version to deploy.
 
 TERRAFORM_VERSION=0.12.2
+
+################################################################################
+#           	No more user-configurable options exist below here!            #
+################################################################################
+
+# Define some critical shell variables.
+
 SCRATCH_DIR=/tmp/_Ec2InstanceMaker
 SRC_DIR=`pwd`
 
