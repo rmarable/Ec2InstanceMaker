@@ -99,11 +99,11 @@ $ cd ~
 * You are now ready to build instances.  Please consult README.md for more
 detailed information on leveraging the scripts in this toolkit.
 
-## Creating an Installation Environment on Linux 
+## Creating an Installation Environment on Linux (local or EC2)
 
 The ec2-setup.sh script can be used to set up the Ec2InstanceMaker operating
-environment on Linux.  This will also work on EC2 instances running CentOS or
-Amazon Linux; support for Ubuntu will be provided in a later release.
+environment on Linux.  This will also work on EC2 instances running CentOS,
+Amazon Linux, or Ubuntu.
 
 After building a new instance, check out the repository from Github and run
 the script:

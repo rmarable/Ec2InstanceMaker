@@ -8,28 +8,46 @@
 
 #!/bin/bash
 
-GIT_ACCESS=rmarable:ebde37d45a8c6a72b48d5e13a0989c9d484d5ab3
-SRC=~/src
+# Define some critical shell variables.
+
 TERRAFORM_VERSION=0.12.2
+SCRATCH_DIR=/tmp/_Ec2InstanceMaker
+SRC_DIR=`pwd`
 
-mkdir $SRC && cd $SRC
+# Create a temporary scratch directory.
 
-git clone https://${GIT_ACCESS}@github.com/rmarable/Ec2InstanceMaker.git 
+if [ ! -d $SCRATCH_DIR ]
+then
+	mkdir -p $SCRATCH_DIR
+fi
 
-cd Ec2InstanceMaker
-sudo yum install -y python3 python3-devel python3-pip jq autoconf automake libtool gcc git
-sudo pip3 install -r requirements.txt
+# Install Terraform.
 
+cd $SCRATCH_DIR
 wget https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip
 unzip terraform_${TERRAFORM_VERSION}_linux_amd64.zip
 sudo cp terraform /usr/local/bin
 
-if [ $1 == "test" ]
+# Install the Ec2InstanceMaker runtime environment.
+
+if [[ `cat /etc/os-release | grep ID_LIKE | grep -c centos` -gt 1 ]]
 then
-	python3 make-instance.py -N tester01 -O rmarable -E rodney.marable@gmail.com -A us-east-1a 
-	python3 access_instance.py -N tester01
+	sudo yum install -y autoconf automake gcc git jq libtool python3 python3-devel python3-pip 
+elif [[ `cat /etc/os-release | grep ID_LIKE | grep -c debian` -gt 1 ]]
+then
+	sudo apt-get -y install autoconf automake gcc git jq libtool python3 python3-dev python3-pip 
 else
-	echo "Finished setting up Ec2InstanceMaker."
-	echo "Exiting..."
-	exit 0
+	echo "*** ERROR ***"
+	echo "Unsupported Linux version!!!"
+	echo "Aborting..."
+	exit 1
 fi
+cd $SRC_DIR
+sudo pip3 install -r requirements.txt
+
+# Cleanup and exit.
+
+rm -rf $SCRATCH_DIR
+echo "Finished setting up Ec2InstanceMaker."
+echo "Exiting..."
+exit 0
