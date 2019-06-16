@@ -468,9 +468,9 @@ else:
 
 iam = boto3.client('iam')
 
-# Create a generic IAM EC2 instance profile permitting EC2 and S3 operations
-# for the instance if iam_role was not defined by the operator.
-# All of these resources will be terminated along with the instance.
+# Create and apply an IAM EC2 instance profile from the default template if
+# iam_role was not defined by the operator.  All IAM resources created as part
+# of the life cycle will be terminated along with the instance.
 
 if iam_role == 'UNDEFINED':
     ec2_iam_instance_role = 'ec2-instance-role-' + instance_serial_number
@@ -519,11 +519,11 @@ if iam_role == 'UNDEFINED':
                 )
             print('Added: ' + ec2_iam_instance_role + ' to ' + ec2_iam_instance_profile)
 
-# If the operator provides an iam_role, use it to construct an IAM EC2
-# instance profile role that will be applied to the new EC2 instance.  The
-# EC2 instance profile and role will be preserved upon instance termination.
+# If the operator provides a pre-existing iam_role, use it to construct an IAM
+# EC2 instance profile that will be applied to the new EC2 instance.  This EC2
+# instance profile and role will be preserved upon instance termination.
 #
-# Note: this is part of the if:else construct defined above!
+# Note: this is all part of the if:else construct defined above!
 
 else:
     ec2_iam_instance_role = iam_role
@@ -556,7 +556,7 @@ if debug_mode == 'true':
     p_val('ec2_iam_instance_role', debug_mode)
     p_val('ec2_iam_instance_profile', debug_mode)
 
-# Set some critical environment variables to support Turbot.
+# Set some critical environment variables to support Turbot operability.
 # https://turbot.com/about/
 
 if turbot_account != 'DISABLED':

@@ -69,6 +69,40 @@
             "Resource": "*"
         },
         {
+            "Sid": "AutoScalingDescribe",
+            "Action": [
+                "autoscaling:DescribeAutoScalingGroups",
+                "autoscaling:DescribeTags",
+                "autoscaling:DescribeLaunchConfigurations",
+                "autoscaling:DescribeAutoScalingInstances"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
+        },
+        {
+            "Sid": "AutoScalingModify",
+            "Action": [
+                "autoscaling:TerminateInstanceInAutoScalingGroup",
+                "autoscaling:SetDesiredCapacity",
+                "autoscaling:UpdateAutoScalingGroup",
+                "autoscaling:CreateAutoScalingGroup",
+                "autoscaling:CreateLaunchConfiguration",
+                "ec2:CreateLaunchTemplate",
+                "ec2:ModifyLaunchTemplate",
+                "ec2:DeleteLaunchTemplate",
+                "ec2:DescribeLaunchTemplates",
+                "ec2:DescribeLaunchTemplateVersions",
+                "autoscaling:PutNotificationConfiguration",
+                "autoscaling:PutScalingPolicy",
+                "autoscaling:DeleteLaunchConfiguration",
+                "autoscaling:DescribeScalingActivities",
+                "autoscaling:DeleteAutoScalingGroup",
+                "autoscaling:DeletePolicy"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
+        },
+	        {
             "Sid": "S3Objects",
             "Action": [
                 "s3:GetObject",
@@ -78,9 +112,7 @@
                 "s3:DeleteObject"
             ],
             "Effect": "Allow",
-            "Resource": [
-                "arn:aws:s3:::*/*"
-            ]
+            "Resource": [ "arn:aws:s3:::*/*" ]
         },
         {
             "Sid": "S3Bucket",
@@ -99,15 +131,165 @@
                 "s3:PutEncryptionConfiguration"
             ],
             "Effect": "Allow",
-            "Resource": [
-                "arn:aws:s3:::*"
-            ]
+            "Resource": [ "arn:aws:s3:::*" ]
         },
         {
             "Sid": "S3Inventory",
             "Action": [
                 "s3:HeadBucket",
                 "s3:ListAllMyBuckets"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
+        },
+        {
+            "Sid": "STS",
+            "Action": [ "sts:GetCallerIdentity" ],
+            "Effect": "Allow",
+            "Resource": "*"
+        },
+        {
+            "Sid": "SQS",
+            "Action": [
+                "sqs:ListQueues",
+                "sqs:GetQueueAttributes",
+                "sqs:CreateQueue",
+                "sqs:SetQueueAttributes",
+                "sqs:DeleteQueue",
+                "sqs:SendMessage",
+                "sqs:ReceiveMessage",
+                "sqs:ChangeMessageVisibility",
+                "sqs:DeleteMessage",
+                "sqs:GetQueueUrl"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
+        },
+        {
+            "Sid": "SQSTags",
+            "Action": [
+                "sqs:ListQueueTags",
+                "sqs:TagQueue",
+                "sqs:UntagQueue"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
+        },
+        {
+            "Sid": "SNS",
+            "Action": [
+                "sns:Subscribe",
+                "sns:Publish",
+                "sns:ListTopics",
+                "sns:GetTopicAttributes",
+                "sns:SetTopicAttributes",
+                "sns:ListSubscriptions",
+                "sns:CreateTopic",
+                "sns:DeleteTopic"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
+        },
+        {
+            "Sid": "IAMListGlobal",
+            "Action": [
+                "iam:ListGroups",
+                "iam:ListRoles",
+                "iam:ListRolePolicies",
+                "iam:ListUsers"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:iam::*:group/*",
+                "arn:aws:iam::*:role/*",
+                "arn:aws:iam::*:user/*"
+            ]
+        },
+        {
+            "Sid": "IAMRole",
+            "Action": [
+                "iam:ListInstanceProfilesForRole",
+                "iam:PassRole",
+                "iam:CreateRole",
+                "iam:DeleteRole",
+                "iam:GetRole",
+                "iam:AddRoleToInstanceProfile",
+                "iam:RemoveRoleFromInstanceProfile",
+                "iam:GetRolePolicy",
+                "iam:PutRolePolicy",
+                "iam:AttachRolePolicy",
+                "iam:DetachRolePolicy",
+                "iam:DeleteRolePolicy",
+                "iam:ListRolePolicies",
+                "iam:SimulatePrincipalPolicy"
+            ],
+            "Effect": "Allow",
+            "Resource": [ "arn:aws:iam::*:role/*" ]
+        },
+        {
+            "Sid": "IAMInstanceProfile",
+            "Action": [
+                "iam:PassRole",
+                "iam:CreateInstanceProfile",
+                "iam:DeleteInstanceProfile",
+                "iam:GetInstanceProfile",
+                "iam:AddRoleToInstanceProfile",
+                "iam:RemoveRoleFromInstanceProfile",
+                "iam:ListInstanceProfiles"
+            ],
+            "Effect": "Allow",
+            "Resource": [ "arn:aws:iam::*:instance-profile/*" ]
+        },
+        {
+            "Sid": "EFS",
+            "Action": [
+                "elasticfilesystem:CreateFileSystem",
+                "elasticfilesystem:CreateMountTarget",
+                "elasticfilesystem:CreateTags",
+                "elasticfilesystem:DeleteFileSystem",
+                "elasticfilesystem:DeleteMountTarget",
+                "elasticfilesystem:DeleteTags",
+                "elasticfilesystem:DescribeFileSystems",
+                "elasticfilesystem:DescribeMountTargets",
+                "elasticfilesystem:DescribeTags",
+                "elasticfilesystem:DescribeMountTargetSecurityGroups",
+                "elasticfilesystem:ModifyMountTargetSecurityGroups",
+                "elasticfilesystem:UpdateFileSystem"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
+        },
+        {
+            "Sid": "FSx",
+            "Action": [
+                "fsx:CreateFileSystem",
+                "fsx:DeleteFileSystem",
+                "fsx:DescribeFileSystems",
+                "fsx:ListTagsForResource",
+                "fsx:TagResource",
+                "fsx:UntagResource",
+                "fsx:UpdateFileSystem"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
+        },
+        {
+            "Sid": "AllowAccessToSSM",
+            "Action": [
+                "ssm:DescribeAssociation",
+                "ssm:ListAssociations",
+                "ssm:GetDocument",
+                "ssm:ListInstanceAssociations",
+                "ssm:UpdateAssociationStatus",
+                "ssm:UpdateInstanceInformation",
+                "ec2messages:AcknowledgeMessage",
+                "ec2messages:DeleteMessage",
+                "ec2messages:FailMessage",
+                "ec2messages:GetEndpoint",
+                "ec2messages:GetMessages",
+                "ec2messages:SendReply",
+                "ds:CreateComputer",
+                "ds:DescribeDirectories"
             ],
             "Effect": "Allow",
             "Resource": "*"

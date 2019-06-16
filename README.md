@@ -113,7 +113,7 @@ instance of interest.
 passwords in an easy-to-parse table dumped to the console.  This information
 can be pasted into RDC for easy access.
 
-* Operability in Turbot (https://www.turbot.com) environments.
+* Operability in Turbot environnments.  Please visit https://www.turbot.com for more information.
 
 ## Installation Instructions for the Impatient
 
@@ -148,15 +148,26 @@ Ec2InstanceMaker is a collection of scripts and user-configurable templates.
 Please see below for more details on how the scripts are used.
 
 * Templates
-  * **GenericEc2InstancePolicy.json.** This default JSON policy document allows
-EC2 and S3 API calls and can be customized to permit fine-grained control of
-the IAM EC2 instance policy.
-  * **Ec2AdminInstancePolicy.json.**  This JSON policy document grants admin
-rights to the IAM EC2 instance profile.  **Use this policy judiciously!**
-  * **build_instance.j2.** This template permits the operator to leverage the
-Terraform post-install hook to perform further configuration of EC2 instances.
-  * **instance_userdata.j2.** This template permits the operator to leverage
-EC2 instance userdata to perform additional configuration.  Please reference:
+
+Ec2InstanceMaker provides some generic templates that can be customized to
+permit more granular control over the IAM EC2 instance policy that is used to
+create the instance profiles that are created by the toolkit.
+
+  * **MinimalEc2InstancePolicy.json** is a bare-bones template that allows only
+EC2 and S3 API calls.
+  * **GenericEc2InstancePolicy.json** provides enough permissions for an EC2
+"jumphost" spawned by make-instance.py to in turn create additional instances.
+In addition to allowing EC2 and S3, it also permits maintenance of EFS and FSx
+for Lustre file systems, SQS queues, SNS topic administration, IAM role and
+instance profile maintenance, and access to SSM.
+  * **Ec2AdminInstancePolicy.json** is provides the EC2 instance profile with
+full adminstrator rights over the AWS account in question.  *Use this policy
+judiciously!*
+  * **build_instance.j2 ** permits the operator to leverage Terraform's
+post-install hook to perform further configuration of EC2 instances using a
+shell script.
+  * **instance_userdata.j2** will allow the operator to leverage EC2 instance
+userdata to perform additional configuration.  Please reference:
 
 https://docs.aws.amazon.com/AWSEC2/latest/WindowsGuide/ec2-instance-metadata.html#instancedata-add-user-data
 

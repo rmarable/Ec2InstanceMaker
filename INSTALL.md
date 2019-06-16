@@ -12,7 +12,8 @@ through an easy-to-use command line interface.  It can also be used as a
 teaching tool for those who wish to dive deep into cloud automation and to
 learn more about the AWS ecosystem.
 
-This toolkit is currently supported on local OSX and Linux environments.  In
+This toolkit is currently supported on local OSX and Linux environments and
+EC2 instances spawned with the GenericEc2InstancePolicy.json template.  In
 theory, it can also be used on Windows machines that have Python and an
 appropriately configured Bash-Cygwin environment, but this method has not been
 tested and will **not** be supported.
@@ -97,6 +98,20 @@ $ cd ~
 
 * You are now ready to build instances.  Please consult README.md for more
 detailed information on leveraging the scripts in this toolkit.
+
+## Creating an Installation Environment on Linux 
+
+The ec2-setup.sh script can be used to set up the Ec2InstanceMaker operating
+environment on Linux.  This will also work on EC2 instances running CentOS or
+Amazon Linux; support for Ubuntu will be provided in a later release.
+
+After building a new instance, check out the repository from Github and run
+the script:
+
+$ mkdir -p ~/src && cd ~/src
+$ git clone https://github.com/rmarable/Ec2InstanceMaker.git
+$ cd Ec2InstanceMaker
+$ ./ec2-setup.sh
 
 ## About make-instance.py
 
