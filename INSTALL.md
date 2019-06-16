@@ -47,12 +47,12 @@ $ brew install ansible autoconf automake gcc jq libtool make readline
 
 * Install Python3 using the guidance provided here:
 
-https://realpython.com/installing-python/
+  https://realpython.com/installing-python/
 
 * Configure the AWS CLI according to the guidelines provided in the AWS public
 documentation:
 
-https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-getting-started.html
+  https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-getting-started.html
 
 * Install and activate a virtual Python environment using virtualenv or pyenv.
 Please visit "https://docs.python-guide.org/dev/virtualenvs/" for more details
@@ -143,6 +143,7 @@ ondemand pricing):
 
 ```
 $ ./make-instance.py -A us-east-1c -N dev01 -O rmarable -E rodney.marable@gmail.com -B alinux2 --ebs_root_volume_size=20 --instance_owner_department=compbio --project_id="XRV-243" --request_type=spot
+```
 
 ### Example: Building a Single Windows Instance 
 
