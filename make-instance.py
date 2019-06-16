@@ -4,7 +4,7 @@
 # Name:         make-instance.py
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   June 3, 2019
-# Last Changed: June 14, 2019
+# Last Changed: June 16, 2019
 # Purpose:      Generic command-line EC2 instance creator
 ################################################################################
 
@@ -797,9 +797,14 @@ else:
 
 print('Invoking Terraform to build ' + instance_name + '...')
 
-subprocess.run('terraform init -input=false', shell=True, cwd=instance_data_dir)
-subprocess.run('terraform plan -out terraform_environment', shell=True, cwd=instance_data_dir)
-subprocess.run('terraform apply \"terraform_environment\"', shell=True, cwd=instance_data_dir)
+if debug_mode == 'true':
+    subprocess.run('TF_LOG= DEBUG terraform init -input=false', shell=True, cwd=instance_data_dir)
+    subprocess.run('TF_LOG= DEBUG terraform plan -out terraform_environment', shell=True, cwd=instance_data_dir)
+    subprocess.run('TF_LOG= DEBUG terraform apply \"terraform_environment\"', shell=True, cwd=instance_data_dir)
+else:
+    subprocess.run('terraform init -input=false', shell=True, cwd=instance_data_dir)
+    subprocess.run('terraform plan -out terraform_environment', shell=True, cwd=instance_data_dir)
+    subprocess.run('terraform apply \"terraform_environment\"', shell=True, cwd=instance_data_dir)
 
 # Print a pretty spacing bar to improve user readability.
 # Replace with '=' bar from ParallelClusterMaker.

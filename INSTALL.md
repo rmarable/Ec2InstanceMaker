@@ -310,23 +310,86 @@ Deleted file: kill-instance.dev01.sh
 Exiting...
 ```
 
-Deleting the instance family "fam01" looks exactly the same:
+### Example: Deleting an Instance Family
+
+Deleting the instance family "fam01" follows the exact same steps as deleting
+a single instance:
 
 ```
 $ ./kill-instance.fam01.sh
-[output snipped]
+
+EC2 instance family "fam01" is marked for termination.
+
+################################################################################
+################  Please type CTRL-C within 5 seconds to abort  ################
+################################################################################
+
+Destroying instance: fam01
+
+aws_spot_instance_request.fam01[0]: Refreshing state... [id=sir-fwf8hg4m]
+aws_spot_instance_request.fam01[2]: Refreshing state... [id=sir-415rgtwn]
+aws_spot_instance_request.fam01[4]: Refreshing state... [id=sir-n8n8kjen]
+aws_spot_instance_request.fam01[1]: Refreshing state... [id=sir-2q5rg12n]
+aws_spot_instance_request.fam01[3]: Refreshing state... [id=sir-gm7ghvjn]
+aws_spot_instance_request.fam01[0]: Destroying... [id=sir-fwf8hg4m]
+aws_spot_instance_request.fam01[1]: Destroying... [id=sir-2q5rg12n]
+aws_spot_instance_request.fam01[4]: Destroying... [id=sir-n8n8kjen]
+aws_spot_instance_request.fam01[3]: Destroying... [id=sir-gm7ghvjn]
+aws_spot_instance_request.fam01[2]: Destroying... [id=sir-415rgtwn]
+aws_spot_instance_request.fam01[1]: Still destroying... [id=sir-2q5rg12n, 10s elapsed]
+aws_spot_instance_request.fam01[4]: Still destroying... [id=sir-n8n8kjen, 10s elapsed]
+aws_spot_instance_request.fam01[3]: Still destroying... [id=sir-gm7ghvjn, 10s elapsed]
+aws_spot_instance_request.fam01[0]: Still destroying... [id=sir-fwf8hg4m, 10s elapsed]
+aws_spot_instance_request.fam01[2]: Still destroying... [id=sir-415rgtwn, 10s elapsed]
+aws_spot_instance_request.fam01[3]: Destruction complete after 16s
+aws_spot_instance_request.fam01[4]: Still destroying... [id=sir-n8n8kjen, 20s elapsed]
+aws_spot_instance_request.fam01[1]: Still destroying... [id=sir-2q5rg12n, 20s elapsed]
+aws_spot_instance_request.fam01[0]: Still destroying... [id=sir-fwf8hg4m, 20s elapsed]
+aws_spot_instance_request.fam01[2]: Still destroying... [id=sir-415rgtwn, 20s elapsed]
+aws_spot_instance_request.fam01[1]: Still destroying... [id=sir-2q5rg12n, 30s elapsed]
+aws_spot_instance_request.fam01[0]: Still destroying... [id=sir-fwf8hg4m, 30s elapsed]
+aws_spot_instance_request.fam01[4]: Still destroying... [id=sir-n8n8kjen, 30s elapsed]
+aws_spot_instance_request.fam01[2]: Still destroying... [id=sir-415rgtwn, 30s elapsed]
+aws_spot_instance_request.fam01[0]: Destruction complete after 33s
+aws_spot_instance_request.fam01[2]: Destruction complete after 33s
+aws_spot_instance_request.fam01[1]: Still destroying... [id=sir-2q5rg12n, 40s elapsed]
+aws_spot_instance_request.fam01[4]: Still destroying... [id=sir-n8n8kjen, 40s elapsed]
+aws_spot_instance_request.fam01[1]: Destruction complete after 43s
+aws_spot_instance_request.fam01[4]: Destruction complete after 43s
+
+Destroy complete! Resources: 5 destroyed.
+Deleted EC2 keypair: fam01-56011116062019_eu-central-1
+Deleted SSH keypair file: /Users/rmarable/src/public/Ec2InstanceMaker/instance_data/fam01/fam01-56011116062019_eu-central-1.pem
+Deleted directory: /Users/rmarable/src/public/Ec2InstanceMaker/instance_data/fam01
+Deleted SNS topic: arn:aws:sns:us-east-1:147724377207:Ec2_Instance_SNS_Alerts_fam01-56011116062019
+Deleted IAM EC2 policy: ec2-instance-policy-fam01-56011116062019
+Deleted IAM EC2 instance profile: ec2-instance-profile-fam01-56011116062019
+Deleted IAM role: ec2-instance-role-fam01-56011116062019
+Deleted file: ./vars_files/fam01.yml
+Deleted file: ./active_instances/fam01.serial
+Deleted file: kill-instance.fam01.sh
+
+###############################################################################
+##    Finished deleting EC2 instance family: fam01
+##                           Instance count: 5
+###############################################################################
+
+Exiting...
 ```
 
 ## Deactivating the virtual Python environment
 
-When you are done working with Ec2InstanceMaker, disable the virtual Python
-environment:
+If you are using a virtual Python environment to work with Ec2InstanceMaker,
+it is a good practice to disable it when you are finished with your instance
+maintenance activities.
+
+For pyenv:
 
 ```
 $ pyenv deactivate
 ```
 
-If you are using virtualenv:
+For virtualenv:
 
 ```
 $ deactivate

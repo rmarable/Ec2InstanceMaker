@@ -131,6 +131,8 @@ resource "aws_spot_instance_request"  "{{ instance_name }}" {
     }
   }
 {% endif %}
+  # add a provisioner to mount EFS here
+  # add a provisioner to mount Lustre here
 }
 {% if request_type == "ondemand" %}
 output "instance_ip_addresses" {
