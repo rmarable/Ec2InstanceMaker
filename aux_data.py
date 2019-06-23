@@ -2,14 +2,14 @@
 # Name:		aux_data.py
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	June 3, 2019
-# Last Changed:	June 14, 2019
+# Last Changed:	June 22, 2019
 # Purpose:	Data structures and functions to support Ec2InstanceMaker
 ################################################################################
 
 # Function: add_security_group_rule()
 # Purpose: add a rule to a security group
 
-def add_security_group_rule(region, sec_grp, protocol, cidr, psource, pdest):
+def add_inbound_security_group_rule(region, sec_grp, protocol, cidr, psource, pdest):
     import boto3
     ec2 = boto3.resource('ec2', region_name=region)
     sec_grp.authorize_ingress(
@@ -31,7 +31,7 @@ def get_ami_info(base_os, region):
         ami_information = ec2client.describe_images(
             Owners=['137112412989'], # Amazon
             Filters=[
-              {'Name': 'name', 'Values': ['amzn2-ami-hvm-2.0.20190508-x86_64-gp2']},
+              {'Name': 'name', 'Values': ['amzn2-ami-hvm-2.0.*']},
               {'Name': 'architecture', 'Values': ['x86_64']},
               {'Name': 'root-device-type', 'Values': ['ebs']},
               {'Name': 'virtualization-type', 'Values': ['hvm']},
@@ -45,7 +45,7 @@ def get_ami_info(base_os, region):
         ami_information = ec2client.describe_images(
             Owners=['137112412989'], # Amazon
             Filters=[
-              {'Name': 'name', 'Values': ['amzn-ami-hvm-2018.03.0.20180622-x86_64-gp2']},
+              {'Name': 'name', 'Values': ['amzn-ami-hvm-*']},
               {'Name': 'architecture', 'Values': ['x86_64']},
               {'Name': 'root-device-type', 'Values': ['ebs']},
               {'Name': 'virtualization-type', 'Values': ['hvm']},
@@ -57,9 +57,8 @@ def get_ami_info(base_os, region):
         aws_ami = amis[0]['ImageId']
     if base_os == 'ubuntu1804':
         ami_information = ec2client.describe_images(
-            Owners=['679593333241'], # Ubuntu
             Filters=[
-              {'Name': 'name', 'Values': ['ubuntu/images/hvm-ssd/ubuntu-bionic-18.04-amd64-server-20190514-3b73ef49-208f-47e1-8a6e-4ae768d8a333-ami-024a64a6685d05041.4']},
+              {'Name': 'name', 'Values': ['ubuntu/images/hvm-ssd/ubuntu-bionic-18.04-amd64-server-*']},
               {'Name': 'architecture', 'Values': ['x86_64']},
               {'Name': 'root-device-type', 'Values': ['ebs']},
               {'Name': 'virtualization-type', 'Values': ['hvm']},
@@ -71,9 +70,8 @@ def get_ami_info(base_os, region):
         aws_ami = amis[0]['ImageId']
     if base_os == 'ubuntu1604':
         ami_information = ec2client.describe_images(
-            Owners=['679593333241'], # Ubuntu
             Filters=[
-              {'Name': 'name', 'Values': ['hapee-ubuntu-xenial-amd64-hvm-1.7r1-1503319460-a9beed01-5f6b-4f5d-9f42-98e7a77dc35b-ami-aab48fd1.4']},
+              {'Name': 'name', 'Values': ['ubuntu/images/hvm-ssd/ubuntu-xenial-16.04-amd64-server-*']},
               {'Name': 'architecture', 'Values': ['x86_64']},
               {'Name': 'root-device-type', 'Values': ['ebs']},
               {'Name': 'virtualization-type', 'Values': ['hvm']},
@@ -85,9 +83,8 @@ def get_ami_info(base_os, region):
         aws_ami = amis[0]['ImageId']
     if base_os == 'ubuntu1404':
         ami_information = ec2client.describe_images(
-            Owners=['275898483189'], # Ubuntu
             Filters=[
-              {'Name': 'name', 'Values': ['Ubuntu 14.04 Base Image']},
+              {'Name': 'name', 'Values': ['ubuntu/images-testing/hvm-ssd/ubuntu-trusty-daily-amd64-server-*']},
               {'Name': 'architecture', 'Values': ['x86_64']},
               {'Name': 'root-device-type', 'Values': ['ebs']},
               {'Name': 'virtualization-type', 'Values': ['hvm']},
@@ -129,7 +126,7 @@ def get_ami_info(base_os, region):
         ami_information = ec2client.describe_images(
             Owners=['801119661308'], # Windows Server 2019
             Filters=[
-              {'Name': 'name', 'Values': ['Windows_Server-2019-English-Full-Base-2019.05.15']},
+              {'Name': 'name', 'Values': ['Windows_Server-2019-English-Full-Base-*']},
               {'Name': 'architecture', 'Values': ['x86_64']},
               {'Name': 'root-device-type', 'Values': ['ebs']},
               {'Name': 'virtualization-type', 'Values': ['hvm']},
@@ -170,18 +167,19 @@ def check_custom_ami(custom_ami, aws_account_id, region):
 # Purpose: Print an abort header, capture CTRL-C when pressed, and remove any
 # orphaned state and config files created by the instance creation script.
 
-def ctrlC_Abort(sleep_time, line_length, vars_file_path, instance_data_dir, instance_serial_number_file, instance_serial_number, region):
+def ctrlC_Abort(sleep_time, line_length, vars_file_path, instance_data_dir, instance_serial_number_file, instance_serial_number, region, security_group_name, vpc_security_group_ids):
     import boto3
     import os
     import sys
     import time
+    from botocore.exceptions import ClientError
     ec2client = boto3.client('ec2')
     iam = boto3.client('iam')
     ec2_keypair = instance_serial_number + '_' + region
     secret_key_file = instance_data_dir + ec2_keypair + '.pem'
-    instance_iam_instance_policy = 'ec2-instance-policy-' + str(instance_serial_number)
-    instance_iam_instance_profile = 'ec2-instance-profile-' + str(instance_serial_number)
-    instance_iam_instance_role = 'ec2-instance-role-' + str(instance_serial_number)
+    iam_instance_policy = 'ec2-instance-policy-' + str(instance_serial_number)
+    iam_instance_profile = 'ec2-instance-profile-' + str(instance_serial_number)
+    iam_instance_role = 'ec2-instance-role-' + str(instance_serial_number)
     print('')
     print(''.center(line_length, '#'))
     center_line = '    Please type CTRL-C within ' + str(sleep_time) + ' seconds to abort    '
@@ -208,14 +206,39 @@ def ctrlC_Abort(sleep_time, line_length, vars_file_path, instance_data_dir, inst
             print('No IAM role or policy exists for this instance.')
             print('')
         else:
-            iam.remove_role_from_instance_profile(InstanceProfileName=instance_iam_instance_profile, RoleName=instance_iam_instance_role)
-            iam.delete_instance_profile(InstanceProfileName=instance_iam_instance_profile)
-            iam.delete_role_policy(RoleName=instance_iam_instance_role, PolicyName=instance_iam_instance_policy)
-            iam.delete_role(RoleName=instance_iam_instance_role)
-            print('Deleted: ' + instance_iam_instance_profile)
-            print('Deleted: ' + instance_iam_instance_policy)
-            print('Deleted: ' + instance_iam_instance_role)
+            try:
+                iam.remove_role_from_instance_profile(InstanceProfileName=iam_instance_profile, RoleName=iam_instance_role)
+                print('Removed: ' + iam_instance_profile + ' from ' + iam_instance_role)
+            except ClientError as e:
+                if e.response['Error']['Code'] == 'NoSuchEntity':
+                    print('No IAM EC2 instance profile could be removed from the instance role!')
+            try:
+                iam.delete_instance_profile(InstanceProfileName=iam_instance_profile)
+                print('Deleted: ' + iam_instance_profile)
+            except ClientError as e:
+                if e.response['Error']['Code'] == 'NoSuchEntity':
+                    print('No IAM EC2 instance profile exists for this instance!')
+            try:
+                iam.delete_role_policy(RoleName=iam_instance_role, PolicyName=iam_instance_policy)
+                print('Deleted: ' + iam_instance_policy)
+            except ClientError as e:
+                if e.response['Error']['Code'] == 'NoSuchEntity':
+                    print('No IAM role policy exists for this instance!')
+            try:
+                iam.delete_role(RoleName=iam_instance_role)
+                print('Deleted: ' + iam_instance_role)
+            except ClientError as e:
+                if e.response['Error']['Code'] == 'NoSuchEntity':
+                    print('No IAM role exists for this instance!')
             print('')
+        try:
+            ec2_sg_status = ec2client.delete_security_group(GroupId=vpc_security_group_ids)
+            print('Deleted EC2 security group: ' + security_group_name)
+            print('')
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'InvalidGroup.NotFound':
+                print('No EC2 security group exists for this instance.')
+                print('')
         try:
             ec2_keypair_status = ec2client.describe_key_pairs(KeyNames=[ec2_keypair])
             rm_ec2_keypair = ec2client.delete_key_pair(KeyName=ec2_keypair)
@@ -298,13 +321,24 @@ def print_TextHeader(p, action, line_length):
 
 def refer_to_docs_and_quit(error_msg):
     import sys
-    print('')
     print('*** ERROR ***')
     print(error_msg)
     print('')
     print('Please resolve this error and retry the instance build.')
     print('Aborting...')
     sys.exit(1)
+
+# Function: time_waiter(duration, interval):
+# Purpose: Given a duration, print '.'  to the console every interval seconds.
+
+def time_waiter(duration, interval):
+    import sys
+    import time
+    step = 1
+    for i in range(0, duration, step):
+        print('.', end=''),
+        time.sleep(interval)
+        sys.stdout.flush() 
 
 ################################################################################
 # Note: there doesn't seem to be an easy way to list valid EC2 instance types  #
