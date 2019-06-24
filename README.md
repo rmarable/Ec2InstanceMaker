@@ -1,4 +1,4 @@
-# Ec2InstanceMaker - A Simple Automated Framework for Building Servers and Attacing Storage in the Cloud
+# Ec2InstanceMaker - Quickly Build AWS EC2 Servers With Attached Cloud Storage
 
 Ec2InstanceMaker is an Open Source command line interface that makes it easy
 to build, access, and destroy servers and storage resources in the cloud.  It
