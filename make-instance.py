@@ -37,6 +37,7 @@ from aux_data import ec2_instances_ebs_optimized
 from aux_data import ec2_instances_full_list
 from aux_data import get_ami_info
 from aux_data import illegal_az_msg
+from aux_data import base_os_instance_check
 from aux_data import p_fail
 from aux_data import p_val
 from aux_data import print_TextHeader
@@ -312,29 +313,9 @@ else:
 
 # Verify that the selected EC2 instance_type is supported by base_os.
 
-if base_os == 'centos6' and ('t3' or 'm5' or 'a1.' or 'c5.' or 'f1.4xlarge' or 'g3s.xlarge' or 'p3' or 'r5' or 'x1e.' or 'z1d.' or 'h1.' or 'i3.metal' or 'i3en.') in instance_type:
-    error_msg = base_os + ' does not support EC2 instance type ' + instance_type + '!'
-    refer_to_docs_and_quit(error_msg)
-elif base_os == 'centos7' and ('m5metal.' or 'a1.' or 'p3dn.24xlarge' or 'r5d.24xlarge' or 'r5d.metal' or 'r5.metal' or 'x1e.' or 'h1.' or 'i3en.') in instance_type:
-    error_msg = base_os + ' does not support EC2 instance type ' + instance_type + '!'
-    refer_to_docs_and_quit(error_msg)
-elif base_os == 'ubuntu1404' and ('t1.' or 't3a.' or 'm5a' or 'm5d.' or 'm5.metal' or 'm1.' or 'a1.' or 'c5n.' or 'c5d.' or 'c1.' or 'f1.4xlarge' or 'p3dn.24xlarge' or 'r5' or 'm2.' or 'z1d.' or 'i3.metal' or 'i3en.') in instance_type:
-    error_msg = base_os + ' does not support EC2 instance type ' + instance_type + '!'
-    refer_to_docs_and_quit(error_msg)
-elif base_os == 'ubuntu1604' and ('t1.' or 't3a.' or 'm5a' or 'm5d.metal' or 'm5.metal' or 'm1.' or 'a1.' or 'c1.' or 'r5ad.' or 'r5d.24xlarge' or 'r5d.metal' or 'r5.metal' or 'm2.' or 'z1d.metal' or 'i3en.') in instance_type:
-    error_msg = base_os + ' does not support EC2 instance type ' + instance_type + '!'
-    refer_to_docs_and_quit(error_msg)
-elif base_os == 'ubuntu1804' and ('t1.' or 't3a.' or 'm5ad' or 'm5d.metal' or 'm5.metal' or 'm1.' or 'a1.' or 'c1.' or 'cc2.8xlarge' or 'r5ad.' or 'r5d.24xlarge' or 'm2.' or 'i3en.') in instance_type:
-    error_msg = base_os + ' does not support EC2 instance type ' + instance_type + '!'
-    refer_to_docs_and_quit(error_msg)
-elif base_os == 'windows2019' and ('a1.' or 'f1.') in instance_type:
-    error_msg = base_os + ' does not support EC2 instance type ' + instance_type + '!'
-    refer_to_docs_and_quit(error_msg)
-else:
-    p_val('base_os', debug_mode)
-    p_val('instance_type', debug_mode)
 print('')
 print('Selected base operating system: ' + base_os)
+base_os_instance_check(base_os, instance_type, debug_mode)
 
 # Provide a mechanism to ensure ebs_optimized is appropriately set for the EC2
 # instance being deployed.
@@ -652,8 +633,12 @@ if debug_mode == 'true':
 
 # Validate EFS based on the selected performance mode and if the EFS file 
 # system should be preserved after the instance is terminated.
-# If EFS encryption was enabled check the operating system to ensure stunnel
-# support behaves as expected.
+# If EFS encryption was enabled, check the operating system to ensure stunnel
+# behaves as expected to enable encryption in flight.
+#
+# Notes:
+# - centos6 includes openssl-1.0.1e-57, which is too old for amazon-efs-utils.
+# - ubuntu1404 does not support amazon-efs-utils natively.
 
 if enable_efs == 'true':
     print('')
@@ -661,9 +646,11 @@ if enable_efs == 'true':
     print('Preserve EFS post-termination: ' + preserve_efs)
     p_val('preserve_efs', debug_mode)
     if efs_encryption == 'true':
-        if base_os == 'centos6':
-            error_msg = 'EFS encryption is not supported under ' + base_os + '!'
-            refer_to_docs_and_quit(error_msg)
+        if base_os == 'centos6' or base_os == 'ubuntu1404':
+            print('')
+            print('*** WARNING ***')
+            print('EFS encryption in flight is not supported under ' + base_os + '!')
+            print('')
         else:
             p_val('efs_encryption', debug_mode)
 p_val('efs_performance_mode', debug_mode)
@@ -1088,10 +1075,12 @@ else:
     subprocess.run('terraform init -input=false', shell=True, cwd=instance_data_dir)
     subprocess.run('terraform plan -out terraform_environment', shell=True, cwd=instance_data_dir)
     subprocess.run('terraform apply \"terraform_environment\"', shell=True, cwd=instance_data_dir)
-#if enable_fsx == 'true':
-if (base_os == 'centos7' and enable_fsx == 'true') or base_os == 'centos6':
+if enable_fsx == 'true' or base_os == 'centos6':
     print('')
-    print('Waiting for the instances to reboot...')
+    if enable_fsx == 'true':
+        print('Rebooting to persistently mount the new Lustre file system...')
+    else:
+        print('Rebooting to ensure ' + base_os + ' reads the root partition properly...')
     time_waiter(20,3)
 
 # Print a pretty spacing bar to improve user readability.

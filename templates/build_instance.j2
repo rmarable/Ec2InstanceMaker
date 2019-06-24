@@ -4,7 +4,7 @@
 # Name:		build_instance.{{ instance_name }}.sh
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	June 3, 2019
-# Last Changed:	June 11, 2019
+# Last Changed:	June 24, 2019
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:	Perform some additional post-installation configuration steps
 #		on EC2 instance {{ instance_name }}
@@ -12,15 +12,11 @@
 
 source /etc/profile
 
-# Set values for some critical variables. 
+# Set values for some critical ec2-user variables. 
 
 EC2_HOME={{ ec2_user_home }}
 EC2_USER={{ ec2_user }}
 SRC={{ ec2_user_src }}
-
-# Set the default region for the AWS CLI. 
-
-aws configure set default.region {{ region }}
 
 # Create a local source directory for the $EC2_USER user account.
 
@@ -30,26 +26,58 @@ then
 	sudo chown -R $EC2_USER:$EC2_USER $SRC
 	sudo chmod -R 755 $SRC
 fi
-
 {% if 'ubuntu' not in base_os %}
+# Wait for the cloud stuff to complete before running apt.
+# https://github.com/hashicorp/terraform/issues/1025
+
+until [[ -f /var/lib/cloud/instance/boot-finished ]]; do
+  sleep 1
+done
+
 # Update the instance via yum.
 
 sudo yum -y update
 {% else %}
+
 # Update the instance via apt.
 
-sudo apt-get -y update
+sudo apt-get update
+sudo apt-get dist-upgrade -y
 {% endif %}
 
 {% if 'ubuntu' not in base_os %}
 # Install some critical packages via yum.
 
-sudo yum install -y git gcc
+sudo yum install -y git gcc zip unzip
 {% else %}
-# Install some critical packages via yum.
+# Use apt to install some critical packages.
 
-sudo apt-get -y git gcc
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y git gcc make python unzip zip
 {% endif %}
+
+{% if 'centos' in base_os or 'ubuntu' in base_os %}
+# Install the AWS CLI using the installed bundler.
+# https://docs.aws.amazon.com/cli/latest/userguide/install-bundle.html
+
+cd $SRC
+mkdir -p __awscli_scratch
+cd __awscli_scratch
+curl https://s3.amazonaws.com/aws-cli/awscli-bundle.zip -o awscli-bundle.zip
+unzip awscli-bundle.zip
+{% if base_os == 'centos6' %}
+sudo yum install -y epel-release
+sudo yum install -y python34
+sudo /usr/bin/python3 ./awscli-bundle/install -i /usr/local/aws -b /usr/local/bin/aws
+{% else %}
+sudo ./awscli-bundle/install -i /usr/local/aws -b /usr/local/bin/aws
+{% endif %}
+cd $EC2_HOME
+aws --version
+{% endif %}
+
+# Set the default region for the AWS CLI. 
+
+aws configure set default.region {{ region }}
 
 # Add a 45-second keep-alive interval so that SSH doesn't logout automatically
 # and adversely affect ongoing EC2 instance activity.
@@ -59,6 +87,145 @@ echo "
 # and adversely affect EC2 instance activity.
 ServerAliveInterval 45" >> $EC2_HOME/.ssh/config
 chmod 0644 $EC2_HOME/.ssh/config
+
+{% if enable_efs == 'true' or enable_fsx == 'true' %}
+#####################################
+# Storage customization begins here #
+#####################################
+{% endif %}
+{% if enable_efs == 'true' %}
+
+{% if 'ubuntu1404' not in base_os or 'centos6' not in base_os %}
+# Create the EFS mount point and efs-utils installation directory.
+
+sudo mkdir -p {{ efs_root }}
+mkdir -p $EC2_HOME/src/__efs_utils_scratch
+cd $EC2_HOME/src/__efs_utils_scratch/
+
+{% endif %}
+{% if 'alinux' in base_os %}
+# Install the amazon-efs-utils package via yum.
+
+sudo yum install -y amazon-efs-utils
+{% endif %}
+{% if 'centos' in base_os %}
+# Install some critical yum packages required by EFS.
+
+sudo yum -y install make nfs-utils rpm-build
+
+{% if base_os == 'centos7' %}
+# Build and install amazon-efs-utils.
+
+git clone https://github.com/aws/efs-utils
+cd efs-utils
+sudo make rpm
+sudo yum -y install ./build/amazon-efs-utils*rpm
+{% endif %}
+{% endif %}
+
+{% if 'ubuntu' in base_os %}
+# Install some critical packages required by EFS via apt-get.
+
+sudo apt-get install -y binutils libssl1.0.0 libssl-dev libwrap0 libwrap0-dev nfs-common
+
+{% if base_os == 'ubuntu1604' or base_os == 'ubuntu1804' %}
+# Build and install amazon-efs-utils.
+
+git clone https://github.com/aws/efs-utils
+cd efs-utils
+sh build-deb.sh
+sudo apt-get install -y ./build/amazon-efs-utils*deb
+{% endif %}
+{% endif %}
+{% if efs_encryption == 'true' and base_os == 'centos7' %}
+
+# Install tools needed to support EFS encryption.
+
+sudo yum -y install openssl-devel tcp_wrappers-devel
+cd $EC2_HOME/src/__efs_utils_scratch/
+sudo rm /bin/stunnel
+sudo curl -o stunnel-5.55.tar.gz https://www.stunnel.org/downloads/stunnel-5.55.tar.gz
+sudo tar xvfz stunnel-5.55.tar.gz
+cd stunnel-5.55/
+sudo ./configure
+sudo make
+sudo make install
+sudo ln -s /usr/local/bin/stunnel /bin/stunnel
+{% endif %}
+{% endif %}
+
+{% if enable_fsx == 'true' %}
+{% if base_os == 'alinux' %}
+# Install the Lustre client for Amazon Linux.
+
+sudo yum -y install jq
+sudo yum -y update kernel
+sudo yum install -y lustre-client
+{% endif %}
+{% if base_os == 'alinux2' %}
+# Install the Lustre client for Amazon Linux 2.
+
+sudo yum -y install jq
+sudo yum -y update kernel
+sudo amazon-linux-extras install -y lustre2.10
+{% endif %}
+{% if base_os == 'centos7' %}
+# Install the Lustre client for CentOS 7.
+
+sudo yum install -y epel-release
+sudo yum install -y jq
+sudo yum install -y https://downloads.whamcloud.com/public/lustre/lustre-2.10.6/el7/client/RPMS/x86_64/kmod-lustre-client-2.10.6-1.el7.x86_64.rpm
+sudo yum install -y https://downloads.whamcloud.com/public/lustre/lustre-2.10.6/el7/client/RPMS/x86_64/lustre-client-2.10.6-1.el7.x86_64.rpm
+{% endif %}
+{% if base_os == 'centos6' %}
+# Install the Lustre client for CentOS 6.
+
+sudo yum install -y wget
+sudo wget -O /usr/local/bin/jq https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64
+sudo chmod 755 /usr/local/bin/jq
+sudo ln -s /usr/local/bin/jq /usr/bin/jq
+sudo yum install -y https://downloads.whamcloud.com/public/lustre/lustre-2.10.6/el6/client/RPMS/x86_64/kmod-lustre-client-2.10.6-1.el6.x86_64.rpm
+sudo yum install -y https://downloads.whamcloud.com/public/lustre/lustre-2.10.6/el6/client/RPMS/x86_64/lustre-client-2.10.6-1.el6.x86_64.rpm
+{% endif %}
+
+fsx_dns_name=`aws --region {{ region }} fsx describe-file-systems | jq '.FileSystems[] | [.DNSName, (.Tags|from_entries|.InstanceSerialNumber)] | @csv' | grep {{ instance_serial_number }} | awk -F, '{print $1}' | tr -d \" | tr -d '\\'`
+
+# Create the Lustre mount point.
+
+sudo mkdir -p {{ fsx_root }}
+sudo chown root:root {{ fsx_root }}
+sudo chmod -R 755 {{ fsx_root }}
+{% if 'ubuntu' not in base_os %}
+# Persistently mount the Lustre file system.
+
+sudo su -c "echo \"${fsx_dns_name}@tcp:/fsx {{ fsx_root }} lustre defaults,_netdev 0 0\" >> /etc/fstab"
+{% endif %}
+{% if enable_fsx_hydration == 'true' %}
+
+# Create scripts in /usr/local/bin that will:
+# - import s3://{{ fsx_s3_bucket }}/{{ fsx_s3_path }} from Lustre
+# - export s3://{{ fsx_s3_bucket }}/{{ fsx_s3_path }} to Lustre
+# - check the status of an export-S3-to-Lustre process
+
+sudo su -c "echo \"nohup find {{ fsx_root }} -type f -print0 | xargs -0 -n 1 sudo lfs hsm_restore &\" > /usr/local/bin/import-s3-to-lustre.sh"
+sudo su -c "echo \"nohup find {{ fsx_root }} -type f -print0 | xargs -0 -n 1 sudo lfs hsm_archive &\" > /usr/local/bin/export-lustre-to-s3.sh"
+sudo su -c "echo \"find {{ fsx_root }} -type f -print0 | xargs -0 -n 1 -P 8 sudo lfs hsm_action | grep "ARCHIVE" | wc -l\" > /usr/local/bin/check-lustre-export-progress.sh"
+
+# Make the scripts executable and change their ownership to root:root.
+
+for script in /usr/local/bin/import-s3-to-lustre.sh  /usr/local/bin/export-lustre-to-s3.sh /usr/local/bin/check-lustre-export-progress.sh
+do
+	sudo chmod 0755 $script
+	sudo chown root:root $script
+done
+{% endif %}
+{% endif %}
+
+{% if base_os == 'centos6' %}
+# Reread the partition table of the root volume.
+
+sudo partprobe
+{% endif %}
 
 ###############################################################
 ## Starting point for user-added EC2 instance customizations ##

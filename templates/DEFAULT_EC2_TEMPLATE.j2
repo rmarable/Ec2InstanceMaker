@@ -2,7 +2,7 @@
 # Name:		{{ instance_name }}.tf
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	June 3, 2019
-# Last Changed:	June 14, 2019
+# Last Changed:	June 22, 2019
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 {% if count > 1 %}
 # Purpose:	Terraform template for instance family {{ instance_name }}
@@ -10,6 +10,41 @@
 # Purpose:	Terraform template for instance {{ instance_name }}
 {% endif %}
 ################################################################################
+{% if enable_efs == 'true' %}
+
+resource "aws_efs_file_system"  "efs-{{ instance_name }}" {
+  provider                  = "{{ provider }}"
+  creation_token            = "{{ instance_serial_number }}"
+  tags =  {
+    Name                    = "efs-{{ instance_name }}"
+{% if count > 1 %}
+    Purpose                 = "EFS for EC2 instance family {{ instance_name }} built by {{ instance_owner }}"
+{% else %}
+    Purpose                 = "EFS for EC2 instance {{ instance_name }} built by {{ instance_owner }}"
+{% endif %}
+    EC2InstanceBuilder      = "Terraform"
+    InstanceSerialNumber    = "{{ instance_serial_number }}"
+    InstanceOwner           = "{{ instance_owner }}"
+    InstanceOwnerEmail      = "{{ instance_owner_email }}"
+    InstanceOwnerDepartment = "{{ instance_owner_department }}"
+{% if 'UNDEFINED' not in project_id %}
+    ProjectID               = "{{ project_id }}"
+{% endif %}
+    DEPLOYMENT_DATE         = "{{ DEPLOYMENT_DATE_TAG }}"
+    OperatingSystem         = "{{ base_os }}"
+  }
+  encrypted                 = "{{ efs_encryption | bool | lower }}"
+  performance_mode          = "{{ efs_performance_mode }}"
+  throughput_mode           = "bursting"
+}
+
+resource "aws_efs_mount_target" "efs-mountTarget-{{ instance_name }}" {
+  provider                  = "{{ provider }}"
+  file_system_id            = "${aws_efs_file_system.efs-{{instance_name }}.id}"
+  subnet_id                 = "{{ subnet_id }}"
+  security_groups           = ["{{ vpc_security_group_ids }}"]
+}
+{% endif %}
 
 {% if request_type == 'ondemand' %}
 resource "aws_instance"  "{{ instance_name }}" {
@@ -26,6 +61,9 @@ resource "aws_spot_instance_request"  "{{ instance_name }}" {
   availability_zone         = "{{ az }}"
   ami                       = "{{ aws_ami }}"
   count                     = "{{ count }}"
+{% if enable_efs == 'true' %}
+  depends_on                = [aws_efs_mount_target.efs-mountTarget-{{ instance_name }}]
+{% endif %}
   ebs_optimized             = "{{ ebs_optimized | lower }}"
 {% if base_os == 'windows2019' %}
   get_password_data         = "true"
@@ -80,6 +118,15 @@ resource "aws_spot_instance_request"  "{{ instance_name }}" {
 {% endif %}
     DEPLOYMENT_DATE         = "{{ DEPLOYMENT_DATE }}"
   }
+{% if request_type == "spot" %}
+  provisioner "local-exec" {
+{% if count > 1 %}
+    command = "aws --region {{ region }} ec2 create-tags --resource ${self.spot_instance_id} --tags Key=Name,Value={{ instance_name }}-${count.index} Key=InstanceSerialNumber,Value={{ instance_serial_number }} Key=InstanceOwner,Value={{ instance_owner }} Key=InstanceOwnerEmail,Value={{ instance_owner_email }} Key=InstanceOwnerDepartment,Value={{ instance_owner_department }} Key=InstanceFamily,Value={{ instance_serial_number }}-{{ instance_type }} Key=EC2RequestType,Value={{ request_type }}{% if 'UNDEFINED' not in project_id %} Key=ProjectId,Value={{ project_id }}{% endif %} Key=DEPLOYMENT_DATE,Value=\"{{ DEPLOYMENT_DATE_TAG }}\" Key=OperatingSystem,Value={{ base_os }}"
+{% else %}
+    command = "aws --region {{ region }} ec2 create-tags --resource ${self.spot_instance_id} --tags Key=Name,Value={{ instance_name }} Key=InstanceSerialNumber,Value={{ instance_serial_number }} Key=InstanceOwner,Value={{ instance_owner }} Key=InstanceOwnerEmail,Value={{ instance_owner_email }} Key=InstanceOwnerDepartment,Value={{ instance_owner_department }} Key=InstanceFamily,Value={{ instance_serial_number }}-{{ instance_type }} Key=EC2RequestType,Value={{ request_type }}{% if 'UNDEFINED' not in project_id %} Key=ProjectId,Value={{ project_id }}{% endif %} Key=DEPLOYMENT_DATE,Value=\"{{ DEPLOYMENT_DATE_TAG }}\" Key=OperatingSystem,Value={{ base_os }}"
+{% endif %}
+  }
+{% endif %}
 {% if 'windows2019' not in base_os %}
   user_data     = "${file("instance_userdata.{{ instance_name }}.sh")}"
   provisioner "file" {
@@ -96,7 +143,7 @@ resource "aws_spot_instance_request"  "{{ instance_name }}" {
   provisioner "remote-exec" {
     inline = [
       "chmod 0755 /tmp/{{ build_instance_script }}",
-      "/tmp/{{ build_instance_script }}",
+      "sh /tmp/{{ build_instance_script }}",
     ]
   connection {
     type        = "ssh"
@@ -107,20 +154,23 @@ resource "aws_spot_instance_request"  "{{ instance_name }}" {
     }
   }
 {% endif %}
-{% if request_type == "spot" %}
-  provisioner "local-exec" {
-{% if count > 1 %}
-    command = "aws --region {{ region }} ec2 create-tags --resource ${self.spot_instance_id} --tags Key=Name,Value={{ instance_name }}-${count.index} Key=InstanceSerialNumber,Value={{ instance_serial_number }} Key=InstanceOwner,Value={{ instance_owner }} Key=InstanceOwnerEmail,Value={{ instance_owner_email }} Key=InstanceOwnerDepartment,Value={{ instance_owner_department }} Key=InstanceFamily,Value={{ instance_serial_number }}-{{ instance_type }} Key=EC2RequestType,Value={{ request_type }}{% if 'UNDEFINED' not in project_id %} Key=ProjectId,Value={{ project_id }}{% endif %} Key=DEPLOYMENT_DATE,Value=\"{{ DEPLOYMENT_DATE_TAG }}\""
-{% else %}
-    command = "aws --region {{ region }} ec2 create-tags --resource ${self.spot_instance_id} --tags Key=Name,Value={{ instance_name }} Key=InstanceSerialNumber,Value={{ instance_serial_number }} Key=InstanceOwner,Value={{ instance_owner }} Key=InstanceOwnerEmail,Value={{ instance_owner_email }} Key=InstanceOwnerDepartment,Value={{ instance_owner_department }} Key=InstanceFamily,Value={{ instance_serial_number }}-{{ instance_type }} Key=EC2RequestType,Value={{ request_type }}{% if 'UNDEFINED' not in project_id %} Key=ProjectId,Value={{ project_id }}{% endif %} Key=DEPLOYMENT_DATE,Value=\"{{ DEPLOYMENT_DATE_TAG }}\""
-{% endif %}
-  }
-{% endif %}
-{% if base_os == "centos6" %}
+{% if enable_efs == 'true' %}
   provisioner "remote-exec" {
     inline = [
-      "sudo partprobe",
-      "sudo reboot",
+{% if efs_encryption == 'true' %}
+{% if base_os == 'centos6' or base_os == 'ubuntu1404' %}
+      "sudo su -c \"echo '${aws_efs_mount_target.efs-mountTarget-{{ instance_name }}.dns_name}:/ /efs nfs4 nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport 0 0' >> /etc/fstab\"",
+{% else %}
+      "sudo su -c \"echo '${aws_efs_mount_target.efs-mountTarget-{{ instance_name }}.dns_name}:/ /efs efs tls,_netdev 0 0' >> /etc/fstab\"",
+{% endif %}
+{% else %}
+{% if base_os == 'centos6' or base_os == 'ubuntu1404' %}
+      "sudo su -c \"echo '${aws_efs_mount_target.efs-mountTarget-{{ instance_name }}.dns_name}:/ /efs nfs4 nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport 0 0' >> /etc/fstab\"",
+{% else %}
+      "sudo su -c \"echo '${aws_efs_mount_target.efs-mountTarget-{{ instance_name }}.dns_name}:/ /efs efs defaults,_netdev 0 0' >> /etc/fstab\"",
+{% endif %}
+{% endif %}
+      "sudo mount /efs",
     ]
   connection {
     type        = "ssh"
@@ -131,8 +181,15 @@ resource "aws_spot_instance_request"  "{{ instance_name }}" {
     }
   }
 {% endif %}
-  # add a provisioner to mount EFS here
-  # add a provisioner to mount Lustre here
+{% if enable_fsx == 'true' or base_os == 'centos6' %}
+  provisioner "local-exec" {
+{% if request_type == "ondemand" %}
+    command = "aws --region {{ region }} ec2 reboot-instances --instance-ids ${self.id}"
+{% else %}
+    command = "aws --region {{ region }} ec2 reboot-instances --instance-ids ${self.spot_instance_id}"
+{% endif %}
+  }
+{% endif %}
 }
 {% if request_type == "ondemand" %}
 output "instance_ip_addresses" {

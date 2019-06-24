@@ -1,9 +1,10 @@
-# Ec2InstanceMaker - Simple Automated Framework for Building Cloud Servers 
+# Ec2InstanceMaker - A Simple Automated Framework for Building Servers and Attacing Storage in the Cloud
 
 Ec2InstanceMaker is an Open Source command line interface that makes it easy
-to build, access, and destroy servers in the cloud.  It is also a useful
-teaching tool for those who want to dive deep into cloud computing automation
-and learn more about the AWS ecosystem.
+to build, access, and destroy servers and storage resources in the cloud.  It
+is also a useful teaching tool for those who want to dive deep into cloud
+computing and storage paradigms, learn more about infrastructure automation,
+and explore the AWS ecosystem.
 
 ## License Information
 
@@ -32,16 +33,30 @@ You cannot create cases with AWS Technical Support or engage AWS support enginee
 
 Ec2InstanceMaker is an Open Source command line wrapper toolkit that eases the
 automation, creation, and destruction of Amazon Elastic Compute Cloud (EC2)
-instance fleets.  This tool is designed to enable anyone to leverage cloud
-computing resources at scale without requiring deep infrastructure knowledge
-or extensive experience with the AWS stack.
+instance fleets that can optionally be attached to Elastic File System (EFS)
+or FSx for Lustre storage resources.  This tool is designed to enable anyone
+to leverage cloud computing and storage resources at scale without requiring
+deep infrastructure knowledge or extensive experience with the AWS stack.
 
-You can find more information about Amazon EC2 and EC2 Spot, by visiting:
+You can find more information about EC2, EC2 Spot, EFS, and FSx for Lustre by
+visiting:
 
 https://aws.amazon.com/ec2/
 https://aws.amazon.com/ec2/spot/
+https://aws.amazon.com/efs/
+https://aws.amazon.com/fsx/lustre/
 
-Ec2InstanceMaker can be run locally (OSX or Linux) or on an existing EC2
+Ec2InstanceMaker also makes extensive use of Terraform, Ansible, the Amazon
+Web Services SDK for Python (boto3), and jq.  You can find more information
+about these tools by visiting:
+
+* Terraform: https://www.terraform.io/
+* Ansible: https://www.ansible.com/
+* Boto3: https://boto3.amazonaws.com/v1/documentation/api/latest/index.html
+* jq: https://stedolan.github.io/jq/
+
+Ec2InstanceMaker requires Python 3.6 or greater and a functional Bash shell
+environment.  It can be run locally on OSX or Linux, and on an existing EC2
 Linux instance.  Please refer to the "Installing Ec2InstanceMaker" section
 for detailed guidance on how to properly configure your environment.
 
@@ -54,50 +69,60 @@ Bash-Cygwin environments.
 Ec2InstanceMaker provides the following features through its command line
 interface:
 
-* Installing instances on multiple operating systems:
+* Installation of multiple operating systems on EC2 instances:
   * Amazon Linux
   * Amazon Linux 2
   * CentOS 6
   * CentOS 7
   * Ubuntu 14.04LTS
   * Ubuntu 16.04LTS
-  * Ubuntu 18.04LTS)
+  * Ubuntu 18.04LTS
   * Windows Server 2019
 
-Note: support for Redhat, OpenSuse, and SLES will be provided in future
-releases.
+Redhat, OpenSuse, and SLES may be supported in future releases.
 
-* Error checking to ensure that only supported instance types for each operating
-system can be created.
+* Error checking to ensure that the selected operating system and EC2 instance
+type are compatible.
 
 * Administrative control over the allowed EC2 instance types that can be deployed.
 
-* Creation of new instances from custom AMIs.  Please see below for notes on enabling EBS root volume encryption.
+* Creation of new instances from custom AMIs.  Please see below for additional 
+guidance on enabling EBS root volume encryption.
 
 * Multiple instances with identical configurations built at the same time a.k.a. "instance families."
 
 * Command line designation of dev, test, stage, and prod operating levels. 
 
-* EC2 Spot instances with a adjustable price buffer to help prevent instance
-terminations caused by Spot market changes.
+* Deployment of EC2 Spot instances with a adjustable price buffer to help
+prevent terminations caused by Spot market fluctuations.
 
-* Variable EBS root volume sizes up to 16 TB with optimization for supported
-instance types.
+* Variable EBS root volume sizes up to 16 TB.
 
-* Provisioned IOPS, throughput optizimed, and general purpose (gp2) SSD EBS
-volumes.
+* Automatic application of EBS optimization for supported instance types.
+
+* Attachment of provisioned IOPS, throughput optizimed, and general purpose
+(gp2) SSD EBS volumes during the instance creation process.
+
+* Creation of EFS file systems that share the instance lifecycle and tags.
+  * Provisioned EFS throughput is NOT supported by this toolkit; please use Lustre if your use cases require high throughput or large IOPS beyond what "maxIO" or "burst mode" can provide.
+
+* Command line option to enable encryption of EFS at rest and in flight.
+
+* Create of FSx for Lustre file systems that share the instance(s) lifecycle
+and tags.  Hydration to and from an S3 bucket is also supported.
 
 * Selective disabling of Intel HyperThreading.
 
-* Custom EC2 security groups.
+* Custom i.e. user-provided EC2 security groups.
 
-* Custom IAM instance profiles that can be created from user-supplied JSON policy documents or pre-existing IAM roles.
+* Custom i.e. user-provided IAM instance profiles that can be created from user-supplied JSON policy documents or pre-existing IAM roles.
 
 * Email notifications via SNS whenever an instance is created or deleted.
 
 * Identification of the instance owner, email address, and department using
 an easily extendable tagging framework.  The instance can also be associated
-with a specific project identification tag.
+with a specific project identification tag.  The department tagging mechanism
+is easily customizable to meet your use case.
 
 * Additional instance customization hooks using EC2 instance userdata or
 post-installation shell scripts.
@@ -126,6 +151,8 @@ These instructions are provided for the impatient and/or lazy.
 * Install Terraform.
 
 * Install Ansible.
+
+* Install jq.
 
 * Create and enable a virtual Python-3.7.x environment.
 
@@ -190,6 +217,14 @@ usage: make-instance.py [-h] --az AZ --instance_name INSTANCE_NAME
                         [--ebs_root_volume_iops EBS_ROOT_VOLUME_IOPS]
                         [--ebs_root_volume_size EBS_ROOT_VOLUME_SIZE]
                         [--ebs_root_volume_type {gp2,io1,st1}]
+                        [--efs_encryption {true,false}]
+                        [--efs_performance_mode {generalPurpose,maxIO}]
+                        [--enable_efs {true,false}]
+                        [--enable_fsx {true,false}]
+                        [--enable_fsx_hydration {true,false}]
+                        [--fsx_chunk_size FSX_CHUNK_SIZE]
+                        [--fsx_size FSX_SIZE] [--fsx_s3_bucket FSX_S3_BUCKET]
+                        [--fsx_s3_path FSX_S3_PATH]
                         [--hyperthreading {true,false}]
                         [--iam_json_policy IAM_JSON_POLICY]
                         [--iam_role IAM_ROLE]
@@ -197,6 +232,7 @@ usage: make-instance.py [-h] --az AZ --instance_name INSTANCE_NAME
                         [--request_type {ondemand,spot}]
                         [--instance_type INSTANCE_TYPE]
                         [--prod_level {dev,test,stage,prod}]
+                        [--preserve_efs {true,false}]
                         [--project_id PROJECT_ID]
                         [--security_group SECURITY_GROUP]
                         [--spot_buffer SPOT_BUFFER]
@@ -218,7 +254,7 @@ optional arguments:
   --ansible_verbosity ANSIBLE_VERBOSITY, -V ANSIBLE_VERBOSITY
                         Set the Ansible verbosity level (default = none)
   --base_os {alinux,alinux2,centos6,centos7,ubuntu1404,ubuntu1604,ubuntu1804,windows2019}, -B {alinux,alinux2,centos6,centos7,ubuntu1404,ubuntu1604,ubuntu1804,windows2019}
-                        cluster base operating system (default = alinux2
+                        instance base operating system (default = alinux2
                         a.k.a. Amazon Linux 2)
   --count COUNT, -C COUNT
                         number of EC2 instances to create (default = 1)
@@ -239,6 +275,32 @@ optional arguments:
                         default = 30)
   --ebs_root_volume_type {gp2,io1,st1}
                         EBS volume type (default = gp2)
+  --efs_encryption {true,false}
+                        enable EFS encryption in transit and at rest (default
+                        = false)
+  --efs_performance_mode {generalPurpose,maxIO}
+                        select the EFS performance mode (default =
+                        generalPurpose)
+  --enable_efs {true,false}
+                        Deploy and mount an Elastic File System (EFS) on the
+                        instance(s) (default = false)
+  --enable_fsx {true,false}
+                        Deploy and mount a Lustre (FSxL) file system on the
+                        instance(s) (default = false)
+  --enable_fsx_hydration {true,false}
+                        enable support for hydrating FSxL from S3 (default =
+                        false)
+  --fsx_chunk_size FSX_CHUNK_SIZE
+                        Chunk size (MB) of S3 objects imported into Lustre
+                        (default = 1024)
+  --fsx_size FSX_SIZE   Lustre file system size in GB - must use multiples of
+                        3600 (default = 3600)
+  --fsx_s3_bucket FSX_S3_BUCKET
+                        Name of an S3 bucket connected to the Lustre file
+                        system for this instance (default = UNDEFINED)
+  --fsx_s3_path FSX_S3_PATH
+                        Path to a folder on s3://fsx_s3_bucket that Lustre
+                        will import/export from (default = fsxRoot)
   --hyperthreading {true,false}, -H {true,false}
                         enable Intel Hyperthreading (default = true)
   --iam_json_policy IAM_JSON_POLICY, -J IAM_JSON_POLICY
@@ -255,6 +317,9 @@ optional arguments:
                         EC2 instance type (default = t2.micro)
   --prod_level {dev,test,stage,prod}
                         Operating stage of the jumphost (default = dev)
+  --preserve_efs {true,false}
+                        Preserve the Elastic File System (EFS) created with
+                        the instance(s) (default = false)
   --project_id PROJECT_ID, -P PROJECT_ID
                         Project name or ID number (default = UNDEFINED)
   --security_group SECURITY_GROUP, -S SECURITY_GROUP
@@ -486,6 +551,80 @@ Please note that additional customization of Windows instances can only be perfo
 Support for post-installation Python or PowerShell scripts may be provided in
 subsequent releases.
 
+## Using EFS
+
+EFS support can be enabled by setting --enable_efs=true when the instance is
+first built:
+
+$ ./make-instance.py -A us-east-1a -O rmarable -E rmarable@amazon.com -N dev01 --request_type=spot --count=3 --enable_efs=true
+
+This will create a new EFS file system that shares tags and its lifecycle with
+instance family "dev01."
+
+Support for "general purpose" and "maximum IO" modes can be selected through
+the efs_performance_mode switch:
+
+```
+  --efs_performance_mode {generalPurpose,maxIO}
+                        select the EFS performance mode (default =
+                        generalPurpose)
+```
+
+To encrypt EFS traffic at rest and in flight, set efs_encryption=true.
+
+Building an EFS file system will add an extra three minutes to the creation
+process time.
+
+## Using FSx for Lustre
+
+To add an FSx for Lustre file system that shares both the instance tags and
+lifecycle, set enable_fsx=true when the instance is first created.  The example
+below will attach a 3600 GB Luster file system mounted at /fsx to a new Amazon
+Linux 2 instance:
+
+```
+$ ./make-instance.py -A us-east-1a -O rmarable -E rmarable@amazon.com -N dev01 --count=3 --request_type=spot --enable_fsx=true
+```
+
+The size of the file system is controlled with the fsx_size flag.  Lustre file
+systems must use multiples of 3600TB or an error will be returned.
+
+Hydration of an FSX file system from an S3 bucket is supported by setting 
+enable_fsx_hydration=true, designating an existing S3 bucket (fsx_s3_bucket)
+and path (fsx_s3_path), and optionally choosing a "chunk" size.  The bucket and
+path, if provided, must exist or an error will be returned.
+
+This example will create a 3.6 TB Lustre file system that will hydrate to and
+from s3://rmarable-hydration-test/import mounted at /fsx on an Amazon Linux 2
+spot instance family called "dev01."  
+
+```
+./make-instance.py -A us-east-1a -O rmarable -E rmarable@amazon.com -N dev01 --count=3 --request_type=spot --enable_fsx=true --fsx_s3_bucket=rmarable-hydration-test --fsx_s3_path=import --enable_fsx_hydration=true
+```
+
+To faciliate pushing data in an out of the bucket from Lustre, please use the
+following shell scripts which will be automatically created and stored in 
+/usr/local/bin on all instance family members:
+
+Import S3 from Lustre: this script will push data from S3 into the FSx layer
+with a transfer rate that is 1/2 that of the Luster file system:
+`$ /usr/local/bin/import-s3-to-lustre.sh`
+
+Export Lustre to S3: this script will push data from the FSx layer into S3:
+`$ /usr/local/bin/export-lustre-to-s3.sh`
+
+Check export status: this script will permit you to track the progress of an
+export Lustre-to-S3 tasks:
+`$ /usr/local/bin/check-lustre-export-progress.sh`
+
+For more information on Lustre hydration to and from S3, please refer to the
+AWS public documentation on using FSx with durable data repositories:
+
+https://docs.aws.amazon.com/fsx/latest/LustreGuide/fsx-data-repositories.html
+
+Support for attaching FSx for Windows file systems to EC2 instances running
+Windows Server 2019 may be provided in a future release.
+
 ## Troubleshooting
 
 * Python version 3.6 or greater is required by this software.  Additionally,
@@ -556,3 +695,16 @@ https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/EBSEncryption.html#EBSEncryp
 Capture a snapshot of this instance, encrypt it, and then use the
 `--custom_ami` flag to launch the instance with this encrypted snapshot
 attached.
+
+* Please be advised that EFS encryption in transit is **not** supported for
+CentOS 6 or Ubuntu 14.04 LTS.
+
+  * centos6 ships with openssl-1.0.1e-57, which is too old to support to support
+TLS with EFS.  There are no officially supported openssl packages beyond this
+version.
+
+  * ubuntu1404 does not seem to support building the native Debian package of
+amazon-efs-utils.
+
+EFS encryption in transit for these operating systems may be provided in a 
+subsequent feature release.

@@ -2,7 +2,7 @@
 # Name:		access_instance.{{ instance_name }}.j2
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   June 8, 2019
-# Last Changed: June 14, 2019
+# Last Changed: June 22, 2019
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 {% if base_os == 'windows2019' %}
 # Purpose:	Provide a quick reference for Windows Administrator passwords
@@ -13,6 +13,7 @@
 
 # Import some critical Python libraries.
 
+import argparse
 import csv
 import os
 import subprocess
@@ -23,7 +24,7 @@ from prettytable import from_csv
 # Purpose: Iterate through a list from item_value=low to item_value=high
 #
 # This function would noramlly be defined within aux_data.py but importing
-# from non-local directories is ugly and unPythonic.
+# from non-local directories makes the code look ugly and unPythonic.
 
 def menuCount(low, high):
     counter = 0
@@ -45,6 +46,13 @@ instance_data_dir = '{{ instance_data_dir }}'
 instance_serial_number = '{{ instance_serial_number }}'
 region = '{{ region }}'
 
+# Determine if the menu index was provided on the command line.
+
+parser = argparse.ArgumentParser(description='access_instance.py: Provide quick SSH access to EC2 instances')
+parser.add_argument('--menu_index', '-m', help='menu index of the EC2 instance', required=False, type=int, default=0)
+args = parser.parse_args()
+menu_index = args.menu_index
+
 {% if 'windows2019' not in base_os  %}
 {% if count > 1 %}
 # Parse the Ids, hostnames, and IP addresses of the instance family.
@@ -62,6 +70,13 @@ region = '{{ region }}'
 
 ec2_instance_id_tf = subprocess.run('terraform show | grep instance_id | awk \'{print $3}\'',  stdout=subprocess.PIPE, shell=True, stderr=subprocess.DEVNULL, cwd=instance_data_dir)
 ec2_InstanceId = ec2_instance_id_tf.stdout.decode('utf-8').replace('\"', '').strip()
+
+# Abort if the menu table is empty because no instances exist.
+
+if len(ec2_InstanceId) == 0:
+    print('No instances found!')
+    print('Aborting...')
+    sys.exit(1)
 
 ec2_instance_name_tf = subprocess.run('terraform show | grep instance_name_index | awk \'{print $3}\'',  stdout=subprocess.PIPE, shell=True, stderr=subprocess.DEVNULL, cwd=instance_data_dir)
 ec2_InstanceName = ec2_instance_name_tf.stdout.decode('utf-8').replace('\"', '').strip()
@@ -130,13 +145,22 @@ csv_file.close()
 {% if count > 1 %}
 # Create a menu to assist the operator with creating SSH connections to the
 # new instances.
+#
+# Bypass the menu if the user already indicated which host is desired.
 
-print('')
-print(ec2_InstanceTable)
-print('')
-print('Select an instance to access using SSH:')
-menuchoice = int(input())
-print('')
+if menu_index == 0:
+    print('')
+    print(ec2_InstanceTable)
+    print('')
+    print('Select an instance to access using SSH:')
+    try:
+        menuchoice = int(input())
+    except KeyboardInterrupt:
+        print('')
+        sys.exit(1)
+    print('')
+else: 
+    menuchoice = menu_index
 
 with open(csvTempFile, newline='') as infh:
     reader = csv.reader(infh)
@@ -162,8 +186,10 @@ print('Reconnect to ' + ssh_hostname + ' by running this command:')
 {% else %}
 print('Reconnect to ' + instance_name + ' by running this command:')
 {% endif %}
-print('')
-print('$ ./access_instance.py -N {{ instance_name }}')
+if menu_index == 0:
+    print('$ ./access_instance.py -N {{ instance_name }}')
+else:
+    print('$ ./access_instance.py -N {{ instance_name }} -m ' + str(menu_index))
 {% endif %}
 
 # Cleanup and exit.

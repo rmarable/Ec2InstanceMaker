@@ -5,9 +5,9 @@ bootcmd:
 {% endif %}
 {% if base_os == "centos6" %}
 runcmd:
-    - yum install -y epel-release
-    - yum install -y cloud-utils-growpart parted dracut-modules-growroot perl
-    - mkinitrd -f -v /boot/initrd-$(uname -r).img $(uname -r)
+  - yum install -y epel-release
+  - yum install -y cloud-utils-growpart parted dracut-modules-growroot perl
+  - mkinitrd -f -v /boot/initrd-$(uname -r).img $(uname -r)
 growpart:
     mode: auto
     devices: ["/"]

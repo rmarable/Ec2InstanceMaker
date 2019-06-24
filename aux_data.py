@@ -385,3 +385,29 @@ ec2_instances_accelerated_computing = ['f1.2xlarge', 'f1.4x.large', 'f1.16xlarge
 # Full list of supported instance types
 
 ec2_instances_full_list = ec2_instances_general_purpose + ec2_instances_compute_optimized + ec2_instances_memory_optimized + ec2_instances_high_memory + ec2_instances_storage_optimized + ec2_instances_accelerated_computing
+
+# Function: base_os_instance_check()
+# Purpose: Verify the selected EC2 instance_type is supported by base_os
+
+def base_os_instance_check(base_os, instance_type, debug_mode):
+    if base_os == 'centos6' and ('t3' or 'm5' or 'a1.' or 'c5.' or 'f1.4xlarge' or 'g3s.xlarge' or 'p3' or 'r5' or 'x1e.' or 'z1d.' or 'h1.' or 'i3.metal' or 'i3en.') in instance_type:
+        error_msg = base_os + ' does not support EC2 instance type ' + instance_type + '!'
+        refer_to_docs_and_quit(error_msg)
+    elif base_os == 'centos7' and ('m5metal.' or 'a1.' or 'p3dn.24xlarge' or 'r5d.24xlarge' or 'r5d.metal' or 'r5.metal' or 'x1e.' or 'h1.' or 'i3en.') in instance_type:
+        error_msg = base_os + ' does not support EC2 instance type ' + instance_type + '!'
+        refer_to_docs_and_quit(error_msg)
+    elif base_os == 'ubuntu1404' and ('t1.' or 't3a.' or 'm5a' or 'm5d.' or 'm5.metal' or 'm1.' or 'a1.' or 'c5n.' or 'c5d.' or 'c1.' or 'f1.4xlarge' or 'p3dn.24xlarge' or 'r5' or 'm2.' or 'z1d.' or 'i3.metal' or 'i3en.') in instance_type:
+        error_msg = base_os + ' does not support EC2 instance type ' + instance_type + '!'
+        refer_to_docs_and_quit(error_msg)
+    elif base_os == 'ubuntu1604' and ('t1.' or 't3a.' or 'm5a' or 'm5d.metal' or 'm5.metal' or 'm1.' or 'a1.' or 'c1.' or 'r5ad.' or 'r5d.24xlarge' or 'r5d.metal' or 'r5.metal' or 'm2.' or 'z1d.metal' or 'i3en.') in instance_type:
+        error_msg = base_os + ' does not support EC2 instance type ' + instance_type + '!'
+        refer_to_docs_and_quit(error_msg)
+    elif base_os == 'ubuntu1804' and ('t1.' or 't3a.' or 'm5ad' or 'm5d.metal' or 'm5.metal' or 'm1.' or 'a1.' or 'c1.' or 'cc2.8xlarge' or 'r5ad.' or 'r5d.24xlarge' or 'm2.' or 'i3en.') in instance_type:
+        error_msg = base_os + ' does not support EC2 instance type ' + instance_type + '!'
+        refer_to_docs_and_quit(error_msg)
+    elif base_os == 'windows2019' and ('a1.' or 'f1.') in instance_type:
+        error_msg = base_os + ' does not support EC2 instance type ' + instance_type + '!'
+        refer_to_docs_and_quit(error_msg)
+    else:
+        p_val('base_os', debug_mode)
+        p_val('instance_type', debug_mode)

@@ -192,9 +192,11 @@ Ec2InstanceMaker provides an easy mechanism to access individual instances or
 specific members of a particular instance family over SSH.  Following every 
 build, Ec2InstanceMaker will dump access and deletion information to the
 console for user convenience.  For mulitple instance "families," a selection
-menu for each instance will be provided.
+menu for each instance will be provided.  The operator can also provide the 
+index of the instance to avoid parsing the menu.  This is also useful for 
+scripting actions against instance families created by this tool.
 
-To access the instance "dev01" created above:
+To access the single instance "dev01" created above:
 
 ```
 $ ./access_instance.py -N dev01
@@ -268,6 +270,12 @@ Connection to 18.196.63.105 closed.
 Reconnect to fam01-2 by running this command:
 
 $ ./access_instance.py -N fam01
+```
+
+Connecting to the instance directly could also be achieved using this command:
+
+```
+$ ./access_instancepy -N fam01 -n 3
 ```
 
 ### Example: Deleting an Instance

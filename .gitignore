@@ -10,6 +10,7 @@
 *.retry
 .serverless
 .swp
+TESTING
 TODO
 __pycache__/
 active_instances/

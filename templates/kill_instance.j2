@@ -2,12 +2,12 @@
 # Name:		kill_instance.{{ instance_name }}.sh
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	June 3, 2019
-# Last Changed:	June 16, 2019
+# Last Changed:	June 22, 2019
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:	Destroy EC2 instance {{ instance_name }}
 ###############################################################################
 
-#!/bin/sh
+#!/bin/bash
 
 # Set the path to the source tree.
 
@@ -15,12 +15,12 @@ SRC_TREE_DIR="`git rev-parse --show-toplevel`"
 
 # Set some critical paths and variables.
 
-INSTANCE_NAME={{ instance_name }}
 INSTANCE_DATA_DIR={{ instance_data_dir }}
+INSTANCE_NAME={{ instance_name }}
 EC2_KEYPAIR={{ ec2_keypair }}
+PRESERVE_IAM_ROLE="{{ preserve_iam_role }}"
 SSH_KEYPAIR_FILE={{ ssh_keypair_file }}
 SNS_TOPIC_ARN="{{ sns_arn }}"
-PRESERVE_IAM_ROLE="{{ preserve_iam_role }}"
 
 # Pause for 5 seconds before deleting anything.
 
@@ -36,22 +36,52 @@ echo "################  Please type CTRL-C within 5 seconds to abort  ##########
 echo "################################################################################"
 sleep 5
 echo ""
+{% if count > 1 %}
+echo "Destroying instance family: {{ instance_name }}"
+{% else %}
 echo "Destroying instance: {{ instance_name }}"
+{% endif %}
 echo ""
 
-# Destroy the instance created by Terraform.
+{% if enable_fsx == "true" %}
+{% if count > 1 %}
+# Parse the Lustre file system DNS name and fs_id of this instance family.
+{% else %}
+# Parse the Lustre file system DNS name and fs_id of this instance.
+{% endif %}
+
+FSX_DNS_NAME=`aws --region {{ region }} fsx describe-file-systems | jq '.FileSystems[] | [.DNSName, (.Tags|from_entries|.InstanceSerialNumber)] | @csv' | grep {{ instance_serial_number }} | awk -F, '{print $1}' | tr -d \" | tr -d '\\'`
+FSX_FS_ID=`aws --region {{ region }} fsx describe-file-systems | jq '.FileSystems[] | [.FileSystemId, (.Tags|from_entries|.InstanceSerialNumber)] | @csv' | grep {{ instance_serial_number }} | awk -F, '{print $1}' | tr -d \" | tr -d '\\'`
+
+# Delete the Lustre file system.
+
+aws --region {{ region }} fsx delete-file-system --file-system-id $FSX_FS_ID
+echo ""
+echo "Deleted Lustre file system: $FSX_DNS_NAME"
+echo ""
+{% endif %}
+
+{% if count > 1 %}
+# Destroy the instance family and associated resources created by Terraform.
+{% else %}
+# Destroy the instance and associated resources created by Terraform.
+{% endif %}
 
 cd $INSTANCE_DATA_DIR
 {% if request_type == 'ondemand' %}
-{% if debug_mode == 'true' %}TF_LOG=DEBUG {% endif %}terraform destroy -auto-approve -target=aws_instance.${INSTANCE_NAME}
+{% if debug_mode == 'true' %}TF_LOG=DEBUG {% endif %}terraform destroy -auto-approve{% if preserve_efs == 'false' %} -target=aws_efs_file_system.efs-${INSTANCE_NAME} -target=aws_efs_mount_target.efs-mountTarget-${INSTANCE_NAME}{% endif %} -target=aws_instance.${INSTANCE_NAME}
 {% else %}
-{% if debug_mode == 'true' %}TF_LOG=DEBUG {% endif %}terraform destroy -auto-approve -target=aws_spot_instance_request.${INSTANCE_NAME}
+{% if debug_mode == 'true' %}TF_LOG=DEBUG {% endif %}terraform destroy -auto-approve{% if preserve_efs == 'false' %} -target=aws_efs_file_system.efs-${INSTANCE_NAME} -target=aws_efs_mount_target.efs-mountTarget-${INSTANCE_NAME}{% endif %} -target=aws_spot_instance_request.${INSTANCE_NAME}
 {% endif %}
 cd $SRC_TREE_DIR
 
+{% if count > 1 %}
 # Delete the ec2_keypair and PEM files associated with this instance family.
+{% else %}
+# Delete the ec2_keypair and PEM files associated with this instance.
+{% endif %}
 
-aws ec2 delete-key-pair --key-name $EC2_KEYPAIR
+aws --region {{ region }} ec2 delete-key-pair --key-name $EC2_KEYPAIR
 echo "Deleted EC2 keypair: $EC2_KEYPAIR"
 for file in $INSTANCE_DATA_DIR/$SSH_KEYPAIR_FILE $SRC_TREE_DIR/$SSH_KEYPAIR_FILE
 do
@@ -62,7 +92,17 @@ do
 	fi
 done
 
-# Delete the instance data directory.
+# Delete the EC2 security group.
+
+{% if enable_fsx == 'true' %}
+(sleep 300 ; aws --region {{ region }} ec2 delete-security-group --group-id {{ vpc_security_group_ids }}) 2>/dev/null &
+SG_GROUPNAME=`aws ec2 describe-security-groups --filters Name=group-id,Values={{ vpc_security_group_ids }} | jq '.SecurityGroups[].GroupName' | tr -d \"`
+echo "Marked EC2 security group for deletion: $SG_GROUPNAME"
+{% else %}
+aws --region {{ region }} ec2 delete-security-group --group-id {{ vpc_security_group_ids }}
+{% endif %}
+
+# Delete the EC2 instance data directory.
 
 if [ -d $INSTANCE_DATA_DIR ]
 then
@@ -70,12 +110,23 @@ then
 	echo "Deleted directory: $INSTANCE_DATA_DIR"
 fi
 
+# Send an SNS notification that the instance is being terminated.
+
+{% if count > 1 %}
+echo "Published instance family termination message:"
+aws sns publish --topic-arn $SNS_TOPIC_ARN --subject "[Ec2InstanceMaker] Instance Family Termination Notice" --message "EC2 instance family {{ instance_name }} was terminated on `date +%Y-%m-%d` at `date +%H:%M.`"
+{% else %}
+echo "Published instance termination message:"
+aws sns publish --topic-arn $SNS_TOPIC_ARN --subject "[Ec2InstanceMaker] Instance Termination Notice" --message "EC2 instance {{ instance_name }} was terminated on `date +%Y-%m-%d` at `date +%H:%M.`  There were {{ count }} instances terminated in this family."
+{% endif %}
+
 # Delete the SNS topic.
 
 aws sns delete-topic --topic-arn $SNS_TOPIC_ARN
 echo "Deleted SNS topic: $SNS_TOPIC_ARN"
+{% if preserve_iam_role == 'false' %}
 
-# If PRESERVE_IAM_ROLE is false:
+# Since PRESERVE_IAM_ROLE is false, take the following actions:
 # 	- Delete the IAM EC2 instance policy.
 # 	- Remove the IAM role from the EC2 instance profile.
 # 	- Delete the IAM EC2 instance profile and role.
@@ -94,8 +145,9 @@ else
 	echo "Preserved EC2 IAM instance role: {{ ec2_iam_instance_role }}"
 	echo "Preserved EC2 IAM instance profile: {{ ec2_iam_instance_profile }}"
 fi
+{% endif %}
 
-# Remove config files and directories associated with {{ instance_name }}.
+# Remove all state data associated with {{ instance_name }}.
 
 for file in {{ vars_file_path }} {{ instance_serial_number_file }}
 do
