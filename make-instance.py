@@ -4,7 +4,7 @@
 # Name:         make-instance.py
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   June 3, 2019
-# Last Changed: June 22, 2019
+# Last Changed: June 25, 2019
 # Purpose:      Generic command-line EC2 instance creator
 ################################################################################
 
@@ -1007,7 +1007,7 @@ if enable_fsx == 'true':
     if 'UNDEFINED' not in project_id:
         Lustre_Tags=[
             { 'Key': 'Name', 'Value': instance_name },
-            { 'Key': 'Purpose', 'Value': 'FSx for Lustre storage attached to ' + instance_owner },
+            { 'Key': 'Purpose', 'Value': 'FSx for Lustre storage attached to ' + instance_name },
             { 'Key': 'FileSystemBuilder', 'Value': 'boto3' },
             { 'Key': 'InstanceSerialNumber', 'Value': instance_serial_number },
             { 'Key': 'InstanceOwner', 'Value': instance_owner },
@@ -1019,7 +1019,7 @@ if enable_fsx == 'true':
     else:
         Lustre_Tags=[
             { 'Key': 'Name', 'Value': instance_name },
-            { 'Key': 'Purpose', 'Value': 'FSx for Lustre storage attached to ' + instance_owner },
+            { 'Key': 'Purpose', 'Value': 'FSx for Lustre storage attached to ' + instance_name },
             { 'Key': 'FileSystemBuilder', 'Value': 'boto3' },
             { 'Key': 'InstanceSerialNumber', 'Value': instance_serial_number },
             { 'Key': 'InstanceOwner', 'Value': instance_owner },

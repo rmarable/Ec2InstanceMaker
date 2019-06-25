@@ -611,7 +611,7 @@ The authenticity of host '54.152.64.121 (54.152.64.121)' can't be established.
 ECDSA key fingerprint is SHA256:t4rxBcFVR7CpEy1N03Qq1+jlfDnjnEdReCagZjurZgo.
 Are you sure you want to continue connecting (yes/no)? yes
 Warning: Permanently added '54.152.64.121' (ECDSA) to the list of known hosts.
-Last login: Tue Jun 25 02:42:53 2019 from 72-21-196-64.amazon.com
+Last login: Tue Jun 25 02:42:53 2019 from www.souldonkeymusic.com:
 [centos@ip-172-31-46-203 ~]$ df -h
 Filesystem              Size  Used Avail Use% Mounted on
 /dev/xvda1              8.0G  1.6G  6.5G  20% /
@@ -630,4 +630,46 @@ lrwxrwxrwx. 1 root root 22 Jun 25 02:46 aws -> /usr/local/aws/bin/aws
 -rwxr-xr-x. 1 root root 90 Jun 25 02:48 check-lustre-export-progress.sh
 -rwxr-xr-x. 1 root root 71 Jun 25 02:48 export-lustre-to-s3.sh
 -rwxr-xr-x. 1 root root 71 Jun 25 02:48 import-s3-to-lustre.sh
+```
+
+## Destroying an Instance
+
+Note: a custom "kill" script is generated when the instance is created.
+
+```
+$ ./kill-instance.dev01.sh
+
+EC2 instance "dev01" is marked for termination.
+
+################################################################################
+################  Please type CTRL-C within 5 seconds to abort  ################
+################################################################################
+
+Destroying instance: dev01
+
+aws_instance.dev01[0]: Refreshing state... [id=i-02dbe6023c8a10040]
+aws_instance.dev01[0]: Destroying... [id=i-02dbe6023c8a10040]
+aws_instance.dev01[0]: Still destroying... [id=i-02dbe6023c8a10040, 10s elapsed]
+aws_instance.dev01[0]: Still destroying... [id=i-02dbe6023c8a10040, 20s elapsed]
+aws_instance.dev01[0]: Still destroying... [id=i-02dbe6023c8a10040, 30s elapsed]
+aws_instance.dev01[0]: Destruction complete after 30s
+
+Destroy complete! Resources: 1 destroyed.
+Deleted EC2 keypair: dev01-17011225062019_us-east-1
+Deleted SSH keypair file: /Users/rmarable/src/public/Ec2InstanceMaker/instance_data/dev01/dev01-17011225062019_us-east-1.pem
+Deleted directory: /Users/rmarable/src/public/Ec2InstanceMaker/instance_data/dev01
+Published instance termination message:
+{
+    "MessageId": "2110aa6a-d5b5-5b37-8d7f-ffe69d93ff5d"
+}
+Deleted SNS topic: arn:aws:sns:us-east-1:147724377207:Ec2_Instance_SNS_Alerts_dev01-17011225062019
+Deleted file: ./vars_files/dev01.yml
+Deleted file: ./active_instances/dev01.serial
+Deleted file: kill-instance.dev01.sh
+
+###############################################################################
+##           Finished deleting EC2 instance: dev01
+###############################################################################
+
+Exiting...
 ```
