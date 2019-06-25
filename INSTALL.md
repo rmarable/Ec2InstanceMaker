@@ -7,10 +7,10 @@ Please refer to the LICENSE and DISCLAIMER.md documents included with this Open 
 ## Introduction
 
 Ec2InstanceMaker is Open Source software that simplifies the automation
-of creating, deleting, and administering cloud computing server resources
-through an easy-to-use command line interface.  It can also be used as a 
-teaching tool for those who wish to dive deep into cloud automation and to
-learn more about the AWS ecosystem.
+of creating, deleting, and administering cloud computing server and storage 
+resources through an easy-to-use command line interface.  It can also be used
+as a teaching tool for those who wish to dive deep into cloud automation and
+to learn more about the AWS ecosystem.
 
 This toolkit is currently supported on local OSX and Linux environments and
 EC2 instances spawned with the GenericEc2InstancePolicy.json template.  In
@@ -20,10 +20,10 @@ tested and will **not** be supported.
 
 ## Creating an Installation Environment on OSX
 
-This section provides guidance for using this toolkit to launch new EC2
-instances directly from OSX.  Please be forewarned that this method requires
-installing external tools including Homebrew which may createe other unforeseen
-problems with your local environment.
+This section provides guidance for launching new EC2 instances directly from
+OSX.  Please be forewarned that this method requires installing external tools
+including Homebrew which may createe other unforeseen problems with your local
+environment.
 
 * Clone the Ec2InstanceMaker toolkit into your local ~/src directory:
 
@@ -96,8 +96,9 @@ $ pip install -r requirements.txt
 $ cd ~
 ```
 
-* You are now ready to build instances.  Please consult README.md for more
-detailed information on leveraging the scripts in this toolkit.
+* You are now ready to build EC2 instances.  Please consult README.md and 
+USE-CASES-TESTED.md for more detailed information on leveraging the scripts
+in this toolkit.
 
 ## Creating an Installation Environment on Linux (local or EC2)
 
@@ -124,7 +125,8 @@ $ ./make-instance.py --help
 
 ## Example Use Cases
 
-Please review these common use cases that this tool can help address.
+Please review these common use cases that this tool can help address.  More 
+details are provided in the USE-CASES-TESTED.md document.
 
 ### Example: Building a Single Linux Instance 
 

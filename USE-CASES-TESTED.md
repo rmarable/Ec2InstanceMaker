@@ -1,10 +1,9 @@
 # EC2InstanceMaker - Use Case Test Summaruy
 
 This document summarizes the use cases that this Open Source software project
-was tested against on June 24, 2019.  These command line invocations can be
-applied in any AWS environment by pasting the command line into a shell,
-substituting your username, email address, and instance name as appropriate
-for your needs.
+was tested against.  These command line invocations can be applied in any AWS
+environment by pasting the command line into a shell and substituting your
+username, email address, and instance name as needed.
 
 Notes:
 
@@ -12,7 +11,7 @@ Notes:
   *  centos6 (openssl-1.0.1e dependency)
   *  ubuntu1404 (no amazon-efs-utils native support)
 
-* There is no support for Lustre on any version of Ubuntu due to kernel and
+* Lustre on any version of Ubuntu is unsupported due to kernel, package, and
 documentation inconsistencies.
 
 ## Single Ondemand Instance With Defaults

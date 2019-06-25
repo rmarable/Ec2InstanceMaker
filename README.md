@@ -167,18 +167,14 @@ freshly created virtual Python environment.
 
 Ec2InstanceMaker is a collection of scripts and user-configurable templates.
 
-* Scripts
-  * make-instance.py
-  * access-instance.py
-  * kill-instance.$INSTANCE_NAME.py
+**Scripts.** Please see below for more details on how the scripts are used.
+* make-instance.py
+* access-instance.py
+* kill-instance.$INSTANCE_NAME.py
 
-Please see below for more details on how the scripts are used.
-
-* Templates
-
-Ec2InstanceMaker provides some generic templates that can be customized to
-permit more granular control over the IAM EC2 instance policy that is used to
-create the instance profiles that are created by the toolkit.
+**Templates**.  Ec2InstanceMaker provides some generic templates that can be
+customized to permit more granular control over the IAM EC2 instance policy
+that is used to create the instance profiles that are created by the toolkit.
 
   * **MinimalEc2InstancePolicy.json** is a bare-bones template that allows only
 EC2 and S3 API calls.
@@ -190,7 +186,7 @@ instance profile maintenance, and access to SSM.
   * **Ec2AdminInstancePolicy.json** is provides the EC2 instance profile with
 full adminstrator rights over the AWS account in question.  *Use this policy
 judiciously!*
-  * **build_instance.j2 ** permits the operator to leverage Terraform's
+  * **build_instance.j2** permits the operator to leverage Terraform's
 post-install hook to perform further configuration of EC2 instances using a
 shell script.
   * **instance_userdata.j2** will allow the operator to leverage EC2 instance
@@ -201,7 +197,6 @@ https://docs.aws.amazon.com/AWSEC2/latest/WindowsGuide/ec2-instance-metadata.htm
 ### Using make-instance.py
 
 **make-instance.py** builds EC2 instances for a wide variety of use cases. 
-To view currently available options:
 
 ```
 $ ./make-instance.py -h
@@ -335,11 +330,12 @@ optional arguments:
 
 ### Building Instances
 
-The minimum required argments are the Availability Zone, the instance owner's
-username and email address, and the instance name.  All other values will fall
-back to the defaults (t2.micro running Amazon Linux 2 with an 8 GB EBS gp2
-unencrypted volume as the root device, using the supplied JSON policy document
-to generate an IAM instance profile that provides EC2 and S3 access:
+The minimum required arguments are the Availability Zone, the instance owner's
+username and email address, and the instance name.  All other parameters will
+fall back to the default of a single ondemand t2.micro instance running Amazon
+Linux 2 with an 8 GB EBS gp2 unencrypted volume as the root device, using the
+supplied JSON policy document to generate an IAM instance profile providing
+EC2 and S3 access:
 
 ```
 $ ./make-instance.py -A us-east-2a -N ec2-testinstance01 -O rmarable -E rodney.marable@gmail.com
@@ -362,11 +358,11 @@ $ ./make-instance.py -A us-east-2a -N ec2-testinstance01 -O rmarable -E rodney.m
 Performing parameter validation...
 
 Selected EC2 instance type: t2.micro
-*** WARNING ***
+** WARNING **
 t2.micro does not support EBS optimization!
 Disabling ebs_optimization for: ec2-testinstance01
 
-*** ERROR ***
+** ERROR **
 Maximum allowed EBS volume size is 16 TB (16000 GB)!
 
 Please resolve this error and retry the instance build.
@@ -376,9 +372,10 @@ Aborting...
 ### Accessing Instances
 
 **access-instance.py** provides an easy mechanism for making SSH connections
-to EC2 Linux instances.  When working with Windows EC2 instances, this script
-will provide the decrypted Administrator password and IP address which can
-then be pasted into a Remote Desktop Client within an easy-to-parse table.
+to multiple EC2 Linux instances.  When working with Windows EC2 instances,
+this script will provide the decrypted Administrator password and IP address
+which can then be pasted into a Remote Desktop Client within an easy-to-parse
+table.
 
 For a single Linux instance:
 
@@ -415,8 +412,8 @@ Reprint this table:
 $ ./access-instance.py -N dev01
 ```
 
-When working with Linux instance families, `access_instance.py` provides a
-menu where the operator can select the specific instance of interest:
+When working with Linux instance families, `access_instance.py` provides an
+interactive menu allowing the user to select the specific instance of interest:
 
 ```
 $ ./access_instance.py -N fam01
@@ -474,7 +471,7 @@ Access the new instance family members with Windows Remote Desktop:
 | Instance Name |   IP Address  |      Adminstrator Password       |
 +---------------+---------------+----------------------------------+
 |    dev01-0    | 3.210.201.142 | GTm.%A8%NARIe$&ax=sWojSRKxU.LIRB |
-|    dev01-1    |  3.216.27.77  | uMP)sOvC2w7WXLi3h3L2%9VjI5Ovwo*c |
+|    dev01-1    |  3.216.27.77  | uMP)sOvC2w7WXLi3h3L2%9VjI5Ovwo7c |
 |    dev01-2    |  34.237.0.213 | 9T2cye$ytrEp9)niIlNv@@P;ORu8f&pu |
 +---------------+---------------+----------------------------------+
 
@@ -484,11 +481,11 @@ $ ./access_instance -N dev01
 
 ### Destroying Instances
 
-**kill-instance.$INSTANCE_NAME.sh.** is a personalized script designed to 
-terminate specific EC2 instances (or instance families), EC2 security groups,
-IAM entities, and any associated storage resources that were created along with
-the instance.  It is generated by make-instance.py and will delete itself when
-the instances it was built with are terminated.
+**kill-instance.$INSTANCE_NAME.sh** is a personalized script designed to 
+terminate specific EC2 instances, EC2 security groups, IAM entities, and any
+associated storage resources that were tagged with the instance_serial_nunber.
+It is generated by make-instance.py and will delete itself when all tagged 
+instances and resources are terminated.
 
 To invoke:
 
@@ -546,17 +543,16 @@ code between these commented stanzas in `templates/instance_userdata.j2` or
 ## Starting point for user-added EC2 instance customizations ##
 ###############################################################
 
-<paste your custom code here>
+_<paste your custom code here>_
 
 #############################################################
 ## Ending point for user-added EC2 instance customizations ##
 #############################################################
 ```
 
-Please note that additional customization of Windows instances can only be performed through the userdata template (templates/instance_userdata.j2).
+Please note that additional customization of Windows instances can only be performed through the userdata template (templates/instance_userdata.j2).  Support for joining a Windows Active Directory domain will be provided in a future release.
 
-Support for post-installation Python or PowerShell scripts may be provided in
-subsequent releases.
+Support for post-installation Python or PowerShell scripts may also be provided in subsequent releases.
 
 ## Using EFS
 
@@ -585,10 +581,7 @@ process time.
 
 ## Using FSx for Lustre
 
-To add an FSx for Lustre file system that shares both the instance tags and
-lifecycle, set enable_fsx=true when the instance is first created.  The example
-below will attach a 3600 GB Luster file system mounted at /fsx to a new Amazon
-Linux 2 instance:
+To add an FSx for Lustre file system that shares both the instance tag collection and lifecycle, set enable_fsx=true when the instance is first created.  The example below will attach a 3600 GB Luster file system mounted at /fsx to a new Amazon Linux 2 instance:
 
 ```
 $ ./make-instance.py -A us-east-1a -O rmarable -E rmarable@amazon.com -N dev01 --count=3 --request_type=spot --enable_fsx=true
@@ -655,7 +648,7 @@ is missing" error:
 ```
 $ ./make-instance.py -N dev01 -O rmarable -E rmarable@amazon.com -A us-east-1b -I t3.micro -C 3 --request_type=spot
 
-*** ERROR ***
+** ERROR **
 Terraform is missing! Please visit: https://www.terraform.io/downloads
 
 Please resolve this error and retry the instance build.
