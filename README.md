@@ -543,7 +543,7 @@ code between these commented stanzas in `templates/instance_userdata.j2` or
 ## Starting point for user-added EC2 instance customizations ##
 ###############################################################
 
-_<paste your custom code here>_
+<paste your custom code here>
 
 #############################################################
 ## Ending point for user-added EC2 instance customizations ##
@@ -556,10 +556,12 @@ Support for post-installation Python or PowerShell scripts may also be provided 
 
 ## Using EFS
 
-EFS support can be enabled by setting --enable_efs=true when the instance is
-first built:
+EFS support can be enabled by setting `--enable_efs=true` when the instance is
+first constructed: 
 
+```
 $ ./make-instance.py -A us-east-1a -O rmarable -E rmarable@amazon.com -N dev01 --request_type=spot --count=3 --enable_efs=true
+```
 
 This will create a new EFS file system that shares tags and its lifecycle with
 instance family "dev01."
@@ -573,7 +575,7 @@ the efs_performance_mode switch:
                         generalPurpose)
 ```
 
-To encrypt EFS traffic at rest and in flight, set efs_encryption=true.  Note
+To encrypt EFS traffic at rest and in flight, set `efs_encryption=true`.  Note
 that encryption in transit is not supported under centos6 or ubuntu1404.
 
 Building an EFS file system will add an extra three minutes to the creation
@@ -581,17 +583,17 @@ process time.
 
 ## Using FSx for Lustre
 
-To add an FSx for Lustre file system that shares both the instance tag collection and lifecycle, set enable_fsx=true when the instance is first created.  The example below will attach a 3600 GB Luster file system mounted at /fsx to a new Amazon Linux 2 instance:
+To add an FSx for Lustre file system that shares both the instance tag collection and lifecycle, set `enable_fsx=true` when the instance is first created.  The example below will attach a 3600 GB Luster file system mounted at /fsx to a new Amazon Linux 2 instance:
 
 ```
 $ ./make-instance.py -A us-east-1a -O rmarable -E rmarable@amazon.com -N dev01 --count=3 --request_type=spot --enable_fsx=true
 ```
 
-The size of the file system is controlled with the fsx_size flag.  Lustre file
+The size of the file system is controlled with the `fsx_size` flag.  Lustre file
 systems must use multiples of 3600TB or an error will be returned.
 
 Hydration of an FSX file system from an S3 bucket is supported by setting 
-enable_fsx_hydration=true, designating an existing S3 bucket (fsx_s3_bucket)
+`enable_fsx_hydration=true`, designating an existing S3 bucket (fsx_s3_bucket)
 and path (fsx_s3_path), and optionally choosing a "chunk" size.  The bucket and
 path, if provided, must exist or an error will be returned.
 
