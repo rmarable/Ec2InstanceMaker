@@ -79,7 +79,7 @@ interface:
   * Ubuntu 18.04LTS
   * Windows Server 2019
 
-Redhat, OpenSuse, and SLES may be supported in future releases.
+    Redhat, OpenSuse, and SLES may be supported in future releases.
 
 * Error checking to ensure that the selected operating system and EC2 instance
 type are compatible.
