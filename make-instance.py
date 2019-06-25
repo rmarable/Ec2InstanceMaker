@@ -1093,10 +1093,10 @@ print('')
 
 if 'windows2019' not in base_os:
     if count == 1:
-        print('Access the new Linux instance via SSH:')
+        print('Access the new ' + base_os + ' instance via SSH:')
         print('$ ./access_instance.py -N ' + instance_name)
     else:
-        print('Access members of the new Linux instance family via SSH:')
+        print('Access the ' + count + ' members of the instance' + base_os + ' instance family via SSH:')
         print('$ ./access_instance.py -N ' + instance_name)
 
 # If base_os is Windows:
