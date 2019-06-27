@@ -2,7 +2,7 @@
 # Name:		aux_data.py
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	June 3, 2019
-# Last Changed:	June 22, 2019
+# Last Changed:	June 26, 2019
 # Purpose:	Data structures and functions to support Ec2InstanceMaker
 ################################################################################
 
@@ -139,7 +139,7 @@ def get_ami_info(base_os, region):
     return(aws_ami)
 
 # Function: check_custom_ami()
-# Purpose: Verify the existence of a user-provided custom AMI
+# Purpose: verify the existence of a user-provided custom AMI
 
 def check_custom_ami(custom_ami, aws_account_id, region):
     import boto3
@@ -148,6 +148,7 @@ def check_custom_ami(custom_ami, aws_account_id, region):
     ami_information = ec2client.describe_images(
         Owners=[aws_account_id],
         Filters=[
+            {'Name': 'architecture', 'Values': ['x86_64']},
             {'Name': 'image-id', 'Values': [custom_ami]},
             {'Name': 'state', 'Values': ['available']},
             {'Name': 'virtualization-type', 'Values': ['hvm']},
@@ -164,8 +165,10 @@ def check_custom_ami(custom_ami, aws_account_id, region):
         return(aws_ami)
 
 # Function: ctrlC_Abort()
-# Purpose: Print an abort header, capture CTRL-C when pressed, and remove any
-# orphaned state and config files created by the instance creation script.
+# Purpose: Print an abort header, capture CTRL-C when pressed, and remove all
+# of entities created by make-instance.py prior to capturing KeyboardInterrupt:
+# orphaned state directories and files; EC2 security groups and keypairs; IAM
+# roles, policies, and instance profiles
 
 def ctrlC_Abort(sleep_time, line_length, vars_file_path, instance_data_dir, instance_serial_number_file, instance_serial_number, region, security_group_name, vpc_security_group_ids):
     import boto3
@@ -183,7 +186,6 @@ def ctrlC_Abort(sleep_time, line_length, vars_file_path, instance_data_dir, inst
     print('')
     print(''.center(line_length, '#'))
     center_line = '    Please type CTRL-C within ' + str(sleep_time) + ' seconds to abort    '
-#    print('    Please type CTRL-C within ' + str(sleep_time) + ' seconds to abort    '.center(line_length, '#'))
     print(center_line.center(line_length, '#'))
     print(''.center(line_length, '#'))
     print('')
@@ -211,7 +213,7 @@ def ctrlC_Abort(sleep_time, line_length, vars_file_path, instance_data_dir, inst
                 print('Removed: ' + iam_instance_profile + ' from ' + iam_instance_role)
             except ClientError as e:
                 if e.response['Error']['Code'] == 'NoSuchEntity':
-                    print('No IAM EC2 instance profile could be removed from the instance role!')
+                    print('No IAM EC2 instance profile exists to remove from the instance role!')
             try:
                 iam.delete_instance_profile(InstanceProfileName=iam_instance_profile)
                 print('Deleted: ' + iam_instance_profile)
@@ -253,7 +255,7 @@ def ctrlC_Abort(sleep_time, line_length, vars_file_path, instance_data_dir, inst
         sys.exit(1)
 
 # Function: illegal_az_msg()
-# Purpose: Return an error message when an invalid AZ is provided
+# Purpose: abort when an invalid AvailabilityZone is provided
 
 def illegal_az_msg(az):
     import sys
@@ -263,7 +265,7 @@ def illegal_az_msg(az):
     sys.exit(1)
 
 # Function: menuCount()
-# Purpose: Iterate through a list from item_value=low to item_value=high
+# Purpose: iterate through a list from item_value=low to item_value=high
 
 def menuCount(low, high):
     counter = 0
@@ -316,7 +318,7 @@ def print_TextHeader(p, action, line_length):
     print(''.center(line_length, '-'))
 
 # Function: refer_to_docs_and_quit()
-# Purpose: Print an error message, refer to the AWS ParallelCluster public
+# Purpose: print an error message, refer to the AWS ParallelCluster public
 # documentation, and quit with a non-successful error code.
 
 def refer_to_docs_and_quit(error_msg):
@@ -329,7 +331,7 @@ def refer_to_docs_and_quit(error_msg):
     sys.exit(1)
 
 # Function: time_waiter(duration, interval):
-# Purpose: Given a duration, print '.'  to the console every interval seconds.
+# Purpose: given a duration, print '.'  to the console every interval seconds.
 
 def time_waiter(duration, interval):
     import sys
@@ -387,7 +389,7 @@ ec2_instances_accelerated_computing = ['f1.2xlarge', 'f1.4x.large', 'f1.16xlarge
 ec2_instances_full_list = ec2_instances_general_purpose + ec2_instances_compute_optimized + ec2_instances_memory_optimized + ec2_instances_high_memory + ec2_instances_storage_optimized + ec2_instances_accelerated_computing
 
 # Function: base_os_instance_check()
-# Purpose: Verify the selected EC2 instance_type is supported by base_os
+# Purpose: verify the selected EC2 instance_type is supported by base_os
 
 def base_os_instance_check(base_os, instance_type, debug_mode):
     if base_os == 'centos6' and ('t3' or 'm5' or 'a1.' or 'c5.' or 'f1.4xlarge' or 'g3s.xlarge' or 'p3' or 'r5' or 'x1e.' or 'z1d.' or 'h1.' or 'i3.metal' or 'i3en.') in instance_type:

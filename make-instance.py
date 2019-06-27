@@ -4,7 +4,7 @@
 # Name:         make-instance.py
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   June 3, 2019
-# Last Changed: June 25, 2019
+# Last Changed: June 26, 2019
 # Purpose:      Generic command-line EC2 instance creator
 ################################################################################
 
@@ -169,71 +169,6 @@ if not ANSIBLE_VERSION:
     error_msg='Ansible is missing! Please visit: https://bit.ly/2KHuyY5'
     refer_to_docs_and_quit(error_msg)
 
-# Configure a boto3 resource and client for communication with S3.
-
-s3 = boto3.resource('s3')
-s3_client = boto3.client('s3')
-
-# Lustre has various package and kernel issues on Ubuntu so we don't support
-# installation when base_os is Ubuntu 14.04LTS, 16.04LTS, or 18.04LTS.
-
-if enable_fsx == 'true' and ('ubuntu' in base_os or base_os == 'windows2019'):
-    error_msg = 'Ec2Instancemaker does not support Lustre on ' + base_os + '!'
-    refer_to_docs_and_quit(error_msg)
-
-# Perform Lustre paramter error checking.
-
-if enable_fsx == 'true' and enable_fsx_hydration == 'false':
-    if 'UNDEFINED' not in fsx_s3_bucket:
-        error_msg = 'enable_fsx_hydration=false but an S3 bucket for Lustre was defined!'
-        refer_to_docs_and_quit(error_msg)
-if enable_fsx == 'false' and enable_fsx_hydration == 'true':
-    if 'UNDEFINED' not in fsx_s3_bucket:
-        error_msg = 'Set enable_fsx=true for all S3-Lustre interactions!'
-        refer_to_docs_and_quit(error_msg)
-
-# Perform error checking to ensure s3://fsx_s3_bucket/fsx_s3_path exists.
-
-if enable_fsx == 'true' and enable_fsx_hydration == 'true':
-    if s3.Bucket(fsx_s3_bucket) not in s3.buckets.all():
-        error_msg = 'Please create a valid S3 bucket before enabling Lustre hydration!'
-        refer_to_docs_and_quit(error_msg)
-    if fsx_s3_path == 'fsxRoot':
-        print('Using the default Lustre S3 path: s3://' + fsx_s3_bucket + '/fsxRoot')
-    else:
-        print('Setting the default Lustre S3 path to: s3://' + fsx_s3_bucket + '/' + fsx_s3_path)
-    print('')
-    check_fsx_s3_path = s3_client.list_objects_v2(
-        Bucket=fsx_s3_bucket,
-        Prefix=fsx_s3_path
-        )
-    check_fsx_s3_object_count = jq('.KeyCount').transform(text=json.dumps(check_fsx_s3_path, default=str), text_output=True)
-    if int(check_fsx_s3_object_count) == 0:
-        error_msg = 'Please ensure s3://' + fsx_s3_bucket + '/' + fsx_s3_path + ' exists!'
-        refer_to_docs_and_quit(error_msg)
-    else:
-        p_val('fsx_s3_bucket', debug_mode)
-        p_val('fsx_s3_path', debug_mode)
-
-# Check to ensure the Lustre volume size is divisible by 3600.
-
-if enable_fsx == 'true':
-    if fsx_size%3600 == 0:
-        p_val('fsx_size', debug_mode)
-    else:
-        error_msg='fsx_size must be divisible by 3600!'
-        refer_to_docs_and_quit(error_msg)
-
-# Perform error checking and validation on fsx_chunk_size, which should range
-# between 1,024 MB (1 GB) and 512,000 MB (500 GB).
-
-if (int(fsx_chunk_size) > 528000) or (int(fsx_chunk_size) < 1024):
-    error_msg = 'fsx_chunk_size must be between 1,024 MB (1 GB) and 528,000 MB (528 GB)!'
-    refer_to_docs_and_quit(error_msg)
-else:
-    if enable_fsx_hydration == 'true':
-        p_val('fsx_chunk_size', debug_mode)
-
 # Set the vars_file_path.
 
 vars_file_path = './vars_files/' + instance_name + '.yml'
@@ -254,7 +189,6 @@ except OSError as e:
 # If an existing vars_file exists, abort to prevent potential duplications.
 
 if os.path.isfile(vars_file_path):
-    error_msg='Ansible is missing! Please visit: https://bit.ly/2KHuyY5'
     print('')
     print('  WARNING  '.center(80, '*'))
     print(('  Found an existing ' + vars_file_path + ' ').center(80,'-'))
@@ -317,6 +251,81 @@ print('')
 print('Selected base operating system: ' + base_os)
 base_os_instance_check(base_os, instance_type, debug_mode)
 
+# Create a boto3 client and resource for EC2.
+
+ec2_client = boto3.client('ec2', region_name = region)
+ec2 = boto3.resource('ec2', region_name = region)
+
+# Create a boto3 client to interact with IAM.
+
+iam = boto3.client('iam')
+
+# Create a boto3 resource and client for communication with S3.
+
+s3 = boto3.resource('s3')
+s3_client = boto3.client('s3')
+
+# Create a boto3 client to interact with SNS.
+
+sns_client = boto3.client('sns')
+
+# Lustre has various package and kernel issues on Ubuntu so we don't support
+# installation when base_os is Ubuntu 14.04LTS, 16.04LTS, or 18.04LTS.
+
+if enable_fsx == 'true' and ('ubuntu' in base_os or base_os == 'windows2019'):
+    error_msg = 'Ec2Instancemaker does not support Lustre on ' + base_os + '!'
+    refer_to_docs_and_quit(error_msg)
+
+# Perform Lustre paramter error checking.
+
+if enable_fsx == 'true' and enable_fsx_hydration == 'false':
+    if 'UNDEFINED' not in fsx_s3_bucket:
+        error_msg = 'enable_fsx_hydration=false but an S3 bucket for Lustre was defined!'
+        refer_to_docs_and_quit(error_msg)
+if enable_fsx == 'false' and enable_fsx_hydration == 'true':
+    if 'UNDEFINED' not in fsx_s3_bucket:
+        error_msg = 'Set enable_fsx=true for all S3-Lustre interactions!'
+        refer_to_docs_and_quit(error_msg)
+
+# Perform error checking to ensure s3://fsx_s3_bucket/fsx_s3_path exists.
+
+if enable_fsx == 'true' and enable_fsx_hydration == 'true':
+    if s3.Bucket(fsx_s3_bucket) not in s3.buckets.all():
+        error_msg = 'Please create a valid S3 bucket before enabling Lustre hydration!'
+        refer_to_docs_and_quit(error_msg)
+    print('Setting the Lustre-S3 path to: s3://' + fsx_s3_bucket + '/' + fsx_s3_path)
+    print('')
+    check_fsx_s3_path = s3_client.list_objects_v2(
+        Bucket=fsx_s3_bucket,
+        Prefix=fsx_s3_path
+        )
+    check_fsx_s3_object_count = jq('.KeyCount').transform(text=json.dumps(check_fsx_s3_path, default=str), text_output=True)
+    if int(check_fsx_s3_object_count) == 0:
+        error_msg = 'Please ensure s3://' + fsx_s3_bucket + '/' + fsx_s3_path + ' exists!'
+        refer_to_docs_and_quit(error_msg)
+    else:
+        p_val('fsx_s3_bucket', debug_mode)
+        p_val('fsx_s3_path', debug_mode)
+
+# Check to ensure the Lustre volume size is divisible by 3600.
+
+if enable_fsx == 'true':
+    if fsx_size%3600 == 0:
+        p_val('fsx_size', debug_mode)
+    else:
+        error_msg='fsx_size must be divisible by 3600!'
+        refer_to_docs_and_quit(error_msg)
+
+# Perform error checking and validation on fsx_chunk_size, which should range
+# between 1,024 MB (1 GB) and 512,000 MB (500 GB).
+
+if (int(fsx_chunk_size) > 528000) or (int(fsx_chunk_size) < 1024):
+    error_msg = 'fsx_chunk_size must be between 1,024 MB (1 GB) and 528,000 MB (528 GB)!'
+    refer_to_docs_and_quit(error_msg)
+else:
+    if enable_fsx_hydration == 'true':
+        p_val('fsx_chunk_size', debug_mode)
+
 # Provide a mechanism to ensure ebs_optimized is appropriately set for the EC2
 # instance being deployed.
 
@@ -352,10 +361,6 @@ if ebs_root_volume_type == 'io1':
     if (ebs_root_volume_iops == 0) or (ebs_root_volume_iops > 16000):
         error_msg='ebs_root_volume_iops must be set to a value between 100 and 16,000!'
         refer_to_docs_and_quit(error_msg)
-
-# Define a boto3 client to interact with EC2.
-
-ec2_client = boto3.client('ec2', region_name = region)
 
 # Print a friendly reminder that spot is cheaper than ondemand to the console
 # if ondemand instances were chosen.  If using spot instances, add spot_price
@@ -422,11 +427,6 @@ for vpc in vpc_information["Vpcs"]:
         error_msg=vpc_id + ' (' + az + ') lacks a valid Name tag!'
         refer_to_docs_and_quit(error_msg)
     p_val('vpc_name', debug_mode)
-
-# Create a boto3 client and resource for EC2.
-
-ec2_client = boto3.client('ec2', region_name = region)
-ec2 = boto3.resource('ec2', region_name = region)
 
 # If the user fails to supply a valid security_group, create a new default 
 # EC2 security group that permits only inbound SSH (Linux) or RDP (Windows)
@@ -538,10 +538,6 @@ else:
     if debug_mode == 'true':
         print('')
     p_val('ec2_keypair', debug_mode)
-
-# Create a boto3 client to interact with IAM.
-
-iam = boto3.client('iam')
 
 # Create and apply an IAM EC2 instance profile from the default template if
 # iam_role was not defined by the operator.  All IAM resources created as part
@@ -668,7 +664,6 @@ if turbot_account != 'DISABLED':
 # Generate a unique SNS topic name for important EC2 events involving this 
 # instance and subscribe instance_owner_email.
 
-sns_client = boto3.client('sns')
 sns_topic_name = 'Ec2_Instance_SNS_Alerts_' + str(instance_serial_number)
 sns_topic = sns_client.create_topic(Name=sns_topic_name)
 sns_topic_arn = sns_topic['TopicArn']
