@@ -81,13 +81,13 @@ parser.add_argument('--iam_json_policy', '-J', help='Use a pre-existing JSON pol
 parser.add_argument('--iam_role', help='Apply a pre-existing IAM role to the instance', required=False, default='UNDEFINED')
 parser.add_argument('--instance_owner_department', choices=['analytics', 'clinical', 'commercial', 'compbio', 'compchem', 'datasci', 'design', 'development', 'hpc', 'imaging', 'manufacturing', 'medical', 'modeling', 'operations', 'proteomics', 'robotics', 'qa', 'research', 'scicomp'], help='Department of the instance_owner (default = hpc)', required=False, default='hpc')
 parser.add_argument('--request_type', choices=['ondemand', 'spot'], help='choose between ondemand or spot instances (default = ondemand)', required=False, default='ondemand')
-parser.add_argument('--instance_type', '-I', help='EC2 instance type (default = t2.micro)', required=False, default='t2.micro')
+parser.add_argument('--instance_type', '-T', help='EC2 instance type (default = t2.micro)', required=False, default='t2.micro')
 parser.add_argument('--prod_level', choices=['dev', 'test', 'stage', 'prod'], help='Operating stage of the jumphost  (default = dev)', required=False, default='dev')
 parser.add_argument('--preserve_efs', choices=['true', 'false'], help='Preserve the Elastic File System (EFS) created with the instance(s) (default = false)', required=False, default='false')
 parser.add_argument('--project_id', '-P', help='Project name or ID number (default = UNDEFINED)', required=False, default='UNDEFINED')
 parser.add_argument('--security_group', '-S', help='Primary security group for the EC2 instance (default = generic_ec2_sg)', required=False, default='generic_ec2_sg')
 parser.add_argument('--spot_buffer', help='pricing buffer to protect from Spot market fluctuations: spot_price = spot_price + spot_price*spot_buffer', type=float, required=False, default=round((1/pi), 8))
-parser.add_argument('--turbot_account', '-T', help='Turbot account ID (default = DISABLED)', required=False, default='DISABLED')
+parser.add_argument('--turbot_account', help='Turbot account ID (default = DISABLED)', required=False, default='DISABLED')
 
 # Create variables from optional instance_parameters provided via command line.
 
@@ -371,7 +371,8 @@ if ebs_root_volume_type == 'io1':
 # Default value of spot_buffer = 1/pi 
 
 if request_type == 'ondemand':
-    print("Selecting: ondemand (NOTE: spot instances are *MUCH* cheaper!)")
+    print('')
+    print("Selected: ondemand (NOTE: spot instances are **MUCH** cheaper!)")
     spot_price = 'UNDEFINED'
     try:
         spot_price = spot_price * spot_buffer
@@ -389,7 +390,8 @@ if request_type == 'spot':
     p_val('spot_price_raw', debug_mode)
     p_val('spot_price_buffer', debug_mode)
     p_val('spot_price', debug_mode)
-    print('Selecting: spot instances @ $' + str(spot_price) + '/hr')
+    print('')
+    print('Setting spot_price: $' + str(spot_price) + '/hr')
 print('')
 
 # Parse the AWS Account ID.

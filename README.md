@@ -712,5 +712,9 @@ version.
   * ubuntu1404 does not seem to support building the native Debian package of
 amazon-efs-utils.
 
-EFS encryption in transit for these operating systems may be provided in a 
+  * EFS encryption in transit for these operating systems may be provided in a 
 subsequent feature release.
+
+* If the instance(s) cannot be built due to a lack of spot capacity, Terraform
+will return a "capacity-not-available" error.  To resolve this, try increasing
+the spot_buffer or using ondemand instead.
