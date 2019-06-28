@@ -4,7 +4,7 @@
 # Name:         make-instance.py
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   June 3, 2019
-# Last Changed: June 26, 2019
+# Last Changed: June 28, 2019
 # Purpose:      Generic command-line EC2 instance creator
 ################################################################################
 
@@ -373,6 +373,12 @@ if ebs_root_volume_type == 'io1':
 if request_type == 'ondemand':
     print("Selecting: ondemand (NOTE: spot instances are *MUCH* cheaper!)")
     spot_price = 'UNDEFINED'
+    try:
+        spot_price = spot_price * spot_buffer
+    except (TypeError):
+        print('')
+        error_msg = 'spot_buffer has no effect when using ondemand instances!'
+        refer_to_docs_and_quit(error_msg)
 if request_type == 'spot':
     if base_os == 'windows2019':
         prices=ec2_client.describe_spot_price_history(InstanceTypes=[instance_type],MaxResults=1,ProductDescriptions=['Windows'],AvailabilityZone=az)
