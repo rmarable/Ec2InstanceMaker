@@ -2,7 +2,7 @@
 # Name:		aux_data.py
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	June 3, 2019
-# Last Changed:	June 26, 2019
+# Last Changed:	July 1, 2019
 # Purpose:	Data structures and functions to support Ec2InstanceMaker
 ################################################################################
 
@@ -18,6 +18,28 @@ def add_inbound_security_group_rule(region, sec_grp, protocol, cidr, psource, pd
         FromPort=psource,
         ToPort=pdest
     )
+
+# Function: base_os_instance_check()
+# Purpose: verify the selected EC2 instance_type is supported by base_os
+
+def base_os_instance_check(base_os, instance_type, debug_mode):
+    base_os_list = 'ec2_unsupported_' + base_os
+    ec2_instance_list_check(instance_type, base_os_list, base_os, debug_mode)
+    p_val('base_os', debug_mode)
+    p_val('instance_type', debug_mode)
+
+# Function: check_ec2_instance()
+# Purpose: verify the instance_type is a member of the instance_list
+
+def ec2_instance_list_check(instance_type, instance_list, feature, debug_mode):
+    for item in instance_list:
+        if item in instance_list:
+            supported = True
+    if supported:
+        pass
+    else:
+        error_msg = instance_type + ' does not support ' + feature + '!'
+        refer_to_docs_and_quit(error_msg)
 
 # Function: get_ami_info()
 # Purpose: get the ID of an AWS AMI image
@@ -348,68 +370,47 @@ def time_waiter(duration, interval):
 # of valid types from the EC2 public documentation.                            #
 ################################################################################
 
-# EC2 instance definitions:
-# EBS Optimized
+# EBS Optimized Instances
 
 ec2_instances_ebs_optimized = ['c4.large', 'c4.xlarge', 'c4.2xlarge', 'c4.4xlarge', 'c4.8xlarge', 'c5.large', 'c5.xlarge', 'c5.2xlarge', 'c5.4xlarge', 'c5.9xlarge', 'c5.18xlarge', 'c5d.large', 'c5d.xlarge', 'c5d.2xlarge', 'c5d.4xlarge', 'c5d.9xlarge', 'c5d.18xlarge', 'd2.xlarge', 'd2.2xlarge', 'd2.4xlarge', 'd2.8xlarge', 'f1.2xlarge', 'f1.16xlarge', 'g3.4xlarge', 'g3.8xlarge', 'g3.16xlarge', 'h1.2xlarge', 'h1.4xlarge', 'h1.8xlarge', 'h1.16xlarge', 'i3.large', 'i3.xlarge', 'i3.2xlarge', 'i3.4xlarge', 'i3.8xlarge', 'i3.16xlarge', 'i3.metal', 'm4.large', 'm4.xlarge', 'm4.2xlarge', 'm4.4xlarge', 'm4.10xlarge', 'm4.16xlarge', 'm5.large', 'm5.xlarge', 'm5.2xlarge', 'm5.4xlarge', 'm5.12xlarge', 'm5.24xlarge', 'm5d.large', 'm5d.xlarge', 'm5d.2xlarge', 'm5d.4xlarge', 'm5d.12xlarge', 'm5d.24xlarge', 'p2.xlarge', 'p2.8xlarge', 'p2.16xlarge', 'p3.2xlarge', 'p3.8xlarge', 'p3.16xlarge', 'r4.large', 'r4.xlarge', 'r4.2xlarge', 'r4.4xlarge', 'r4.8xlarge', 'r4.16xlarge', 'x1.16xlarge', 'x1.32xlarge', 'x1e.xlarge', 'x1e.2xlarge', 'x1e.4xlarge', 'x1e.8xlarge', 'x1e.16xlarge', 'x1e.32xlarge']
 
-# EC2 instance definitions:
-# General Purpose
+# General Purpose Instances
 
 ec2_instances_general_purpose = ['a1.medium', 'a1.large', 'a1.xlarge', 'a1.2xlarge', 'a1.4xlarge', 't2.nano', 't2.micro', 't2.small', 't2.medium', 't2.large', 't2.xlarge', 't2.2xlarge', 't3.nano', 't3.micro', 't3.small', 't3.medium', 't3.large', 't3.xlarge', 't3.2xlarge', 't3a.nano', 't3a.micro', 't3a.small', 't3a.medium', 't3a.large', 't3a.xlarge', 't3a.2xlarge', 'm4.large', 'm4.xlarge', 'm4.2xlarge', 'm4.4xlarge', 'm4.10xlarge', 'm4.16xlarge', 'm5.large', 'm5.xlarge', 'm5.2xlarge', 'm5.4xlarge', 'm5.12xlarge', 'm5.24xlarge', 'm5d.large', 'm5d.xlarge', 'm5d.2xlarge', 'm5d.4xlarge', 'm5d.12xlarge', 'm5d.24xlarge', 'm5a.large', 'm5a.xlarge', 'm5a.2xlarge', 'm5a.4xlarge', 'm5a.12xlarge', 'm5a.24xlarge', 'm5ad.large', 'm5ad.xlarge', 'm5ad.2xlarge', 'm5ad.4xlarge', 'm5ad.12xlarge', 'm5ad.24xlarge']
 
-# EC2 instance definitions:
-# Compute Optimized
+# Compute Optimized Instances
 
 ec2_instances_compute_optimized = ['c4.large', 'c4.xlarge', 'c4.2xlarge', 'c4.4xlarge', 'c4.8xlarge', 'c5.large', 'c5.xlarge', 'c5.2xlarge', 'c5.4xlarge', 'c5.9xlarge', 'c5.18xlarge', 'c5d.xlarge', 'c5d.2xlarge', 'c5d.4xlarge', 'c5d.9xlarge', 'c5d.18xlarge', 'c5n.18xlarge']
 
-# EC2 instance definitions:
-# Memory Optimized
+# Memory Optimized Instances
 
 ec2_instances_memory_optimized = ['r4.large', 'r4.xlarge', 'r4.2xlarge', 'r4.4xlarge', 'r4.8xlarge', 'r4.16xlarge', 'r5.large', 'r5.xlarge', 'r5.2xlarge', 'r5.4xlarge', 'r5.12xlarge', 'r5.24xlarge', 'r5.metal', 'r5d.large', 'r5d.xlarge', 'r5d.2xlarge', 'r5d.4xlarge', 'r5d.12xlarge', 'r5d.24xlarge', 'r5d.metal', 'r5a.large', 'r5a.xlarge', 'r5a.2xlarge', 'r5a.4xlarge', 'r5a.12xlarge', 'r5a.24xlarge', 'r5ad.large', 'r5ad.xlarge', 'r5ad.2xlarge', 'r5ad.4xlarge', 'r5ad.12xlarge', 'r5ad.24xlarge', 'x1.16xlarge', 'x1.32xlarge', 'x1e.xlarge', 'x1e.2xlarge', 'x1e.4xlarge', 'x1e.8xlarge', 'x1e.16xlarge', 'x1e.32xlarge', 'z1d.large', 'z1d.xlarge', 'z1d.2xlarge', 'z1d.3xlarge', 'z1d.6xlarge', 'z1d.12xlarge', 'z1d.metal']
 
-# EC2 instance definitions:
-# High Memory
+# High Memory Instances
 
 ec2_instances_high_memory = ['u-6tb1.metal', 'u-9tb1.metal', 'u-12tb1.metal']
 
-# EC2 instance definitions:
-# Storage Optimized
+# Storage Optimized Instances
 
 ec2_instances_storage_optimized = ['d2.xlarge', 'd2.2xlarge', 'd2.4xlarge', 'd2.8xlarge', 'h1.2xlarge', 'h1.4xlarge', 'h1.8xlarge', 'h1.16xlarge', 'i3.large', 'i3.xlarge', 'i3.2xlarge', 'i3.4xlarge', 'i3.8xlarge', 'i3.16xlarge', 'i3.metal']
 
-# EC2 instance definitions:
-# Accelerated Computing
+# Accelerated Computing Instances
 
 ec2_instances_accelerated_computing = ['f1.2xlarge', 'f1.4x.large', 'f1.16xlarge', 'g3s.xlarge', 'g3.4xlarge', 'g3.8xlarge', 'g3.16xlarge', 'p2.xlarge', 'p2.8xlarge', 'p2.16xlarge', 'p3.2xlarge', 'p3.8xlarge', 'p3.16xlarge', 'p3dn.24xlarge']
 
-# EC2 instance definitions:
 # Full list of supported instance types
 
 ec2_instances_full_list = ec2_instances_general_purpose + ec2_instances_compute_optimized + ec2_instances_memory_optimized + ec2_instances_high_memory + ec2_instances_storage_optimized + ec2_instances_accelerated_computing
 
-# Function: base_os_instance_check()
-# Purpose: verify the selected EC2 instance_type is supported by base_os
+# Instances that support EC2 Placement Groups
 
-def base_os_instance_check(base_os, instance_type, debug_mode):
-    if base_os == 'centos6' and ('t3' or 'm5' or 'a1.' or 'c5.' or 'f1.4xlarge' or 'g3s.xlarge' or 'p3' or 'r5' or 'x1e.' or 'z1d.' or 'h1.' or 'i3.metal' or 'i3en.') in instance_type:
-        error_msg = base_os + ' does not support EC2 instance type ' + instance_type + '!'
-        refer_to_docs_and_quit(error_msg)
-    elif base_os == 'centos7' and ('m5metal.' or 'a1.' or 'p3dn.24xlarge' or 'r5d.24xlarge' or 'r5d.metal' or 'r5.metal' or 'x1e.' or 'h1.' or 'i3en.') in instance_type:
-        error_msg = base_os + ' does not support EC2 instance type ' + instance_type + '!'
-        refer_to_docs_and_quit(error_msg)
-    elif base_os == 'ubuntu1404' and ('t1.' or 't3a.' or 'm5a' or 'm5d.' or 'm5.metal' or 'm1.' or 'a1.' or 'c5n.' or 'c5d.' or 'c1.' or 'f1.4xlarge' or 'p3dn.24xlarge' or 'r5' or 'm2.' or 'z1d.' or 'i3.metal' or 'i3en.') in instance_type:
-        error_msg = base_os + ' does not support EC2 instance type ' + instance_type + '!'
-        refer_to_docs_and_quit(error_msg)
-    elif base_os == 'ubuntu1604' and ('t1.' or 't3a.' or 'm5a' or 'm5d.metal' or 'm5.metal' or 'm1.' or 'a1.' or 'c1.' or 'r5ad.' or 'r5d.24xlarge' or 'r5d.metal' or 'r5.metal' or 'm2.' or 'z1d.metal' or 'i3en.') in instance_type:
-        error_msg = base_os + ' does not support EC2 instance type ' + instance_type + '!'
-        refer_to_docs_and_quit(error_msg)
-    elif base_os == 'ubuntu1804' and ('t1.' or 't3a.' or 'm5ad' or 'm5d.metal' or 'm5.metal' or 'm1.' or 'a1.' or 'c1.' or 'cc2.8xlarge' or 'r5ad.' or 'r5d.24xlarge' or 'm2.' or 'i3en.') in instance_type:
-        error_msg = base_os + ' does not support EC2 instance type ' + instance_type + '!'
-        refer_to_docs_and_quit(error_msg)
-    elif base_os == 'windows2019' and ('a1.' or 'f1.') in instance_type:
-        error_msg = base_os + ' does not support EC2 instance type ' + instance_type + '!'
-        refer_to_docs_and_quit(error_msg)
-    else:
-        p_val('base_os', debug_mode)
-        p_val('instance_type', debug_mode)
+ec2_instances_placement_groups = ['a1.', 'm4.', 'm5.', 'c3.', 'c4.', 'c5.', 'cr1.8xlarge', 'r3.', 'r4.', 'r5.', 'x1.', 'x1e.', 'z1d.', 'd2.', 'h1.', 'hs1.8xlarge', 'i2.', 'i3.', 'i3en.', 'f1.', 'g2.', 'g3.', 'p2.', 'p3']
+
+# Unsupported instance types by operating system
+
+ec2_unsupported_centos6 = ['t3.', 'm5.', 'a1.', 'c5.', 'f1.4xlarge', 'g3s.xlarge', 'p3.', 'r5.', 'x1e.', 'z1d.', 'h1.', 'i3.metal', 'i3en.']
+ec2_unsupported_centos7 = ['m5metal.', 'a1.', 'p3dn.24xlarge', 'r5d.24xlarge', 'r5d.metal', 'r5.metal', 'x1e.', 'h1.', 'i3en.']
+ec2_unsupported_ubuntu1404 = ['t1.', 't3a.', 'm5a.', 'm5d.', 'm5.metal', 'm1.', 'a1.', 'c5n.', 'c5d.', 'c1.', 'f1.4xlarge', 'p3dn.24xlarge', 'r5.', 'm2.', 'z1d.', 'i3.metal', 'i3en.']
+ec2_unsupported_ubuntu1604 = ['t1.', 't3a.', 'm5a.', 'm5d.metal', 'm5.metal', 'm1.', 'a1.', 'c1.', 'r5.ad.', 'r5.d.24xlarge', 'r5.d.metal', 'r5..metal', 'm2.', 'z1d.metal', 'i3en.']
+ec2_unsupported_ubuntu1804 = ['t1.', 't3a.', 'm5a.d', 'm5d.metal', 'm5.metal', 'm1.', 'a1.', 'c1.', 'cc2.8xlarge', 'r5.ad.', 'r5.d.24xlarge', 'm2.', 'i3en.']
+ec2_unsupported_windows2019 = ['a1.', 'f1.']

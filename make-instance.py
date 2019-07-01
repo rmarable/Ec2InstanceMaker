@@ -35,6 +35,14 @@ from aux_data import check_custom_ami
 from aux_data import ctrlC_Abort
 from aux_data import ec2_instances_ebs_optimized
 from aux_data import ec2_instances_full_list
+from aux_data import ec2_instance_list_check
+from aux_data import ec2_instances_placement_groups
+from aux_data import ec2_unsupported_centos6
+from aux_data import ec2_unsupported_centos7
+from aux_data import ec2_unsupported_ubuntu1404
+from aux_data import ec2_unsupported_ubuntu1404
+from aux_data import ec2_unsupported_ubuntu1804
+from aux_data import ec2_unsupported_windows2019
 from aux_data import get_ami_info
 from aux_data import illegal_az_msg
 from aux_data import base_os_instance_check
@@ -70,6 +78,7 @@ parser.add_argument('--ebs_root_volume_type', choices=['gp2', 'io1', 'st1'], hel
 parser.add_argument('--efs_encryption', choices=['true', 'false'], help='enable EFS encryption in transit and at rest (default = false)', required=False, default='false')
 parser.add_argument('--efs_performance_mode', choices=['generalPurpose', 'maxIO'], help='select the EFS performance mode (default = generalPurpose)', required=False, default='generalPurpose')
 parser.add_argument('--enable_efs', choices=['true', 'false'], help='Deploy and mount an Elastic File System (EFS) on the instance(s) (default = false)', required=False, default='false')
+parser.add_argument('--enable_placement_group', '--enable_pg', choices=['true', 'false'], help='Place the new instances in an EC2 placement group using the "cluster" strategy (default = false)', required=False, default='false')
 parser.add_argument('--enable_fsx', choices=['true', 'false'], help='Deploy and mount a Lustre (FSxL) file system on the instance(s) (default = false)', required=False, default='false')
 parser.add_argument('--enable_fsx_hydration', choices=['true', 'false'], help='enable support for hydrating FSxL from S3 (default = false)', required=False, default='false')
 parser.add_argument('--fsx_chunk_size', help='Chunk size (MB) of S3 objects imported into Lustre (default = 1024)', required=False, type=int, default=1024)
@@ -83,6 +92,7 @@ parser.add_argument('--instance_owner_department', choices=['analytics', 'clinic
 parser.add_argument('--request_type', choices=['ondemand', 'spot'], help='choose between ondemand or spot instances (default = ondemand)', required=False, default='ondemand')
 parser.add_argument('--instance_type', '-T', help='EC2 instance type (default = t2.micro)', required=False, default='t2.micro')
 parser.add_argument('--prod_level', choices=['dev', 'test', 'stage', 'prod'], help='Operating stage of the jumphost  (default = dev)', required=False, default='dev')
+parser.add_argument('--placement_group_strategy', '--pg_strategy', choices=['cluster', 'spread'], help='Designate an EC2 placement group strategy (default = cluster)', required=False, default='cluster')
 parser.add_argument('--preserve_efs', choices=['true', 'false'], help='Preserve the Elastic File System (EFS) created with the instance(s) (default = false)', required=False, default='false')
 parser.add_argument('--project_id', '-P', help='Project name or ID number (default = UNDEFINED)', required=False, default='UNDEFINED')
 parser.add_argument('--security_group', '-S', help='Primary security group for the EC2 instance (default = generic_ec2_sg)', required=False, default='generic_ec2_sg')
@@ -108,6 +118,7 @@ efs_performance_mode = args.efs_performance_mode
 enable_efs = args.enable_efs
 enable_fsx = args.enable_fsx
 enable_fsx_hydration = args.enable_fsx_hydration
+enable_placement_group = args.enable_placement_group
 fsx_s3_bucket = args.fsx_s3_bucket
 fsx_s3_path = args.fsx_s3_path
 fsx_chunk_size = args.fsx_chunk_size
@@ -121,6 +132,7 @@ instance_owner_department = args.instance_owner_department
 instance_owner_email = args.instance_owner_email
 request_type = args.request_type
 instance_type = args.instance_type
+placement_group_strategy = args.placement_group_strategy
 preserve_efs = args.preserve_efs
 prod_level = args.prod_level
 project_id = args.project_id
@@ -374,12 +386,7 @@ if request_type == 'ondemand':
     print('')
     print("Selected: ondemand (NOTE: spot instances are **MUCH** cheaper!)")
     spot_price = 'UNDEFINED'
-    try:
-        spot_price = spot_price * spot_buffer
-    except (TypeError):
-        print('')
-        error_msg = 'spot_buffer has no effect when using ondemand instances!'
-        refer_to_docs_and_quit(error_msg)
+    spot_buffer = 'UNDEFINED'
 if request_type == 'spot':
     if base_os == 'windows2019':
         prices=ec2_client.describe_spot_price_history(InstanceTypes=[instance_type],MaxResults=1,ProductDescriptions=['Windows'],AvailabilityZone=az)
@@ -393,6 +400,24 @@ if request_type == 'spot':
     print('')
     print('Setting spot_price: $' + str(spot_price) + '/hr')
 print('')
+
+# Determine if the instances should be placed in an EC2 placement group.
+# Abort if the user attempts to put a single instance in a placement group.
+# Partition spread groups are not yet supported by Terraform for some reason.
+
+if enable_placement_group == 'true':
+    if count == 1:
+        error_msg = 'Using placement groups requires deploying more than a single instance!'
+        refer_to_docs_and_quit(error_msg)
+    else:
+        ec2_instance_list_check(instance_type, ec2_instances_placement_groups, 'EC2 Placement Groups', debug_mode)
+        print('Enabling: EC2 Placement Group')
+        print('Strategy: ' + placement_group_strategy)
+        print('')
+        if debug_mode == 'true':
+            p_val('placement_group_strategy', debug_mode)
+else:
+    placement_group_strategy = 'UNDEFINED'
 
 # Parse the AWS Account ID.
 
@@ -723,6 +748,7 @@ instance_parameters = {
     'enable_fsx': enable_fsx,
     'fsx_size': fsx_size,
     'enable_fsx_hydration': enable_fsx_hydration,
+    'enable_placement_group': enable_placement_group,
     'fsx_s3_bucket': fsx_s3_bucket,
     'fsx_s3_path': fsx_s3_path,
     'fsx_chunk_size': fsx_chunk_size,
@@ -735,6 +761,7 @@ instance_parameters = {
     'request_type': request_type,
     'instance_serial_number': instance_serial_number,
     'instance_serial_number_file': instance_serial_number_file,
+    'placement_group_strategy': placement_group_strategy,
     'preserve_efs': preserve_efs,
     'prod_level': prod_level,
     'project_id': project_id,
@@ -786,11 +813,15 @@ if debug_mode == 'true':
         print('efs_performance_mode = ' + efs_performance_mode)
         print('preserve_efs = ' + preserve_efs)
     if enable_fsx == 'true':
+        print('enable_fsx=' + enable_fsx)
         print('fsx_size=' + fsx_size)
         print('enable_fsx_hydration=' + enable_fsx_hydration)
         print('fsx_s3_bucket=' + fsx_s3_bucket)
         print('fsx_s3_path=' + fsx_s3_path)
         print('fsx_chunk_size=' + fsx_chunk_size)
+    if enable_placement_group == 'true':
+        print('enable_placement_group = ' + enable_placement_group)
+        print('placement_group_strategy = ' + placement_group_strategy)
     print('hyperthreading = ' + hyperthreading)
     print('instance_name = ' + instance_name)
     print('instance_owner = ' + instance_owner)
@@ -828,7 +859,7 @@ vars_file_main_part = '''\
 # Name:    	{instance_name}.yml
 # Author:  	Rodney Marable <rodney.marable@gmail.com>
 # Created On:   June 3, 2019
-# Last Changed: June 22, 2019
+# Last Changed: July 1, 2019
 # Deployed On:  {DEPLOYMENT_DATE}
 # Purpose: 	Build template auto-generated by Ec2InstanceMaker
 ################################################################################
@@ -894,6 +925,8 @@ ebs_root_volume_iops: {ebs_root_volume_iops}
 # AWS networking
 
 az: {az}
+enable_placement_group: {enable_placement_group}
+placement_group_strategy: {placement_group_strategy}
 region: {region}
 security_group: {security_group}
 subnet_id: {subnet_id}
@@ -984,7 +1017,7 @@ if count == 1:
 else:
     print('Generating templates for instance family ' + instance_name + '...')
 
-cmd_string = 'ansible-playbook --extra-vars \"instance_name=' + instance_name + ' instance_serial_number=' + instance_serial_number + ' turbot_account=' + turbot_account + ' enable_efs=' + enable_efs + ' efs_encryption=' + efs_encryption + ' preserve_efs=' + preserve_efs + ' enable_fsx=' + enable_fsx + ' enable_fsx_hydration=' + enable_fsx_hydration + ' fsx_s3_bucket=' + fsx_s3_bucket + ' fsx_s3_path=' + fsx_s3_path + '\" create_instance_terraform_templates.yml ' + ansible_verbosity
+cmd_string = 'ansible-playbook --extra-vars \"instance_name=' + instance_name + ' instance_serial_number=' + instance_serial_number + ' turbot_account=' + turbot_account + ' enable_efs=' + enable_efs + ' efs_encryption=' + efs_encryption + ' preserve_efs=' + preserve_efs + ' enable_placement_group=' + enable_placement_group + ' placement_group_strategy=' + placement_group_strategy + ' enable_fsx=' + enable_fsx + ' enable_fsx_hydration=' + enable_fsx_hydration + ' fsx_s3_bucket=' + fsx_s3_bucket + ' fsx_s3_path=' + fsx_s3_path + '\" create_instance_terraform_templates.yml ' + ansible_verbosity
 
 print(cmd_string, file=open(instance_serial_number_file, "a"))
 
@@ -1099,7 +1132,7 @@ if 'windows2019' not in base_os:
         print('Access the new ' + base_os + ' instance via SSH:')
         print('$ ./access_instance.py -N ' + instance_name)
     else:
-        print('Access the ' + count + ' members of the instance' + base_os + ' instance family via SSH:')
+        print('Access the ' + str(count) + ' members of the instance' + base_os + ' instance family via SSH:')
         print('$ ./access_instance.py -N ' + instance_name)
 
 # If base_os is Windows:

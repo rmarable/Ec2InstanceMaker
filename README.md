@@ -96,6 +96,9 @@ guidance on enabling EBS root volume encryption.
 * Deployment of EC2 Spot instances with a adjustable price buffer to help
 prevent terminations caused by Spot market fluctuations.
 
+* Deployment of instance families into EC2 placement groups utilizing the
+"cluster" strategy.
+
 * Variable EBS root volume sizes up to 16 TB.
 
 * Automatic application of EBS optimization for supported instance types.
@@ -217,6 +220,7 @@ usage: make-instance.py [-h] --az AZ --instance_name INSTANCE_NAME
                         [--enable_efs {true,false}]
                         [--enable_fsx {true,false}]
                         [--enable_fsx_hydration {true,false}]
+                        [--enable_placement_group {true,false}]
                         [--fsx_chunk_size FSX_CHUNK_SIZE]
                         [--fsx_size FSX_SIZE] [--fsx_s3_bucket FSX_S3_BUCKET]
                         [--fsx_s3_path FSX_S3_PATH]
@@ -285,6 +289,9 @@ optional arguments:
   --enable_fsx_hydration {true,false}
                         enable support for hydrating FSxL from S3 (default =
                         false)
+  --enable_placement_group {true,false}
+                        Place the new instances in an EC2 placement group
+                        using the "cluster" strategy (default = false)
   --fsx_chunk_size FSX_CHUNK_SIZE
                         Chunk size (MB) of S3 objects imported into Lustre
                         (default = 1024)
@@ -630,6 +637,20 @@ https://docs.aws.amazon.com/fsx/latest/LustreGuide/fsx-data-repositories.html
 
 Support for attaching FSx for Windows file systems to EC2 instances running
 Windows Server 2019 may be provided in a future release.
+
+## EC2 Placement Groups
+
+Ec2InstanceMaker supports the use of EC2 placement groups by setting
+`--enable_placement_group=true`.  The strategies supported currently are
+"cluster' and "spread."  Future releases will support "partition" placement
+groups with additional control over the number of allowed partitions through
+command line switches.
+
+The placement group will be named "ec2pg-$INSTANCE_SERIAL_NUMBER" and is tied
+to the instance life cycle.
+
+The script will abort if the operator attempts to place a single instance into
+a placement group.
 
 ## Troubleshooting
 
