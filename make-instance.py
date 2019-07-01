@@ -63,7 +63,7 @@ parser.add_argument('--instance_name', '-N', help='name of the instance (REQUIRE
 parser.add_argument('--instance_owner', '-O', help='ActiveDirectory username of the instance instance_owner (REQUIRED)', required=True)
 parser.add_argument('--instance_owner_email', '-E', help='Email address of the instance instance_owner (REQUIRED)', required=True)
 
-# Configure arguments for the optional parameters.
+# Parse values for the optional parameters from the commnand linue.
 
 parser.add_argument('--ansible_verbosity', '-V', help='Set the Ansible verbosity level (default = none)', required=False, default='')
 parser.add_argument('--base_os', '-B', choices=['alinux', 'alinux2', 'centos6', 'centos7', 'ubuntu1404', 'ubuntu1604', 'ubuntu1804', 'windows2019'], help='instance base operating system (default = alinux2 a.k.a. Amazon Linux 2)', required=False, default='alinux2')
@@ -99,7 +99,8 @@ parser.add_argument('--security_group', '-S', help='Primary security group for t
 parser.add_argument('--spot_buffer', help='pricing buffer to protect from Spot market fluctuations: spot_price = spot_price + spot_price*spot_buffer', type=float, required=False, default=round((1/pi), 8))
 parser.add_argument('--turbot_account', help='Turbot account ID (default = DISABLED)', required=False, default='DISABLED')
 
-# Create variables from optional instance_parameters provided via command line.
+# Create variables from the optional instance parameter values provided from
+# the command line.
 
 args = parser.parse_args()
 ansible_verbosity = args.ansible_verbosity
@@ -197,7 +198,7 @@ except OSError as e:
     if e.errno != errno.EEXIST:
         raise
 
-# Check for the presence of an existing vars_file for this instance.
+# Check for the presence of an existing vars_file for the instance.
 # If an existing vars_file exists, abort to prevent potential duplications.
 
 if os.path.isfile(vars_file_path):
@@ -219,7 +220,7 @@ else:
         print('Performing parameter validation...')
     p_val('vars_file_path', debug_mode)
 
-# Define a local state directory for this instance.
+# Define a local state directory for the instance.
 
 instance_data_dir = './instance_data/' + instance_name + '/'
 try:
@@ -228,7 +229,7 @@ except OSError as e:
     if e.errno != errno.EEXIST:
         raise
 
-# Generate a unique instance_serial_number for tracking purposes.
+# Generate a unique instance_serial_number for the instance.
 
 DEPLOYMENT_DATE = time.strftime("%B %-d, %Y")
 DEPLOYMENT_DATE_TAG = time.strftime("%-d-%B-%Y")
@@ -272,7 +273,7 @@ ec2 = boto3.resource('ec2', region_name = region)
 
 iam = boto3.client('iam')
 
-# Create a boto3 resource and client for communication with S3.
+# Create a boto3 resource and client to interact with S3.
 
 s3 = boto3.resource('s3')
 s3_client = boto3.client('s3')
@@ -377,10 +378,11 @@ if ebs_root_volume_type == 'io1':
 # Print a friendly reminder that spot is cheaper than ondemand to the console
 # if ondemand instances were chosen.  If using spot instances, add spot_price
 # to spot_buffer to protect against market fluctuations:
+#
 # spot_price = spot_price * spot_buffer, rounded off to 8 decimal places.
+# Default value of spot_buffer = 1/pi 
 #
 # Current AWS spot instance prices: https://aws.amazon.com/ec2/spot/pricing/
-# Default value of spot_buffer = 1/pi 
 
 if request_type == 'ondemand':
     print('')
@@ -694,7 +696,7 @@ if turbot_account != 'DISABLED':
     os.environ['AWS_DEFAULT_REGION'] = region
     boto3.setup_default_session(profile_name=turbot_profile)
 
-# Generate a unique SNS topic name for important EC2 events involving this 
+# Generate a unique SNS topic name for important EC2 events involving the
 # instance and subscribe instance_owner_email.
 
 sns_topic_name = 'Ec2_Instance_SNS_Alerts_' + str(instance_serial_number)
@@ -1032,7 +1034,7 @@ if debug_mode == 'false':
 else:
     ctrlC_Abort(30, 80, vars_file_path, instance_data_dir, instance_serial_number_file, instance_serial_number, region, security_group_name, vpc_security_group_ids)
 
-# Set up a boto3 client for FSx interactions.
+# Set up a boto3 client for Lustre interactions.
 
 fsx_client = boto3.client('fsx', region_name = region)
 
@@ -1085,7 +1087,7 @@ if enable_fsx == 'true':
         LustreConfiguration=Lustre_Fsx_Configuration
         )
 
-# Print some interesting information to the console for operator convenience
+# Print some interesting information to the console for operator convenience.
 # Add a 60-second timer to ensure the instances don't become available before
 # the Lustre file system is mountable.
 
@@ -1099,8 +1101,7 @@ if enable_fsx == 'true':
     print('')
     print('Finished building: ' + lustre_file_system_dnsName.replace('\"', '').strip())
 
-# Create the new EC2 instances with Terraform.
-# If enable_efs=true, build the EFS file system and mount targets as well.
+# Create the new EC2 instances and supporting infrastructure with Terraform.
 
 print('Invoking Terraform to build ' + instance_name + '...')
 if debug_mode == 'true':

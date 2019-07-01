@@ -13,9 +13,9 @@
 {% if enable_placement_group == 'true' %}
 
 resource "aws_placement_group" "ec2pg-{{ instance_name }}" {
-  name            =  "ec2pg-{{ instance_serial_number }}"
-  provider        = "{{ provider }}"
-  strategy        =  "{{ placement_group_strategy }}"
+  name                      =  "ec2pg-{{ instance_serial_number }}"
+  provider                  = "{{ provider }}"
+  strategy                  =  "{{ placement_group_strategy }}"
 }
 {% endif %}
 {% if enable_efs == 'true' %}

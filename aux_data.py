@@ -41,125 +41,6 @@ def ec2_instance_list_check(instance_type, instance_list, feature, debug_mode):
         error_msg = instance_type + ' does not support ' + feature + '!'
         refer_to_docs_and_quit(error_msg)
 
-# Function: get_ami_info()
-# Purpose: get the ID of an AWS AMI image
-# Source: http://cavaliercoder.com/blog/finding-the-latest-centos-ami.html
-
-def get_ami_info(base_os, region):
-    import boto3
-    import json
-    ec2client = boto3.client('ec2', region_name = region)
-    if base_os == 'alinux2':
-        ami_information = ec2client.describe_images(
-            Owners=['137112412989'], # Amazon
-            Filters=[
-              {'Name': 'name', 'Values': ['amzn2-ami-hvm-2.0.*']},
-              {'Name': 'architecture', 'Values': ['x86_64']},
-              {'Name': 'root-device-type', 'Values': ['ebs']},
-              {'Name': 'virtualization-type', 'Values': ['hvm']},
-            ],
-        )
-        amis = sorted(ami_information['Images'],
-            key=lambda x: x['CreationDate'],
-            reverse=True)
-        aws_ami = amis[0]['ImageId']
-    if base_os == 'alinux':
-        ami_information = ec2client.describe_images(
-            Owners=['137112412989'], # Amazon
-            Filters=[
-              {'Name': 'name', 'Values': ['amzn-ami-hvm-*']},
-              {'Name': 'architecture', 'Values': ['x86_64']},
-              {'Name': 'root-device-type', 'Values': ['ebs']},
-              {'Name': 'virtualization-type', 'Values': ['hvm']},
-            ],
-        )
-        amis = sorted(ami_information['Images'],
-            key=lambda x: x['CreationDate'],
-            reverse=True)
-        aws_ami = amis[0]['ImageId']
-    if base_os == 'ubuntu1804':
-        ami_information = ec2client.describe_images(
-            Filters=[
-              {'Name': 'name', 'Values': ['ubuntu/images/hvm-ssd/ubuntu-bionic-18.04-amd64-server-*']},
-              {'Name': 'architecture', 'Values': ['x86_64']},
-              {'Name': 'root-device-type', 'Values': ['ebs']},
-              {'Name': 'virtualization-type', 'Values': ['hvm']},
-            ],
-        )
-        amis = sorted(ami_information['Images'],
-            key=lambda x: x['CreationDate'],
-            reverse=True)
-        aws_ami = amis[0]['ImageId']
-    if base_os == 'ubuntu1604':
-        ami_information = ec2client.describe_images(
-            Filters=[
-              {'Name': 'name', 'Values': ['ubuntu/images/hvm-ssd/ubuntu-xenial-16.04-amd64-server-*']},
-              {'Name': 'architecture', 'Values': ['x86_64']},
-              {'Name': 'root-device-type', 'Values': ['ebs']},
-              {'Name': 'virtualization-type', 'Values': ['hvm']},
-            ],
-        )
-        amis = sorted(ami_information['Images'],
-            key=lambda x: x['CreationDate'],
-            reverse=True)
-        aws_ami = amis[0]['ImageId']
-    if base_os == 'ubuntu1404':
-        ami_information = ec2client.describe_images(
-            Filters=[
-              {'Name': 'name', 'Values': ['ubuntu/images-testing/hvm-ssd/ubuntu-trusty-daily-amd64-server-*']},
-              {'Name': 'architecture', 'Values': ['x86_64']},
-              {'Name': 'root-device-type', 'Values': ['ebs']},
-              {'Name': 'virtualization-type', 'Values': ['hvm']},
-            ],
-        )
-        amis = sorted(ami_information['Images'],
-            key=lambda x: x['CreationDate'],
-            reverse=True)
-        aws_ami = amis[0]['ImageId']
-    if base_os == 'centos6':
-        ami_information = ec2client.describe_images(
-            Owners=['679593333241'], # CentOS
-            Filters=[
-              {'Name': 'name', 'Values': ['CentOS Linux 6 x86_64 HVM EBS *']},
-              {'Name': 'architecture', 'Values': ['x86_64']},
-              {'Name': 'root-device-type', 'Values': ['ebs']},
-              {'Name': 'virtualization-type', 'Values': ['hvm']},
-            ],
-        )
-        amis = sorted(ami_information['Images'],
-                      key=lambda x: x['CreationDate'],
-                      reverse=True)
-        aws_ami = amis[0]['ImageId']
-    if base_os == 'centos7':
-        ami_information = ec2client.describe_images(
-            Owners=['679593333241'], # CentOS
-            Filters=[
-              {'Name': 'name', 'Values': ['CentOS Linux 7 x86_64 HVM EBS *']},
-              {'Name': 'architecture', 'Values': ['x86_64']},
-              {'Name': 'root-device-type', 'Values': ['ebs']},
-              {'Name': 'virtualization-type', 'Values': ['hvm']},
-            ],
-        )
-        amis = sorted(ami_information['Images'],
-              key=lambda x: x['CreationDate'],
-              reverse=True)
-        aws_ami = amis[0]['ImageId']
-    if base_os == 'windows2019':
-        ami_information = ec2client.describe_images(
-            Owners=['801119661308'], # Windows Server 2019
-            Filters=[
-              {'Name': 'name', 'Values': ['Windows_Server-2019-English-Full-Base-*']},
-              {'Name': 'architecture', 'Values': ['x86_64']},
-              {'Name': 'root-device-type', 'Values': ['ebs']},
-              {'Name': 'virtualization-type', 'Values': ['hvm']},
-            ],
-        )
-        amis = sorted(ami_information['Images'],
-              key=lambda x: x['CreationDate'],
-              reverse=True)
-        aws_ami = amis[0]['ImageId']
-    return(aws_ami)
-
 # Function: check_custom_ami()
 # Purpose: verify the existence of a user-provided custom AMI
 
@@ -286,6 +167,125 @@ def illegal_az_msg(az):
     print('Aborting...')
     sys.exit(1)
 
+# Function: get_ami_info()
+# Purpose: get the ID of an AWS AMI image
+# Source: http://cavaliercoder.com/blog/finding-the-latest-centos-ami.html
+
+def get_ami_info(base_os, region):
+    import boto3
+    import json
+    ec2client = boto3.client('ec2', region_name = region)
+    if base_os == 'alinux2':
+        ami_information = ec2client.describe_images(
+            Owners=['137112412989'], # Amazon
+            Filters=[
+              {'Name': 'name', 'Values': ['amzn2-ami-hvm-2.0.*']},
+              {'Name': 'architecture', 'Values': ['x86_64']},
+              {'Name': 'root-device-type', 'Values': ['ebs']},
+              {'Name': 'virtualization-type', 'Values': ['hvm']},
+            ],
+        )
+        amis = sorted(ami_information['Images'],
+            key=lambda x: x['CreationDate'],
+            reverse=True)
+        aws_ami = amis[0]['ImageId']
+    if base_os == 'alinux':
+        ami_information = ec2client.describe_images(
+            Owners=['137112412989'], # Amazon
+            Filters=[
+              {'Name': 'name', 'Values': ['amzn-ami-hvm-*']},
+              {'Name': 'architecture', 'Values': ['x86_64']},
+              {'Name': 'root-device-type', 'Values': ['ebs']},
+              {'Name': 'virtualization-type', 'Values': ['hvm']},
+            ],
+        )
+        amis = sorted(ami_information['Images'],
+            key=lambda x: x['CreationDate'],
+            reverse=True)
+        aws_ami = amis[0]['ImageId']
+    if base_os == 'ubuntu1804':
+        ami_information = ec2client.describe_images(
+            Filters=[
+              {'Name': 'name', 'Values': ['ubuntu/images/hvm-ssd/ubuntu-bionic-18.04-amd64-server-*']},
+              {'Name': 'architecture', 'Values': ['x86_64']},
+              {'Name': 'root-device-type', 'Values': ['ebs']},
+              {'Name': 'virtualization-type', 'Values': ['hvm']},
+            ],
+        )
+        amis = sorted(ami_information['Images'],
+            key=lambda x: x['CreationDate'],
+            reverse=True)
+        aws_ami = amis[0]['ImageId']
+    if base_os == 'ubuntu1604':
+        ami_information = ec2client.describe_images(
+            Filters=[
+              {'Name': 'name', 'Values': ['ubuntu/images/hvm-ssd/ubuntu-xenial-16.04-amd64-server-*']},
+              {'Name': 'architecture', 'Values': ['x86_64']},
+              {'Name': 'root-device-type', 'Values': ['ebs']},
+              {'Name': 'virtualization-type', 'Values': ['hvm']},
+            ],
+        )
+        amis = sorted(ami_information['Images'],
+            key=lambda x: x['CreationDate'],
+            reverse=True)
+        aws_ami = amis[0]['ImageId']
+    if base_os == 'ubuntu1404':
+        ami_information = ec2client.describe_images(
+            Filters=[
+              {'Name': 'name', 'Values': ['ubuntu/images-testing/hvm-ssd/ubuntu-trusty-daily-amd64-server-*']},
+              {'Name': 'architecture', 'Values': ['x86_64']},
+              {'Name': 'root-device-type', 'Values': ['ebs']},
+              {'Name': 'virtualization-type', 'Values': ['hvm']},
+            ],
+        )
+        amis = sorted(ami_information['Images'],
+            key=lambda x: x['CreationDate'],
+            reverse=True)
+        aws_ami = amis[0]['ImageId']
+    if base_os == 'centos6':
+        ami_information = ec2client.describe_images(
+            Owners=['679593333241'], # CentOS
+            Filters=[
+              {'Name': 'name', 'Values': ['CentOS Linux 6 x86_64 HVM EBS *']},
+              {'Name': 'architecture', 'Values': ['x86_64']},
+              {'Name': 'root-device-type', 'Values': ['ebs']},
+              {'Name': 'virtualization-type', 'Values': ['hvm']},
+            ],
+        )
+        amis = sorted(ami_information['Images'],
+                      key=lambda x: x['CreationDate'],
+                      reverse=True)
+        aws_ami = amis[0]['ImageId']
+    if base_os == 'centos7':
+        ami_information = ec2client.describe_images(
+            Owners=['679593333241'], # CentOS
+            Filters=[
+              {'Name': 'name', 'Values': ['CentOS Linux 7 x86_64 HVM EBS *']},
+              {'Name': 'architecture', 'Values': ['x86_64']},
+              {'Name': 'root-device-type', 'Values': ['ebs']},
+              {'Name': 'virtualization-type', 'Values': ['hvm']},
+            ],
+        )
+        amis = sorted(ami_information['Images'],
+              key=lambda x: x['CreationDate'],
+              reverse=True)
+        aws_ami = amis[0]['ImageId']
+    if base_os == 'windows2019':
+        ami_information = ec2client.describe_images(
+            Owners=['801119661308'], # Windows Server 2019
+            Filters=[
+              {'Name': 'name', 'Values': ['Windows_Server-2019-English-Full-Base-*']},
+              {'Name': 'architecture', 'Values': ['x86_64']},
+              {'Name': 'root-device-type', 'Values': ['ebs']},
+              {'Name': 'virtualization-type', 'Values': ['hvm']},
+            ],
+        )
+        amis = sorted(ami_information['Images'],
+              key=lambda x: x['CreationDate'],
+              reverse=True)
+        aws_ami = amis[0]['ImageId']
+    return(aws_ami)
+
 # Function: menuCount()
 # Purpose: iterate through a list from item_value=low to item_value=high
 
@@ -365,9 +365,12 @@ def time_waiter(duration, interval):
         sys.stdout.flush() 
 
 ################################################################################
-# Note: there doesn't seem to be an easy way to list valid EC2 instance types  #
-# on a per-region or availability zone basis so instead define a static list   #
-# of valid types from the EC2 public documentation.                            #
+################################################################################
+# There doesn't seem to be an easy way to dynamically list EC2 instances based #
+# on functionality or availability on a per-region (or AZ) basis.  So instead, #
+# define static lists from the EC2 public documentation that can be referenced #
+# programatically.                                                             #
+################################################################################
 ################################################################################
 
 # EBS Optimized Instances
