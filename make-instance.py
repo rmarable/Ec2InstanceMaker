@@ -59,9 +59,9 @@ parser = argparse.ArgumentParser(description='make-instance.py: Command-line int
 # Configure parser arguments for the required variables.
 
 parser.add_argument('--az', '-A', help='AWS Availability Zone (REQUIRED)', required=True)
-parser.add_argument('--instance_name', '-N', help='name of the instance (REQUIRED)', required=True)
-parser.add_argument('--instance_owner', '-O', help='ActiveDirectory username of the instance instance_owner (REQUIRED)', required=True)
-parser.add_argument('--instance_owner_email', '-E', help='Email address of the instance instance_owner (REQUIRED)', required=True)
+parser.add_argument('--instance_name', '-N', help='name of the instance(s) (REQUIRED)', required=True)
+parser.add_argument('--instance_owner', '-O', help='ActiveDirectory username of the instance_owner (REQUIRED)', required=True)
+parser.add_argument('--instance_owner_email', '-E', help='Email address of the instance_owner (REQUIRED)', required=True)
 
 # Parse values for the optional parameters from the commnand linue.
 
@@ -87,7 +87,7 @@ parser.add_argument('--fsx_s3_bucket', help='Name of an S3 bucket connected to t
 parser.add_argument('--fsx_s3_path', help='Path to a folder on s3://fsx_s3_bucket that Lustre will import/export from (default = fsxRoot)', required=False, default='fsxRoot')
 parser.add_argument('--hyperthreading', '-H', choices=['true', 'false'], help='enable Intel Hyperthreading (default = true)', required=False, default='true')
 parser.add_argument('--iam_json_policy', '-J', help='Use a pre-existing JSON policy document in the /templates subdirectory to set permissions for iam_role (default = GenericEc2InstancePolicy.json', required=False, default='GenericEc2InstancePolicy.json')
-parser.add_argument('--iam_role', help='Apply a pre-existing IAM role to the instance', required=False, default='UNDEFINED')
+parser.add_argument('--iam_role', help='Apply a pre-existing IAM role to the instance(s)', required=False, default='UNDEFINED')
 parser.add_argument('--instance_owner_department', choices=['analytics', 'clinical', 'commercial', 'compbio', 'compchem', 'datasci', 'design', 'development', 'hpc', 'imaging', 'manufacturing', 'medical', 'modeling', 'operations', 'proteomics', 'robotics', 'qa', 'research', 'scicomp'], help='Department of the instance_owner (default = hpc)', required=False, default='hpc')
 parser.add_argument('--request_type', choices=['ondemand', 'spot'], help='choose between ondemand or spot instances (default = ondemand)', required=False, default='ondemand')
 parser.add_argument('--instance_type', '-T', help='EC2 instance type (default = t2.micro)', required=False, default='t2.micro')
@@ -157,7 +157,7 @@ if any(char0.isupper() for char0 in instance_name) or any(char1.isupper() for ch
     error_msg='instance_name and instance_owner may not contain uppercase letters!'
     refer_to_docs_and_quit(error_msg)
 
-# Get the version of Terraform being used to build the instance.
+# Get the version of Terraform being used to build the instance(s).
 
 terraform_version_string = "terraform -version | head -1 | awk '{print $2}'"
 TERRAFORM_VERSION = subprocess.check_output(terraform_version_string, shell=True, universal_newlines=True, stderr=subprocess.DEVNULL)
@@ -171,7 +171,7 @@ else:
     print('')
     p_val('Terraform: version = ' + TERRAFORM_VERSION, debug_mode)
 
-# Get the version of Ansible being used to build the instance.
+# Get the version of Ansible being used to build the instance(s).
 
 ansible_version_string = "ansible --version | head -1 | awk '{print $2}' | tr -d '\n'"
 ANSIBLE_VERSION = subprocess.check_output(ansible_version_string, shell=True, universal_newlines=True, stderr=subprocess.DEVNULL)
@@ -198,7 +198,7 @@ except OSError as e:
     if e.errno != errno.EEXIST:
         raise
 
-# Check for the presence of an existing vars_file for the instance.
+# Check for the presence of an existing vars_file for the instance(s).
 # If an existing vars_file exists, abort to prevent potential duplications.
 
 if os.path.isfile(vars_file_path):
@@ -220,7 +220,7 @@ else:
         print('Performing parameter validation...')
     p_val('vars_file_path', debug_mode)
 
-# Define a local state directory for the instance.
+# Define a local state directory for the instance(s).
 
 instance_data_dir = './instance_data/' + instance_name + '/'
 try:
@@ -229,7 +229,7 @@ except OSError as e:
     if e.errno != errno.EEXIST:
         raise
 
-# Generate a unique instance_serial_number for the instance.
+# Generate a unique instance_serial_number for the instance(s).
 
 DEPLOYMENT_DATE = time.strftime("%B %-d, %Y")
 DEPLOYMENT_DATE_TAG = time.strftime("%-d-%B-%Y")
@@ -340,7 +340,7 @@ else:
         p_val('fsx_chunk_size', debug_mode)
 
 # Provide a mechanism to ensure ebs_optimized is appropriately set for the EC2
-# instance being deployed.
+# instance(s) being deployed.
 
 if ebs_optimized == 'true':
     if instance_type not in ec2_instances_ebs_optimized:
@@ -403,7 +403,7 @@ if request_type == 'spot':
     print('Setting spot_price: $' + str(spot_price) + '/hr')
 print('')
 
-# Determine if the instances should be placed in an EC2 placement group.
+# Determine if the instance(s) should be placed in an EC2 placement group.
 # Abort if the user attempts to put a single instance in a placement group.
 # Partition spread groups are not yet supported by Terraform for some reason.
 
@@ -536,7 +536,7 @@ else:
         refer_to_docs_and_quit(error_msg)
 p_val('aws_ami', debug_mode)
 
-# Create a new EC2 key pair and secret key file for the instance within the
+# Create a new EC2 key pair and secret key file for the instance(s) within the
 # deployment region of choice if either entity doesn't already exist.
 
 ec2_keypair = instance_serial_number + '_' + region
@@ -574,9 +574,9 @@ else:
         print('')
     p_val('ec2_keypair', debug_mode)
 
-# Create and apply an IAM EC2 instance profile from the default template if
+# Create and apply an IAM EC2 instance(s) profile from the default template if
 # iam_role was not defined by the operator.  All IAM resources created as part
-# of the life cycle will be terminated along with the instance.
+# of the life cycle will be terminated along with the instance(s).
 
 if iam_role == 'UNDEFINED':
     ec2_iam_instance_role = 'ec2-instance-role-' + instance_serial_number
@@ -627,7 +627,7 @@ if iam_role == 'UNDEFINED':
 
 # If the operator provides a pre-existing iam_role, use it to construct an IAM
 # EC2 instance profile that will be applied to the new EC2 instance.  This EC2
-# instance profile and role will be preserved upon instance termination.
+# instance profile and role won't be terminated with the instance(s).
 #
 # Note: this is all part of the if:else construct defined above!
 
@@ -663,7 +663,7 @@ if debug_mode == 'true':
     p_val('ec2_iam_instance_profile', debug_mode)
 
 # Validate EFS based on the selected performance mode and if the EFS file 
-# system should be preserved after the instance is terminated.
+# system should be preserved after the instance(s) is terminated.
 # If EFS encryption was enabled, check the operating system to ensure stunnel
 # behaves as expected to enable encryption in flight.
 #
@@ -697,7 +697,7 @@ if turbot_account != 'DISABLED':
     boto3.setup_default_session(profile_name=turbot_profile)
 
 # Generate a unique SNS topic name for important EC2 events involving the
-# instance and subscribe instance_owner_email.
+# instance(s) and subscribe instance_owner_email.
 
 sns_topic_name = 'Ec2_Instance_SNS_Alerts_' + str(instance_serial_number)
 sns_topic = sns_client.create_topic(Name=sns_topic_name)
@@ -1004,7 +1004,7 @@ enable_fsx: false
 
 vars_file_main = vars_file_main_part + vars_file_efs + vars_file_fsx
 
-# Write the instance vars_file to disk.
+# Write the instance(s) vars_file to disk.
 
 print(vars_file_main.format(**instance_parameters), file = open(vars_file_path, 'w'))
 
@@ -1012,7 +1012,7 @@ print('')
 print('Saved ' + instance_name + ' build template: ' + vars_file_path)
 print('')
 
-# Generate the EC2 instance templates using Ansible.
+# Generate the EC2 instance creation templates using Ansible.
 
 if count == 1:
     print('Generating templates for instance ' + instance_name + '...')
@@ -1038,7 +1038,7 @@ else:
 
 fsx_client = boto3.client('fsx', region_name = region)
 
-# Generate the instance tags and a configuration template for based on the
+# Generate the instance(s) tags and a configuration template for based on the
 # command line parameters provided (or not) by the operator.
 
 if enable_fsx == 'true':
@@ -1075,7 +1075,7 @@ if enable_fsx == 'true':
     else:
         Lustre_Fsx_Configuration={ 'WeeklyMaintenanceStartTime': '4:20:00' }
 
-# Create the Lustre file system and apply the instance tags.
+# Create the Lustre file system and apply the instance(s) tags.
 
     make_lustre_file_system = fsx_client.create_file_system(
         ClientRequestToken=instance_serial_number,
@@ -1088,8 +1088,8 @@ if enable_fsx == 'true':
         )
 
 # Print some interesting information to the console for operator convenience.
-# Add a 60-second timer to ensure the instances don't become available before
-# the Lustre file system is mountable.
+# Add a 60-second timer to ensure the instance(s) don't become available prior
+# to the Lustre file system reaching a mountable state.
 
     make_lustre_file_system_json = json.dumps(make_lustre_file_system, default=str)
     lustre_file_system_dnsName = jq('del(.ResponseMetadata) | .FileSystem.DNSName').transform(text=make_lustre_file_system_json, text_output=True)
@@ -1101,7 +1101,7 @@ if enable_fsx == 'true':
     print('')
     print('Finished building: ' + lustre_file_system_dnsName.replace('\"', '').strip())
 
-# Create the new EC2 instances and supporting infrastructure with Terraform.
+# Create the new EC2 instance(s) and supporting infrastructure with Terraform.
 
 print('Invoking Terraform to build ' + instance_name + '...')
 if debug_mode == 'true':

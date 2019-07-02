@@ -29,7 +29,7 @@ def base_os_instance_check(base_os, instance_type, debug_mode):
     p_val('instance_type', debug_mode)
 
 # Function: check_ec2_instance()
-# Purpose: verify the instance_type is a member of the instance_list
+# Purpose: verify the instance_type is a member of an instance_list
 
 def ec2_instance_list_check(instance_type, instance_list, feature, debug_mode):
     for item in instance_list:

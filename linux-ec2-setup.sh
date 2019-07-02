@@ -3,8 +3,8 @@
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   June 14, 2019
 # Last Changed: July 1, 2019
-# Purpose:      Setup Ec2InstanceMaker to spawn new instances from an instance
-#		created by Ec2InstanceMaker
+# Purpose:      Configure an instance spawned by Ec2InstanceMaker to create 
+#		new instances using Ec2InstanceMaker
 ################################################################################
 
 #!/bin/bash

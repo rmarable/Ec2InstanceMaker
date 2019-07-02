@@ -109,7 +109,7 @@ resource "aws_spot_instance_request"  "{{ instance_name }}" {
 {% if 'UNDEFINED' not in project_id %}
     ProjectID               = "{{ project_id }}"
 {% endif %}
-    DEPLOYMENT_DATE         = "{{ DEPLOYMENT_DATE }}"
+    DEPLOYMENT_DATE         = "{{ DEPLOYMENT_DATE_TAG }}"
   }
   volume_tags =  {
     EC2InstanceBuilder      = "Terraform"
@@ -127,7 +127,7 @@ resource "aws_spot_instance_request"  "{{ instance_name }}" {
 {% if 'UNDEFINED' not in project_id %}
     ProjectID               = "{{ project_id }}"
 {% endif %}
-    DEPLOYMENT_DATE         = "{{ DEPLOYMENT_DATE }}"
+    DEPLOYMENT_DATE         = "{{ DEPLOYMENT_DATE_TAG }}"
   }
 {% if request_type == "spot" %}
   provisioner "local-exec" {
