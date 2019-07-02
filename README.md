@@ -41,10 +41,10 @@ deep infrastructure knowledge or extensive experience with the AWS stack.
 You can find more information about EC2, EC2 Spot, EFS, and FSx for Lustre by
 visiting:
 
-https://aws.amazon.com/ec2/
-https://aws.amazon.com/ec2/spot/
-https://aws.amazon.com/efs/
-https://aws.amazon.com/fsx/lustre/
+* https://aws.amazon.com/ec2/
+* https://aws.amazon.com/ec2/spot/
+* https://aws.amazon.com/efs/
+* https://aws.amazon.com/fsx/lustre/
 
 Ec2InstanceMaker also makes extensive use of Terraform, Ansible, the Amazon
 Web Services SDK for Python (boto3), and jq.  You can find more information
