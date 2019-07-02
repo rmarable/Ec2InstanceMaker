@@ -590,14 +590,14 @@ process time.
 
 ## Using FSx for Lustre
 
-To add an FSx for Lustre file system that shares both the instance tag collection and lifecycle, set `enable_fsx=true` when the instance is first created.  The example below will attach a 3600 GB Luster file system mounted at /fsx to a new Amazon Linux 2 instance:
+To add an FSx for Lustre file system that shares both the instance tag collection and lifecycle, set `enable_fsx=true` when the instance is first created.  The example below will attach a 3,600 GB Luster file system mounted at /fsx to a new Amazon Linux 2 instance:
 
 ```
 $ ./make-instance.py -A us-east-1a -O rmarable -E rmarable@amazon.com -N dev01 --count=3 --request_type=spot --enable_fsx=true
 ```
 
 The size of the file system is controlled with the `fsx_size` flag.  Lustre file
-systems must use multiples of 3600TB or an error will be returned.
+systems must use multiples of 3,600 GB or an error will be returned.
 
 Hydration of an FSX file system from an S3 bucket is supported by setting 
 `enable_fsx_hydration=true`, designating an existing S3 bucket (`fsx_s3_bucket`)
