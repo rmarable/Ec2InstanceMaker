@@ -2,7 +2,7 @@
 # Name:		kill_instance.{{ instance_name }}.sh
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	June 3, 2019
-# Last Changed:	July 2, 2019
+# Last Changed:	July 3, 2019
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:	Destroy EC2 instance {{ instance_name }}
 ###############################################################################
@@ -21,6 +21,11 @@ EC2_KEYPAIR={{ ec2_keypair }}
 PRESERVE_IAM_ROLE="{{ preserve_iam_role }}"
 SSH_KEYPAIR_FILE={{ ssh_keypair_file }}
 SNS_TOPIC_ARN="{{ sns_arn }}"
+
+# Parse the AMI ImageId and EBS SnapshotId tagged with instance_serial_number.
+
+AMI_ID=`aws --region {{ region }} ec2 describe-images --filters Name=tag-value,Values={{ instance_serial_number }} | jq '.Images[].ImageId' | tr -d \"`
+AMI_SNAPSHOT_ID=`aws --region {{ region }} ec2 describe-images --filters Name=tag-value,Values={{ instance_serial_number }} | jq '.Images[].BlockDeviceMappings[].Ebs.SnapshotId' | tr -d \"`
 
 # Pause for 5 seconds before deleting anything.
 
@@ -96,7 +101,7 @@ done
 
 {% if enable_fsx == 'true' %}
 (sleep 300 ; aws --region {{ region }} ec2 delete-security-group --group-id {{ vpc_security_group_ids }}) 2>/dev/null &
-SG_GROUPNAME=`aws ec2 describe-security-groups --filters Name=group-id,Values={{ vpc_security_group_ids }} | jq '.SecurityGroups[].GroupName' | tr -d \"`
+SG_GROUPNAME=`aws --region {{ region }} ec2 describe-security-groups --filters Name=group-id,Values={{ vpc_security_group_ids }} | jq '.SecurityGroups[].GroupName' | tr -d \"`
 echo "Marked EC2 security group for deletion: $SG_GROUPNAME"
 {% else %}
 aws --region {{ region }} ec2 delete-security-group --group-id {{ vpc_security_group_ids }}
@@ -113,9 +118,45 @@ fi
 {% if enable_placement_group == 'true' %}
 # Delete the EC2 placement group.
 
-aws ec2 delete-placement-group --group-name ec2_pg-{{ instance_serial_number }}
+aws --region {{ region }} ec2 delete-placement-group --group-name ec2pg-{{ instance_serial_number }}
 
 {% endif %}
+{% if preserve_ami == 'false' %}
+
+# Delete the AMI ImageId and EBS SnapshotId tagged with instance_serial_number.
+
+if [ ! -z $AMI_ID ]
+then
+	aws --region {{ region }} ec2 deregister-image --image-id $AMI_ID
+	aws --region {{ region }} ec2 delete-snapshot --snapshot-id $AMI_SNAPSHOT_ID
+	echo ""
+	echo "Deleted AMI: $AMI_ID"
+	echo "Deleted EBS snapshot: $AMI_SNAPSHOT_ID"
+	echo ""
+else
+	echo ""
+	echo "No AMI image tagged with {{ instance_serial_number }} was found."
+	echo ""
+fi
+{% else %}
+
+# Print a message to the console confirming preservation of the AMI ImageId and
+# EBS SnapshotId tagged with instance_serial_number.
+
+if [ ! -z $AMI_ID ]
+then
+	echo ""
+	echo "Preserved AMI: $AMI_ID"
+	echo "Preserved EBS snapshot: $AMI_SNAPSHOT_ID"
+	echo "*** Delete this snapshot if it isn't needed to avoid additional charges!"
+	echo ""
+else
+	echo ""
+	echo "No AMI image tagged with {{ instance_serial_number }} was found."
+	echo ""
+fi
+{% endif %}
+
 # Send an SNS notification that the instance is being terminated.
 
 {% if count > 1 %}
@@ -130,6 +171,7 @@ aws sns publish --topic-arn $SNS_TOPIC_ARN --subject "[Ec2InstanceMaker] Instanc
 
 aws sns delete-topic --topic-arn $SNS_TOPIC_ARN
 echo "Deleted SNS topic: $SNS_TOPIC_ARN"
+echo ""
 {% if preserve_iam_role == 'false' %}
 
 # Since PRESERVE_IAM_ROLE is false, take the following actions:
@@ -164,14 +206,17 @@ do
 	fi
 done
 
-# Delete references to the kill-instance shell script.
+# Delete symlinks to the top-level shell scripts.
 
 cd $SRC_TREE_DIR
-if [ -L kill-instance.{{ instance_name }}.sh ] 
-then
-	unlink kill-instance.{{ instance_name }}.sh
-	echo "Deleted file: kill-instance.{{ instance_name }}.sh"
-fi
+for link in kill-instance.{{ instance_name }}.sh build-ami.{{ instance_name }}.sh
+do
+	if [ -L $link ]
+	then
+		unlink $link
+		echo "Removed symlink: $link"
+	fi
+done
 
 # Cleanup and exit.
 
@@ -181,7 +226,7 @@ echo "##########################################################################
 echo "##    Finished deleting EC2 instance family: {{ instance_name }}"
 echo "##                           Instance count: {{ count }}"
 {% else %}
-echo "##           Finished deleting EC2 instance: {{ instance_name }}"
+echo "##    Finished deleting EC2 instance: {{ instance_name }}"
 {% endif %}
 echo "###############################################################################"
 echo ""

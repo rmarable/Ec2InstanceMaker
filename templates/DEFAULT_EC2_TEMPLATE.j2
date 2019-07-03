@@ -151,10 +151,22 @@ resource "aws_spot_instance_request"  "{{ instance_name }}" {
     private_key = "${file("{{ ssh_keypair_file }}")}"
     }
   }
+  provisioner "file" {
+    source      = "{{ custom_user_script }}"
+    destination = "/tmp/{{ custom_user_script }}"
+  connection {
+    type        = "ssh"
+    host        = self.public_ip
+    user        = "{{ ec2_user }}"
+    agent       =  false
+    private_key = "${file("{{ ssh_keypair_file }}")}"
+    }
+  }
   provisioner "remote-exec" {
     inline = [
       "chmod 0755 /tmp/{{ build_instance_script }}",
       "sh /tmp/{{ build_instance_script }}",
+      "sh /tmp/{{ custom_user_script }}",
     ]
   connection {
     type        = "ssh"

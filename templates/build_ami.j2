@@ -1,0 +1,109 @@
+################################################################################
+# Name:         build_ami.{{ instance_name }}.sh
+# Author:       Rodney Marable <rodney.marable@gmail.com>
+# Created On:   June 28, 2019
+# Last Changed: July 3, 2019
+# Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
+# Purpose:      Create a new AMI from an instance spawned by Ec2InstanceMaker
+################################################################################
+
+#!/bin/bash
+
+# Define the name of the AMI to create.
+
+AMI_NAME="ami-{{ instance_serial_number }}"
+{% if preserve_ami == 'false' %}
+
+# Print a console warning that this AMI will *NOT* be preserved when the
+# instance is terminated.  This is non-default behavior that the operator
+# had to have intentionally enabled by setting "--preserve_ami=false" when
+# the instance was originally built.
+
+echo ""
+echo "***WARNING***"
+{% if count > 1 %}
+echo "This AMI will be *DELETED* with instance family: {{ instance_name }}"
+{% else %}
+echo "This AMI will be *DELETED* with instance: {{ instance_name }}"
+{% endif %}
+{% endif %}
+
+# Parse the source AMI from instance_serial_number.
+
+echo ""
+echo "Parsing the InstanceId of the AMI source..."
+echo ""
+AMI_SRC_EC2_ID=`aws --region {{ region }} ec2 describe-instances --filters Name=tag-value,Values={{ instance_serial_number }} | jq '.Reservations[].Instances[].InstanceId' | head -1 | tr -d \"`
+
+# Warn the operator that the source instance will be shut down to create the
+# image and offer a 5-second window to hit CTRL-C.
+
+echo "##############################################################################"
+echo "#                              *** WARNING ***                               #"
+echo "#                 Preparing to shut down the source instance!                #"
+echo "#    Please type CTRL-C within 5 seconds if this is *NOT* what you wanted!   #"
+echo "##############################################################################"
+sleep 5
+
+# Check to see if another AMI already exists.
+
+AMI_ID=`aws --region {{ region }} ec2 describe-images --filters Name=tag-value,Values={{ instance_serial_number }} | jq '.Images[].ImageId' | tr -d \"`
+if [ ! -z $AMI_ID ]
+then
+	echo "*** ERROR ***"
+	echo "Found an existing AMI ID: $AMI_ID"
+	echo ""
+	read -p 'Type DELETE to remove: ' DELETE_AMI
+	if [[ $DELETE_AMI == "DELETE" ]]
+	then
+		aws --region {{ region }} ec2 deregister-image --image-id $AMI_ID
+		aws --region {{ region }} ec2 delete-snapshot --snapshot-id $AMI_SNAPSHOT_ID
+		echo ""
+		echo "Deleted AMI: $AMI_ID"
+		echo "Deleted EBS snapshot: $AMI_SNAPSHOT_ID"
+		echo ""
+	else
+		echo ""
+		echo "*** ERROR ***"
+		echo "The existing AMI will not be removed! Aborting..."
+		exit 1
+	fi
+fi
+
+# Shut down the instance.
+
+echo ""
+echo "Shutting down the instance that will be used to build the new AMI..."
+echo "This may take a few minutes so please be patient!"
+echo ""
+aws --region {{ region }} ec2 stop-instances --instance-ids $AMI_SRC_EC2_ID
+aws --region {{ region }} ec2 wait instance-stopped --instance-ids $AMI_SRC_EC2_ID
+
+# Create the new AMI.
+
+echo ""
+echo "Creating the new AMI..."
+echo ""
+AMI_ID=`aws --region {{ region }} ec2 create-image --instance-id $AMI_SRC_EC2_ID --name $AMI_NAME --description "Spawned from Ec2InstanceMaker" | grep ImageId | awk '{print $2}' | tr -d \"`
+
+# Tag the new AMI.
+
+echo "Tagging the new AMI..."
+echo ""
+aws --region {{ region }} ec2 create-tags --resource $AMI_ID --tags Key=Name,Value={{ instance_name }} Key=InstanceSerialNumber,Value={{ instance_serial_number }} Key=InstanceOwner,Value={{ instance_owner }} Key=InstanceOwnerEmail,Value={{ instance_owner_email }} Key=InstanceOwnerDepartment,Value={{ instance_owner_department }} Key=InstanceFamily,Value={{ instance_serial_number }}-{{ instance_type }} Key=EC2RequestType,Value={{ request_type }}{% if 'UNDEFINED' not in project_id %} Key=ProjectId,Value={{ project_id }}{% endif %} Key=DEPLOYMENT_DATE,Value=\"{{ DEPLOYMENT_DATE_TAG }}\" Key=OperatingSystem,Value={{ base_os }}
+
+# Restart the source instance.
+
+echo "Restarting the source instance..."
+echo ""
+aws --region {{ region }} ec2 start-instances --instance-ids $AMI_SRC_EC2_ID
+aws --region {{ region }} ec2 wait instance-running --instance-ids $AMI_SRC_EC2_ID
+
+# Cleanup and exit.
+
+echo ""
+echo "Finished building: $AMI_ID"
+echo ""
+echo "Exiting..."
+echo ""
+exit 0
