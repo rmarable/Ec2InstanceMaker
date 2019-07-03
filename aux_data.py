@@ -2,9 +2,14 @@
 # Name:		aux_data.py
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	June 3, 2019
-# Last Changed:	July 1, 2019
+# Last Changed:	July 3, 2019
 # Purpose:	Data structures and functions to support Ec2InstanceMaker
 ################################################################################
+
+# Global variable definitions
+
+null_list = ['']
+supported = 0
 
 # Function: add_security_group_rule()
 # Purpose: add a rule to a security group
@@ -23,23 +28,24 @@ def add_inbound_security_group_rule(region, sec_grp, protocol, cidr, psource, pd
 # Purpose: verify the selected EC2 instance_type is supported by base_os
 
 def base_os_instance_check(base_os, instance_type, debug_mode):
-    base_os_list = 'ec2_unsupported_' + base_os
-    ec2_instance_list_check(instance_type, base_os_list, base_os, debug_mode)
-    p_val('base_os', debug_mode)
-    p_val('instance_type', debug_mode)
-
-# Function: check_ec2_instance()
-# Purpose: verify the instance_type is a member of an instance_list
-
-def ec2_instance_list_check(instance_type, instance_list, feature, debug_mode):
-    for item in instance_list:
-        if item in instance_list:
-            supported = True
-    if supported:
-        pass
-    else:
-        error_msg = instance_type + ' does not support ' + feature + '!'
+    def base_os_status(base_os, instance_type):
+        print('')
+        error_msg = base_os + ' does not support EC2 instance type ' + instance_type + '!'
         refer_to_docs_and_quit(error_msg)
+    if base_os == 'centos6' and ('t3' or 'm5' or 'a1.' or 'c5.' or 'f1.4xlarge' or 'g3s.xlarge' or 'p3' or 'r5' or 'x1e.' or 'z1d.' or 'h1.' or 'i3.metal' or 'i3en.') in instance_type:
+        base_os_status(base_os, instance_type)
+    elif base_os == 'centos7' and ('m5metal.' or 'a1.' or 'p3dn.24xlarge' or 'r5d.24xlarge' or 'r5d.metal' or 'r5.metal' or 'x1e.' or 'h1.' or 'i3en.') in instance_type:
+        base_os_status(base_os, instance_type)
+    elif base_os == 'ubuntu1404' and ('t1.' or 't3a.' or 'm5a' or 'm5d.' or 'm5.metal' or 'm1.' or 'a1.' or 'c5n.' or 'c5d.' or 'c1.' or 'f1.4xlarge' or 'p3dn.24xlarge' or 'r5' or 'm2.' or 'z1d.' or 'i3.metal' or 'i3en.') in instance_type:
+        base_os_status(base_os, instance_type)
+    elif base_os == 'ubuntu1604' and ('t1.' or 't3a.' or 'm5a' or 'm5d.metal' or 'm5.metal' or 'm1.' or 'a1.' or 'c1.' or 'r5ad.' or 'r5d.24xlarge' or 'r5d.metal' or 'r5.metal' or 'm2.' or 'z1d.metal' or 'i3en.') in instance_type:
+        base_os_status(base_os, instance_type)
+    elif base_os == 'ubuntu1804' and ('t1.' or 't3a.' or 'm5ad' or 'm5d.metal' or 'm5.metal' or 'm1.' or 'a1.' or 'c1.' or 'cc2.8xlarge' or 'r5ad.' or 'r5d.24xlarge' or 'm2.' or 'i3en.') in instance_type:
+        base_os_status(base_os, instance_type)
+    elif base_os == 'windows2019' and ('a1.' or 'f1.') in instance_type:
+        base_os_status(base_os, instance_type)
+    else:
+        p_val('base_os', debug_mode)
 
 # Function: check_custom_ami()
 # Purpose: verify the existence of a user-provided custom AMI
@@ -157,15 +163,19 @@ def ctrlC_Abort(sleep_time, line_length, vars_file_path, instance_data_dir, inst
         print('Aborting...')
         sys.exit(1)
 
-# Function: illegal_az_msg()
-# Purpose: abort when an invalid AvailabilityZone is provided
+# Function: ec2_placement_group_check()
+# Purpose: verify the instance_type supports EC2 placement groups
 
-def illegal_az_msg(az):
-    import sys
-    print('*** ERROR ***')
-    print('"' + az + '"' + ' is not a valid Availability Zone in the selected AWS Region.')
-    print('Aborting...')
-    sys.exit(1)
+def ec2_placement_group_check(instance_type, debug_mode):
+    global supported
+    for item in ec2_instances_placement_groups:
+        if item in instance_type:
+            supported = True
+    if supported:
+        pass
+    else:
+        error_msg = instance_type + ' does not support EC2 Placement Groups!'
+        refer_to_docs_and_quit(error_msg)
 
 # Function: get_ami_info()
 # Purpose: get the ID of an AWS AMI image
@@ -300,6 +310,16 @@ def menuCount(low, high):
         return None
     return iter(tmp, None)
 
+# Function: illegal_az_msg()
+# Purpose: abort when an invalid AvailabilityZone is provided
+
+def illegal_az_msg(az):
+    import sys
+    print('*** ERROR ***')
+    print('"' + az + '"' + ' is not a valid Availability Zone in the selected AWS Region.')
+    print('Aborting...')
+    sys.exit(1)
+
 # Function: p_fail()
 # Purpose: print a failed instance_parameter validation message to stdout
 
@@ -364,14 +384,10 @@ def time_waiter(duration, interval):
         time.sleep(interval)
         sys.stdout.flush() 
 
-################################################################################
-################################################################################
-# There doesn't seem to be an easy way to dynamically list EC2 instances based #
-# on functionality or availability on a per-region (or AZ) basis.  So instead, #
-# define static lists from the EC2 public documentation that can be referenced #
-# programatically.                                                             #
-################################################################################
-################################################################################
+# There doesn't seem to be an easy way to dynamically list available EC2
+# instances # based on functionality or availability on a per-region (or AZ)
+# basis, so instead define static lists from the EC2 public documentation
+# that can be referenced programatically.
 
 # EBS Optimized Instances
 
@@ -411,9 +427,11 @@ ec2_instances_placement_groups = ['a1.', 'm4.', 'm5.', 'c3.', 'c4.', 'c5.', 'cr1
 
 # Unsupported instance types by operating system
 
-ec2_unsupported_centos6 = ['t3.', 'm5.', 'a1.', 'c5.', 'f1.4xlarge', 'g3s.xlarge', 'p3.', 'r5.', 'x1e.', 'z1d.', 'h1.', 'i3.metal', 'i3en.']
-ec2_unsupported_centos7 = ['m5metal.', 'a1.', 'p3dn.24xlarge', 'r5d.24xlarge', 'r5d.metal', 'r5.metal', 'x1e.', 'h1.', 'i3en.']
-ec2_unsupported_ubuntu1404 = ['t1.', 't3a.', 'm5a.', 'm5d.', 'm5.metal', 'm1.', 'a1.', 'c5n.', 'c5d.', 'c1.', 'f1.4xlarge', 'p3dn.24xlarge', 'r5.', 'm2.', 'z1d.', 'i3.metal', 'i3en.']
-ec2_unsupported_ubuntu1604 = ['t1.', 't3a.', 'm5a.', 'm5d.metal', 'm5.metal', 'm1.', 'a1.', 'c1.', 'r5.ad.', 'r5.d.24xlarge', 'r5.d.metal', 'r5..metal', 'm2.', 'z1d.metal', 'i3en.']
-ec2_unsupported_ubuntu1804 = ['t1.', 't3a.', 'm5a.d', 'm5d.metal', 'm5.metal', 'm1.', 'a1.', 'c1.', 'cc2.8xlarge', 'r5.ad.', 'r5.d.24xlarge', 'm2.', 'i3en.']
-ec2_unsupported_windows2019 = ['a1.', 'f1.']
+ec2_instances_unsupported_alinux = null_list
+ec2_instances_unsupported_alinux2 = null_list
+ec2_instances_unsupported_centos6 = ['t3.', 'm5.', 'a1.', 'c5.', 'f1.4xlarge', 'g3s.xlarge', 'p3.', 'r5.', 'x1e.', 'z1d.', 'h1.', 'i3.metal', 'i3en.']
+ec2_instances_unsupported_centos7 = ['m5metal.', 'a1.', 'p3dn.24xlarge', 'r5d.24xlarge', 'r5d.metal', 'r5.metal', 'x1e.', 'h1.', 'i3en.']
+ec2_instances_unsupported_ubuntu1404 = ['t1.', 't3a.', 'm5a.', 'm5d.', 'm5.metal', 'm1.', 'a1.', 'c5n.', 'c5d.', 'c1.', 'f1.4xlarge', 'p3dn.24xlarge', 'r5.', 'm2.', 'z1d.', 'i3.metal', 'i3en.']
+ec2_instances_unsupported_ubuntu1604 = ['t1.', 't3a.', 'm5a.', 'm5d.metal', 'm5.metal', 'm1.', 'a1.', 'c1.', 'r5.ad.', 'r5.d.24xlarge', 'r5.d.metal', 'r5..metal', 'm2.', 'z1d.metal', 'i3en.']
+ec2_instances_unsupported_ubuntu1804 = ['t1.', 't3a.', 'm5a.d', 'm5d.metal', 'm5.metal', 'm1.', 'a1.', 'c1.', 'cc2.8xlarge', 'r5.ad.', 'r5.d.24xlarge', 'm2.', 'i3en.']
+ec2_instances_unsupported_windows2019 = ['a1.', 'f1.']
