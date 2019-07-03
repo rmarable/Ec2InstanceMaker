@@ -86,6 +86,8 @@ type are compatible.
 
 * Administrative control over the allowed EC2 instance types that can be deployed.
 
+* Creation of new AMIs from the spawned EC2 instance to assist with deployment of customized compute environments.  Please see below for additional guidance on how to augment the build templates to incorporate your "personalized" changes.
+
 * Creation of new instances from custom AMIs.  Please see below for additional 
 guidance on enabling EBS root volume encryption.
 
@@ -118,7 +120,7 @@ and tags.  Hydration to and from an S3 bucket is also supported.
 
 * Custom i.e. user-provided EC2 security groups.
 
-* Custom i.e. user-provided IAM instance profiles that can be created from user-supplied JSON policy documents or pre-existing IAM roles.
+* Custom i.e. user-provided IAM instance profiles that can be created from user-supplied JSON policy documents or pre-existing IAM roles.  Guidance for how to communicate with your local DevOps team to get their support with deployment of tthe aforementioned policy documents is also provided in the "Note to DevOps Teams" section below.
 
 * Email notifications via SNS whenever an instance is created or deleted.
 
@@ -128,7 +130,8 @@ with a specific project identification tag.  The department tagging mechanism
 is easily customizable to meet your use case.
 
 * Additional instance customization hooks using EC2 instance userdata or
-post-installation shell scripts.
+post-installation shell scripts.  Please see the "Instance Customization" 
+section for more details.
 
 * Custom scripting to automate deletion the instance or all members of the
 instance family at once.
@@ -165,6 +168,24 @@ freshly created virtual Python environment.
 * Build away!
 
 **It is strongly suggested that the reader carefully review the installation documentation (INSTALL.md) to avoid potentially costly and time-consuming mistakes.** 
+
+## Note to DevOps Teams
+
+As noted above, Ec2InstanceMaker is intended to reduce the administrative burden required for DevOps teams to support the diverse compute and storage needs of their stakeholders; conversely, it can empower scientists, engineers, statisticians, and analysts to compute at scale without needing to get assistnace from their Devops team.
+
+* **Ec2InstanceMaker does not make any changes to the existing networking environment already present in the operator's AWS account**.
+  * These tools do not create new VPCs, subnets, Internet or NAT gateways, routes, or Transit Gateways.
+  * They do not intentionally modify Route53 configurations, change default routes, or otherwise impact or deploy any infrastructure that is not explicitly documented or easily inferred by reviewing the code.
+
+* **Ec2InstanceMaker creates generic IAM roles, policies, and instance templates that are individualized as much as possible for each instance or instance family.**
+  * These JSON templates contain all required IAM permissions to work with the AWS services listed below and can be easily extended to fit any use case:
+    * EC2
+    * AutoScaling
+    * S3
+    * SQS
+    * SNS
+  * They are located in the templates/ subdirectory.  For convenience, "minimal" and "admin" templates are also provided.
+  * If you run into permissions problems building instances or provisioning storage resources, it's usually because of an IAM issue.  When speaking with your DevOps professionals, it is suggested that you share this template and work with them to customize an appropriate solution for your environment.
 
 ## Using Ec2InstanceMaker
 
@@ -231,6 +252,7 @@ usage: make-instance.py [-h] --az AZ --instance_name INSTANCE_NAME
                         [--request_type {ondemand,spot}]
                         [--instance_type INSTANCE_TYPE]
                         [--prod_level {dev,test,stage,prod}]
+                        [--preserve_ami {true,false}]
                         [--preserve_efs {true,false}]
                         [--project_id PROJECT_ID]
                         [--security_group SECURITY_GROUP]
@@ -319,6 +341,9 @@ optional arguments:
                         EC2 instance type (default = t2.micro)
   --prod_level {dev,test,stage,prod}
                         Operating stage of the jumphost (default = dev)
+  --preserve_ami {true,false}
+                        Preserve any AMI image built from the instance(s)
+                        post-termination (default = true)
   --preserve_efs {true,false}
                         Preserve the Elastic File System (EFS) created with
                         the instance(s) (default = false)
@@ -541,25 +566,19 @@ any ongoing interactive instance activity.
 
 The instance userdata template disables Intel HyperThreading if `--enable_hyperthreading=false` and modifies the root volume on CentOS 6 instances so it can be expanded up to 16 TB without user intervention.
 
-Ec2InstanceMaker also permits additional customization by pasting your custom
-code between these commented stanzas in `templates/instance_userdata.j2` or
-`templates/build_instance.j2`:
+Ec2InstanceMaker also permits additional user customization by simply pasting the desired commands into `templates/custom_user_script.j2` beneath the obvious comment:
 
 ```
-###############################################################
-## Starting point for user-added EC2 instance customizations ##
-###############################################################
-
-<paste your custom code here>
-
-#############################################################
-## Ending point for user-added EC2 instance customizations ##
-#############################################################
+########################################################
+## Paste your custom script actions below this comment #
+########################################################
 ```
 
-Please note that additional customization of Windows instances can only be performed through the userdata template (templates/instance_userdata.j2).  Support for joining a Windows Active Directory domain will be provided in a future release.
+This provides operators and DevOps professionals with a powerful mechanism for quickly building and distributing "golden" AMI images that can be widely distributed throughout an enterprise, or for customized images that can be specifically tailored by individuals or teams.  Please see "Working with Custom AMIs" and "Building New AMIs with the build-ami Script" for additional details.
 
-Support for post-installation Python or PowerShell scripts may also be provided in subsequent releases.
+Please note that additional customization of Windows instances can only be performed through the userdata template (templates/instance_userdata.j2).
+
+Support for joining a Windows Active Directory domain and mounting FSx for Windows storage will be provided in a future release.  Support for PowerShell scripts may also be provided in subsequent releases.
 
 ## Using EFS
 
@@ -652,6 +671,28 @@ to the instance life cycle.
 The script will abort if the operator attempts to place a single instance into
 a placement group.
 
+## Working with Custom AMIs ##
+
+Ec2InstanceMaker supports building new instances from custom AMIs by using the `--custom_ami` switch.  If the custom_ami is not found, the script will return an error.
+
+## Building New AMIs Using the build-ami Script ##
+
+Ec2InstanceMaker provides a customized build script for each instance_serial_number which permits the operator to create and register a new AMI image.  By including custom code in the `build-instance.j2` template, users now have a powerful mechanism for quickly customizing AMIs without requiring DevOps assistance.  Conversely, DevOps professionals now have a means to disseminate curated "golden" AMIs throughout their environment.
+
+To build a new AMI:
+```
+$ ./build-ami.$INSTANCE_NAME.sh
+```
+
+By default, any AMI created by this script will be preserved after the instance (or instance family) is terminated.
+
+To modify this behavior, the instance(s) must be built by setting `preserve_ami=false` like this:
+```
+./make-instance.py -O rmarable -E rodney.marable@gmail.com -N dev01 -A us-east-1a --preserve_ami=false
+```
+
+This is *not* a recommended best practice and should only be enabled when testing.
+
 ## Troubleshooting
 
 * Python version 3.6 or greater is required by this software.  Additionally,
@@ -718,10 +759,7 @@ launched within the region in question for that account:
 
 https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/EBSEncryption.html#EBSEncryption_supported_instances
 
-  * **Use a custom AMI.**  Launch a normal EC2 instance with Ec2InstanceMaker.
-Capture a snapshot of this instance, encrypt it, and then use the
-`--custom_ami` flag to launch the instance with this encrypted snapshot
-attached.
+  * **Deploy from a custom AMI with an encrypted snapshot.**  Launch a normal EC2 instance with Ec2InstanceMaker.  Capture a snapshot of this instance, encrypt it, and then use the `--custom_ami` flag to launch the instance with this encrypted snapshot attached.  Ec2InstanceMaker will support this feature in a future release.
 
 * Please be advised that EFS encryption in transit is **not** supported for
 CentOS 6 or Ubuntu 14.04 LTS.

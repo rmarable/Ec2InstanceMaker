@@ -97,7 +97,7 @@ $ cd ~
 ```
 
 * You are now ready to build EC2 instances.  Please consult README.md and 
-USE-CASES-TESTED.md for more detailed information on leveraging the scripts
+EXAMPLE_USE_CASES.md for more detailed information on leveraging the scripts
 in this toolkit.
 
 ## Creating an Installation Environment on Linux (local or EC2)
@@ -126,7 +126,7 @@ $ ./make-instance.py --help
 ## Example Use Cases
 
 Please review these common use cases that this tool can help address.  More 
-details are provided in the USE-CASES-TESTED.md document.
+details are provided in the EXAMPLE_USE-CASES.md document.
 
 ### Example: Building a Single Linux Instance 
 
