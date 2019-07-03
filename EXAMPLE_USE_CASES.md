@@ -1,9 +1,8 @@
-# EC2InstanceMaker - Use Case Test Summaruy
+# EC2InstanceMaker - Example Use Cases
 
-This document summarizes the use cases that this Open Source software project
+This document summarizes some use cases that this Open Source software project
 was tested against.  These command line invocations can be applied in any AWS
-environment by pasting the command line into a shell and substituting your
-username, email address, and instance name as needed.
+environment by pasting the appropriate command line into a shell and substituting your username, email address, instance name, and other required parameters as needed.
 
 Notes:
 
@@ -44,6 +43,19 @@ t2.micro instances with 8 GB gp2 EBS root volumes.
 t2.micro instances with larger gp2 EBS root volumes.  A sampling of "df" output
 for some operating systems is provided to confirm the root volume was sized as
 configured on the command line.
+
+### Custom AMI:
+```./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev03 --base_os=alinux2 --ebs_root_volume_size=1000 custom_ami=ami-00c8f252620d3a56e
+
+[ec2-user@ip-172-31-44-153 ~]$ df -h
+Filesystem      Size  Used Avail Use% Mounted on
+devtmpfs        475M     0  475M   0% /dev
+tmpfs           492M     0  492M   0% /dev/shm
+tmpfs           492M  388K  492M   1% /run
+tmpfs           492M     0  492M   0% /sys/fs/cgroup
+/dev/xvda1     1000G  2.5G  998G   1% /
+tmpfs            99M     0   99M   0% /run/user/1000
+```
 
 ### Amazon Linux 2:
 ```./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev03 --base_os=alinux2 --ebs_root_volume_size=785
@@ -631,9 +643,29 @@ lrwxrwxrwx. 1 root root 22 Jun 25 02:46 aws -> /usr/local/aws/bin/aws
 -rwxr-xr-x. 1 root root 71 Jun 25 02:48 import-s3-to-lustre.sh
 ```
 
+## Building a New AMI from a Fresh Instance ##
+
+A standard AMI build script is provided with each new build.  To register a new AMI, please run the following command:
+
+```
+$ ./build-ami.dev01.sh
+```
+.
+To build a new "golden" AMI or custom image, paste your desired changes into
+the obvious location within `templates/custom_user_script.j2` and they will
+be execuated as part of the instance deployment process.  Then, simply run
+the build-ami script as noted above.
+
+Currently, Ec2InstanceMaker only supports one active AMI and EBS snapshot per
+instance invocation.  If an existing image is detected, you **must** delete it
+when prompted before the AMI build will continue.
+
+Support for managing multiple AMI images associated with the same instance
+build may be added in a future release.
+
 ## Destroying an Instance
 
-Note: a custom "kill" script is generated when the instance is created.
+A custom "kill" script is generated when the instance is created:
 
 ```
 $ ./kill-instance.dev01.sh
