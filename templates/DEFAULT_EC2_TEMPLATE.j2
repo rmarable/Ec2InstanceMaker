@@ -2,7 +2,7 @@
 # Name:		{{ instance_name }}.tf
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	June 3, 2019
-# Last Changed:	July 1, 2019
+# Last Changed:	July 2, 2019
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 {% if count > 1 %}
 # Purpose:	Terraform template for instance family {{ instance_name }}
@@ -12,7 +12,7 @@
 ################################################################################
 {% if enable_placement_group == 'true' %}
 
-resource "aws_placement_group" "ec2pg-{{ instance_name }}" {
+resource "aws_placement_group" "ec2pg-{{ instance_serial_number }}" {
   name                      =  "ec2pg-{{ instance_serial_number }}"
   provider                  = "{{ provider }}"
   strategy                  =  "{{ placement_group_strategy }}"
@@ -81,7 +81,7 @@ resource "aws_spot_instance_request"  "{{ instance_name }}" {
   key_name                  = "{{ ec2_keypair }}"
   monitoring                = "true"
 {% if enable_placement_group == 'true' %}
-  placement_group           = "ec2pg-{{ instance_name }}"
+  placement_group           = "ec2pg-{{ instance_serial_number }}"
 {% endif %}
   provider                  = "{{ provider }}"
   root_block_device {
