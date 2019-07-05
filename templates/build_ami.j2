@@ -2,7 +2,7 @@
 # Name:         build_ami.{{ instance_name }}.sh
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   June 28, 2019
-# Last Changed: July 3, 2019
+# Last Changed: July 4, 2019
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:      Create a new AMI from an instance spawned by Ec2InstanceMaker
 ################################################################################
@@ -20,12 +20,15 @@ AMI_NAME="ami-{{ instance_serial_number }}"
 # the instance was originally built.
 
 echo ""
-echo "***WARNING***"
+echo "*** ALERT ***"
+echo "Because make-instance.py was invoked with 'preserve_ami=false', this AMI"
 {% if count > 1 %}
-echo "This AMI will be *DELETED* with instance family: {{ instance_name }}"
+echo "will be *DELETED* along with instance family: {{ instance_name }}"
 {% else %}
-echo "This AMI will be *DELETED* with instance: {{ instance_name }}"
+echo "will be *DELETED* along with instance: {{ instance_name }}"
 {% endif %}
+echo ""
+echo "Relaunching {{ instance_name }} using the new AMI will *NOT* be possible!"
 {% endif %}
 
 # Parse the source AMI from instance_serial_number.
@@ -50,10 +53,11 @@ sleep 5
 AMI_ID=`aws --region {{ region }} ec2 describe-images --filters Name=tag-value,Values={{ instance_serial_number }} | jq '.Images[].ImageId' | tr -d \"`
 if [ ! -z $AMI_ID ]
 then
-	echo "*** ERROR ***"
+	echo ""
+	echo "*** WARNING ***"
 	echo "Found an existing AMI ID: $AMI_ID"
 	echo ""
-	read -p 'Type DELETE to remove: ' DELETE_AMI
+	read -p 'Type DELETE to remove and replace: ' DELETE_AMI
 	if [[ $DELETE_AMI == "DELETE" ]]
 	then
 		aws --region {{ region }} ec2 deregister-image --image-id $AMI_ID
@@ -65,7 +69,8 @@ then
 	else
 		echo ""
 		echo "*** ERROR ***"
-		echo "The existing AMI will not be removed! Aborting..."
+		echo "The existing AMI will not be removed!"
+		echo "Aborting..."
 		exit 1
 	fi
 fi
@@ -78,6 +83,38 @@ echo "This may take a few minutes so please be patient!"
 echo ""
 aws --region {{ region }} ec2 stop-instances --instance-ids $AMI_SRC_EC2_ID
 aws --region {{ region }} ec2 wait instance-stopped --instance-ids $AMI_SRC_EC2_ID
+{% if ebs_encryption == 'true' %}
+
+# Generate a client token to ensure idempotency of the AMI creation process.
+# Source: https://amzn.to/30djnJA
+
+CLIENT_TOKEN=`shuf -zer -n32  {A..Z} {a..z} {0..9}`
+
+# Create the new encrypted AMI.
+
+echo ""
+echo "Creating an unencrypted source AMI..."
+echo ""
+AMI_ID_UNENCRYPTED=`aws --region {{ region }} ec2 create-image --instance-id $AMI_SRC_EC2_ID --name ${AMI_NAME}-unencrypted --description "Unencrypted instance spawned from Ec2InstanceMaker" | grep ImageId | awk '{print $2}' | tr -d \"`
+echo "Waiting for the unencrypted source AMI to become available..."
+echo ""
+aws --region {{ region }} ec2 wait image-available --image-ids $AMI_ID_UNENCRYPTED
+AMI_SNAPSHOT_ID_UNENCRYPTED=`aws --region {{ region }} ec2 describe-images --filters Name=image-id,Values=$AMI_ID_UNENCRYPTED | jq '.Images[].BlockDeviceMappings[].Ebs.SnapshotId' | tr -d \"`
+echo "Creating an encrypted AMI from the unencrypted source..."
+echo ""
+AMI_ID_ENCRYPTED=`aws --region {{ region }} ec2 copy-image --source-image-id $AMI_ID_UNENCRYPTED --source-region {{ region }} --encrypted --description "Encrypted instance spawned from Ec2InstanceMaker" --name ${AMI_NAME}-encrypted --client-token $CLIENT_TOKEN | grep ImageId | awk '{print $2}' | tr -d \"`
+echo "Waiting for the encrypted AMI to become available..."
+echo ""
+aws --region {{ region }} ec2 wait image-available --image-ids $AMI_ID_ENCRYPTED
+aws --region {{ region }} ec2 deregister-image --image-id $AMI_ID_UNENCRYPTED
+AMI_SNAPSHOT_ID_ENCRYPTED=`aws --region {{ region }} ec2 describe-images --filters Name=image-id,Values=$AMI_ID_ENCRYPTED | jq '.Images[].BlockDeviceMappings[].Ebs.SnapshotId' | tr -d \"`
+echo "Waiting for the ecrypted EBS snapshotting process to complete..."
+echo ""
+aws --region {{ region }} ec2 wait snapshot-completed --snapshot-ids $AMI_SNAPSHOT_ID_ENCRYPTED
+aws --region {{ region }} ec2 delete-snapshot --snapshot-id $AMI_SNAPSHOT_ID_UNENCRYPTED
+AMI_ID=$AMI_ID_ENCRYPTED
+AMI_SNAPSHOT_ID=$AMI_SNAPSHOT_ID_ENCRYPTED
+{% else %}
 
 # Create the new AMI.
 
@@ -85,25 +122,50 @@ echo ""
 echo "Creating the new AMI..."
 echo ""
 AMI_ID=`aws --region {{ region }} ec2 create-image --instance-id $AMI_SRC_EC2_ID --name $AMI_NAME --description "Spawned from Ec2InstanceMaker" | grep ImageId | awk '{print $2}' | tr -d \"`
+AMI_SNAPSHOT_ID=`aws --region {{ region }} ec2 describe-images --filters Name=image-id,Values=$AMI_ID | jq '.Images[].BlockDeviceMappings[].Ebs.SnapshotId' | tr -d \"`
+echo "Waiting for the new AMI to become available..."
+echo ""
+aws --region {{ region }} ec2 wait image-available --image-ids =$AMI_ID
+AMI_SNAPSHOT_ID_ENCRYPTED=`aws --region {{ region }} ec2 describe-images --filters Name=image-id,Values=$AMI_ID_ENCRYPTED | jq '.Images[].BlockDeviceMappings[].Ebs.SnapshotId' | tr -d \"`
+echo "Waiting for the EBS snapshotting process to complete..."
+echo ""
+aws --region {{ region }} ec2 wait snapshot-completed --snapshot-ids $AMI_SNAPSHOT_ID
+{% endif %}
 
-# Tag the new AMI.
+# Tag the new AMI and its associated EBS snapshot.
 
 echo "Tagging the new AMI..."
 echo ""
 aws --region {{ region }} ec2 create-tags --resource $AMI_ID --tags Key=Name,Value={{ instance_name }} Key=InstanceSerialNumber,Value={{ instance_serial_number }} Key=InstanceOwner,Value={{ instance_owner }} Key=InstanceOwnerEmail,Value={{ instance_owner_email }} Key=InstanceOwnerDepartment,Value={{ instance_owner_department }} Key=InstanceFamily,Value={{ instance_serial_number }}-{{ instance_type }} Key=EC2RequestType,Value={{ request_type }}{% if 'UNDEFINED' not in project_id %} Key=ProjectId,Value={{ project_id }}{% endif %} Key=DEPLOYMENT_DATE,Value=\"{{ DEPLOYMENT_DATE_TAG }}\" Key=OperatingSystem,Value={{ base_os }}
+echo "Tagging the new EBS snapshot..."
+echo ""
+aws --region {{ region }} ec2 create-tags --resource $AMI_SNAPSHOT_ID --tags Key=Name,Value={{ instance_name }} Key=InstanceSerialNumber,Value={{ instance_serial_number }} Key=InstanceOwner,Value={{ instance_owner }} Key=InstanceOwnerEmail,Value={{ instance_owner_email }} Key=InstanceOwnerDepartment,Value={{ instance_owner_department }} Key=InstanceFamily,Value={{ instance_serial_number }}-{{ instance_type }} Key=EC2RequestType,Value={{ request_type }}{% if 'UNDEFINED' not in project_id %} Key=ProjectId,Value={{ project_id }}{% endif %} Key=DEPLOYMENT_DATE,Value=\"{{ DEPLOYMENT_DATE_TAG }}\" Key=OperatingSystem,Value={{ base_os }}
 
-# Restart the source instance.
+# Restart the source EC2 instance.
 
-echo "Restarting the source instance..."
+echo "Restarting the source EC2 instance..."
 echo ""
 aws --region {{ region }} ec2 start-instances --instance-ids $AMI_SRC_EC2_ID
 aws --region {{ region }} ec2 wait instance-running --instance-ids $AMI_SRC_EC2_ID
 
-# Cleanup and exit.
+# Print guidance on how to launch instances with the new AMI to the console.
 
+SRC_TREE_DIR="`git rev-parse --show-toplevel`"
+ACTIVE_STATE_FILE=$SRC_TREE_DIR/active_instances/{{ instance_name }}.serial
+MAKE_INSTANCE_CMD=`grep make-instance.py $ACTIVE_STATE_FILE`
 echo ""
 echo "Finished building: $AMI_ID"
 echo ""
-echo "Exiting..."
+{% if ebs_encryption == 'true' %}
+echo "Relaunch {{ instance_name }} as an encrypted instance with this new AMI:"
+{% else %}
+echo "Relaunch {{ instance_name }} with this new AMI:"
+{% endif %}
+echo "\$ ./kill-instance.{{ instance_name }}.sh"
+echo "\$ ${MAKE_INSTANCE_CMD} --custom_ami=$AMI_ID"
+
+# Cleanup and exit.
+
 echo ""
+echo "Exiting..."
 exit 0

@@ -2,7 +2,7 @@
 # Name:		kill_instance.{{ instance_name }}.sh
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	June 3, 2019
-# Last Changed:	July 3, 2019
+# Last Changed:	July 4, 2019
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:	Destroy EC2 instance {{ instance_name }}
 ###############################################################################
@@ -197,24 +197,26 @@ fi
 
 # Remove all state data associated with {{ instance_name }}.
 
+echo "Deleted state files:"
 for file in {{ vars_file_path }} {{ instance_serial_number_file }}
 do
 	if [ -f $file ]
 	then
 		rm $file
-		echo "Deleted file: $file"
+		echo "	$file"
 	fi
 done
 
 # Delete symlinks to the top-level shell scripts.
 
 cd $SRC_TREE_DIR
+echo "Removed symlinks:"
 for link in kill-instance.{{ instance_name }}.sh build-ami.{{ instance_name }}.sh
 do
 	if [ -L $link ]
 	then
 		unlink $link
-		echo "Removed symlink: $link"
+		echo "	$link"
 	fi
 done
 

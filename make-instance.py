@@ -4,7 +4,7 @@
 # Name:         make-instance.py
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   June 3, 2019
-# Last Changed: July 3, 2019
+# Last Changed: July 4, 2019
 # Purpose:      Generic command-line EC2 instance creator
 ################################################################################
 
@@ -33,6 +33,7 @@ from prettytable import from_csv
 from aux_data import add_inbound_security_group_rule
 from aux_data import check_custom_ami
 from aux_data import ctrlC_Abort
+from aux_data import ebs_encryption_check
 from aux_data import ec2_instances_ebs_optimized
 from aux_data import ec2_instances_full_list
 from aux_data import ec2_instances_placement_groups
@@ -70,7 +71,7 @@ parser.add_argument('--base_os', '-B', choices=['alinux', 'alinux2', 'centos6', 
 parser.add_argument('--count', '-C', help='number of EC2 instances to create (default = 1)', type=int, required=False, default=1)
 parser.add_argument('--custom_ami', help='ami-id of a custom Amazon Machine Image (default = UNDEFINED)', required=False, default='UNDEFINED')
 parser.add_argument('--debug_mode', '-D', choices=['true', 'false'], help='Enable debug mode (default = false)', required=False, default='false')
-parser.add_argument('--ebs_encryption', choices=['true', 'false'], help='enable EBS encryption (default = false)', required=False, default='false')
+parser.add_argument('--ebs_encryption', choices=['true', 'false'], help='enable EBS encryption where possible (default = false)', required=False, default='false')
 parser.add_argument('--ebs_optimized', choices=['true', 'false'],help='use optimized EBS volumes (default = yes)', required=False, default='true')
 parser.add_argument('--ebs_root_volume_iops', help='amount of provisioned IOPS for the EBS root volume when ebs_root_volume_type=io1 (default = 0)', required=False, type=int, default=0)
 parser.add_argument('--ebs_root_volume_size', help='EBS volume size in GB (Linux default = 8, Windows default = 30)', required=False, type=int, default=8)
@@ -355,6 +356,11 @@ if ebs_optimized == 'true':
         print('')
         print('EBS optimization: Enabled')
 p_val('ebs_optimized', debug_mode)
+
+# Verify that the selected EC2 instance_type supports encrypted EBS volumes.
+
+if ebs_encryption == 'true':
+    ebs_encryption_check(instance_type, instance_name, debug_mode)
 
 # Check to ensure requested EBS volume size is not larger than 16 TB.
 
@@ -1028,7 +1034,7 @@ if count == 1:
 else:
     print('Generating templates for instance family ' + instance_name + '...')
 
-cmd_string = 'ansible-playbook --extra-vars \"instance_name=' + instance_name + ' instance_serial_number=' + instance_serial_number + ' turbot_account=' + turbot_account + ' enable_efs=' + enable_efs + ' efs_encryption=' + efs_encryption + ' preserve_ami=' + preserve_ami + ' preserve_efs=' + preserve_efs + ' enable_placement_group=' + enable_placement_group + ' placement_group_strategy=' + placement_group_strategy + ' enable_fsx=' + enable_fsx + ' enable_fsx_hydration=' + enable_fsx_hydration + ' fsx_s3_bucket=' + fsx_s3_bucket + ' fsx_s3_path=' + fsx_s3_path + '\" create_instance_terraform_templates.yml ' + ansible_verbosity
+cmd_string = 'ansible-playbook --extra-vars \"instance_name=' + instance_name + ' instance_serial_number=' + instance_serial_number + ' turbot_account=' + turbot_account + ' enable_efs=' + enable_efs + ' efs_encryption=' + efs_encryption + ' ebs_encryption=' + ebs_encryption + ' preserve_ami=' + preserve_ami + ' preserve_efs=' + preserve_efs + ' enable_placement_group=' + enable_placement_group + ' placement_group_strategy=' + placement_group_strategy + ' enable_fsx=' + enable_fsx + ' enable_fsx_hydration=' + enable_fsx_hydration + ' fsx_s3_bucket=' + fsx_s3_bucket + ' fsx_s3_path=' + fsx_s3_path + '\" create_instance_terraform_templates.yml ' + ansible_verbosity
 
 print(cmd_string, file=open(instance_serial_number_file, "a"))
 

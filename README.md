@@ -740,14 +740,15 @@ supported by Terraform at this time.  Please see this open issue on Github:
 
 https://github.com/terraform-providers/terraform-provider-aws/issues/8624)
 
-If your use case requires an encrypted EBS root volume, please refer to these
-guidelines in the AWS public documentation:
+If your use case requires an encrypted EBS root volume, please follow these
+steps:
 
-https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/EBSEncryption.html
+  * Add `ebs_encryption=true` to the `make-instance.py` invocation.
+  * When the instance is finished building, build a new encrypted AMI with the
+included `build-ami` script using the symlink in the top-level SRC tree.
+  * Note the resulting AMI ID value and use it to launch subsequent instances with "--custom_ami=$AMI_ID".
 
-Some current suggested workarounds:
-
-  * **Enable EBS encryption by default for all instances in the account.**  Here is a link to the AWS public documentation that explains how to enable encryption by default:
+You can also enable EBS encryption by default for all instances in the account by reviewing this link to the AWS public documentation:
 
 https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/EBSEncryption.html#encryption-by-default
 
@@ -758,8 +759,6 @@ link on the AWS public documentation summarizes the instances that can be
 launched within the region in question for that account:
 
 https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/EBSEncryption.html#EBSEncryption_supported_instances
-
-  * **Deploy from a custom AMI with an encrypted snapshot.**  Launch a normal EC2 instance with Ec2InstanceMaker.  Capture a snapshot of this instance, encrypt it, and then use the `--custom_ami` flag to launch the instance with this encrypted snapshot attached.  Ec2InstanceMaker will support this feature in a future release.
 
 * Please be advised that EFS encryption in transit is **not** supported for
 CentOS 6 or Ubuntu 14.04 LTS.

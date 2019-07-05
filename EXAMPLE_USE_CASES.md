@@ -15,37 +15,36 @@ documentation inconsistencies.
 
 ## Single Ondemand Instance With Defaults
 
-t2.micro instances with 8 GB gp2 EBS root volumes.
+t2.micro instances with 8 GB unencrypted gp2 EBS root volumes.
 
 ### Amazon Linux
-`./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=alinux`
+`$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=alinux`
 
 ### Amazon Linux 2:
-`./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=alinux2`
+$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=alinux2`
 
 ### CentOS 6.10
-`./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev03 --base_os=centos6`
+$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev03 --base_os=centos6`
 
 ### CentOS 7
-`./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=centos7`
+$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=centos7`
 
 ### Ubuntu 14.04.06 LTS
 ` ./make-instance.py -N dev04 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=ubuntu1404`
 
 ### Ubuntu 16.04.06 LTS
-`./make-instance.py -N dev02 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=ubuntu1604`
+$ ./make-instance.py -N dev02 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=ubuntu1604`
 
 ### Ubuntu 18.04.02 LTS
-`./make-instance.py -N dev02 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=ubuntu1804`
+$ ./make-instance.py -N dev02 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=ubuntu1804`
 
 ## Single Ondemand Instance With Larger EBS Root Volume
 
-t2.micro instances with larger gp2 EBS root volumes.  A sampling of "df" output
-for some operating systems is provided to confirm the root volume was sized as
-configured on the command line.
+t2.micro instances with larger unencrypted gp2 EBS root volumes.  A sampling of "df" output for some operating systems is provided to confirm the root volume was sized as configured on the command line.
 
 ### Custom AMI:
-```./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev03 --base_os=alinux2 --ebs_root_volume_size=1000 custom_ami=ami-00c8f252620d3a56e
+```
+$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev03 --base_os=alinux2 --ebs_root_volume_size=1000 custom_ami=ami-00c8f252620d3a56e
 
 [ec2-user@ip-172-31-44-153 ~]$ df -h
 Filesystem      Size  Used Avail Use% Mounted on
@@ -58,7 +57,8 @@ tmpfs            99M     0   99M   0% /run/user/1000
 ```
 
 ### Amazon Linux 2:
-```./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev03 --base_os=alinux2 --ebs_root_volume_size=785
+```
+$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev03 --base_os=alinux2 --ebs_root_volume_size=785
 
 [ec2-user@ip-172-31-45-192 ~]$ df -h
 Filesystem      Size  Used Avail Use% Mounted on
@@ -71,7 +71,8 @@ tmpfs            99M     0   99M   0% /run/user/1000
 ```
 
 ### CentOS 6.10
-```./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=centos6 --ebs_root_volume_size=250
+```
+$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=centos6 --ebs_root_volume_size=250
 
 [centos@ip-172-31-35-78 ~]$ df -h
 Filesystem      Size  Used Avail Use% Mounted on
@@ -80,7 +81,8 @@ tmpfs           498M     0  498M   0% /dev/shm
 ```
 
 ### CentOS 7.6.1810
-```./make-instance.py -N dev04 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=centos7 --ebs_root_volume_size=420
+```
+$ ./make-instance.py -N dev04 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=centos7 --ebs_root_volume_size=420
 
 [centos@ip-172-31-12-110 ~]$ df -h
 Filesystem      Size  Used Avail Use% Mounted on
@@ -93,7 +95,8 @@ tmpfs            99M     0   99M   0% /run/user/1000
 ```
 
 ### Ubuntu 16.04.06 LTS
-```./make-instance.py -N dev02 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=ubuntu1604 --ebs_root_volume_size=300
+```
+$ ./make-instance.py -N dev02 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=ubuntu1604 --ebs_root_volume_size=300
 
 ubuntu@ip-172-31-6-15:~$ df -h
 Filesystem      Size  Used Avail Use% Mounted on
@@ -108,6 +111,97 @@ tmpfs           100M     0  100M   0% /run/user/1000
 /dev/loop1       18M   18M     0 100% /snap/amazon-ssm-agent/1335
 ```
 
+## Single Ondemand Instance with Encrypted EBS Root Volume
+
+Starting with a t2.micro instance with an 8 GB unencrypted gp2 EBS root volume serving as the source for an encrypted AMI.  After the initial instance is created, the build-ami script is used to generate an encrypted AMI, which can then be leveraged to create a new instance with an encrypted EBS root volume.
+
+Because the source instance was originally built with `ebs_encryption=true`, the resulting AMI that is produced by this script will have its root EBS volume encrypted.
+
+Support for user-owned KMS keys will be provided in a future release.
+
+### Amazon Linux 2:
+```
+$ ./make-instance.py -A us-east-2a -O rmarable -E rodney.marable@gmail.com -N dev01 --ebs_encryption=true --preserve_ami=false
+```
+
+* Because `preserve_ami=false`, this AMI will **NOT** be preserved after the parent instance is terminated and will be not be available for launching new instances.  This is counterproductive for real-world use cases and thus is not a recommended best practice.  A more practical command line invocation looks like this:
+
+```
+$ ./make-instance.py -A us-east-2a -O rmarable -E rodney.marable@gmail.com -N dev01 --ebs_encryption=true
+```
+
+The `build_ami` script, located in the top-level SRC tree, is then used to create a new encrypted AMI:
+
+```
+$ ./build-ami.dev01.sh
+
+Parsing the InstanceId of the AMI source...
+
+##############################################################################
+#                              ** WARNING **                               #
+#                 Preparing to shut down the source instance!                #
+#    Please type CTRL-C within 5 seconds if this is *NOT* what you wanted!   #
+##############################################################################
+
+Shutting down the instance that will be used to build the new AMI...
+This may take a few minutes so please be patient!
+
+{
+    "StoppingInstances": [
+        {
+            "CurrentState": {
+                "Code": 64,
+                "Name": "stopping"
+            },
+            "InstanceId": "i-04e684dba550beba3",
+            "PreviousState": {
+                "Code": 16,
+                "Name": "running"
+            }
+        }
+    ]
+}
+
+Creating an unencrypted source AMI...
+
+Waiting for the unencrypted source AMI to become available...
+
+Creating an encrypted AMI from the unencrypted source...
+
+Waiting for the encrypted AMI to become available...
+
+Waiting for the ecrypted EBS snapshotting process to complete...
+
+Tagging the new AMI...
+
+Tagging the new EBS snapshot...
+
+Restarting the source EC2 instance...
+
+{
+    "StartingInstances": [
+        {
+            "CurrentState": {
+                "Code": 0,
+                "Name": "pending"
+            },
+            "InstanceId": "i-04e684dba550beba3",
+            "PreviousState": {
+                "Code": 80,
+                "Name": "stopped"
+            }
+        }
+    ]
+}
+
+Finished building: ami-0c83f12c460b868d1
+
+Launch a new encrypted instance with this AMI:
+$ ./make-instance.py -A us-east-2a -O rmarable -E rodney.marable@gmail.com -N dev01 --ebs_encryption=true --custom_ami=ami-0c83f12c460b868d1
+
+Exiting...
+```
+
 ## Single Ondemand Instance with Attached Elastic File System (EFS)
 
 t2.micro instance with an 8 GB gp2 EBS root volume and an attached EFS file
@@ -119,7 +213,8 @@ verification from the test instances:
 * "aws efs describe-file-systems"
 
 ### Amazon Linux:
-```./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev03 --base_os=alinux --enable_efs=true
+```
+$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev03 --base_os=alinux --enable_efs=true
 
 [ec2-user@ip-172-31-36-231 ~]$ df -h
 Filesystem                                 Size  Used Avail Use% Mounted on
@@ -130,7 +225,8 @@ fs-010349e2.efs.us-east-1.amazonaws.com:/  8.0E     0  8.0E   0% /efs
 ```
 
 ### Amazon Linux 2:
-```./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev03 --base_os=alinux2 --enable_efs=true
+```
+$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev03 --base_os=alinux2 --enable_efs=true
 
 [ec2-user@ip-172-31-43-188 ~]$ df
 Filesystem                1K-blocks    Used        Available Use% Mounted on
@@ -144,7 +240,8 @@ tmpfs                        100736       0           100736   0% /run/user/1000
 ```
 
 ### CentOS 6.10
-```./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=centos6 --enable_efs=true
+```
+$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=centos6 --enable_efs=true
 
 [centos@ip-172-31-36-96 ~]$ df
 Filesystem                  1K-blocks    Used        Available Use% Mounted on
@@ -155,7 +252,8 @@ fs-320f45d1.efs.us-east-1.amazonaws.com:/
 ```
 
 ### CentOS 7.6.1810
-```./make-instance.py -N dev04 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=centos7 --enable_efs=true
+```
+$ ./make-instance.py -N dev04 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=centos7 --enable_efs=true
 
 [centos@ip-172-31-3-221 ~]$ df -h
 Filesystem                                 Size  Used Avail Use% Mounted on
@@ -169,7 +267,8 @@ tmpfs                                       99M     0   99M   0% /run/user/1000
 ```
 
 ### Ubuntu 14.04.06 LTS
-```./make-instance.py -N dev04 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=ubuntu1404 --enable_efs=true
+```
+$ ./make-instance.py -N dev04 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=ubuntu1404 --enable_efs=true
 
 ubuntu@ip-172-31-8-189:~$ df -h
 Filesystem                                 Size  Used Avail Use% Mounted on
@@ -184,7 +283,8 @@ fs-28064ccb.efs.us-east-1.amazonaws.com:/  8.0E     0  8.0E   0% /efs
 ```
 
 ### Ubuntu 16.04.06 LTS
-```./make-instance.py -N dev03 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=ubuntu1604 --enable_efs=true
+```
+$ ./make-instance.py -N dev03 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=ubuntu1604 --enable_efs=true
 
 ubuntu@ip-172-31-11-234:~$ df
 Filesystem               1K-blocks    Used        Available Use% Mounted on
@@ -263,7 +363,8 @@ ubuntu@ip-172-31-11-234:~$ aws efs describe-file-systems
 ```
 
 ### Ubuntu 18.04.02 LTS
-```./make-instance.py -N dev02 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=ubuntu1804 --enable_efs=true
+```
+$ ./make-instance.py -N dev02 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=ubuntu1804 --enable_efs=true
 
 ubuntu@ip-172-31-10-51:~$ df -h
 Filesystem                                 Size  Used Avail Use% Mounted on
@@ -296,7 +397,8 @@ provided:
 * aws fsx describe-file-systems 
 
 ### Amazon Linux
-```./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev03 --base_os=alinux --enable_efs=true --efs_encryption=true
+```
+$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev03 --base_os=alinux --enable_efs=true --efs_encryption=true
 
 [ec2-user@ip-172-31-43-254 ~]$ df -h
 Filesystem      Size  Used Avail Use% Mounted on
@@ -310,7 +412,8 @@ tmpfs           493M     0  493M   0% /dev/shm
 ```
 
 ### Amazon Linux 2
-```./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev03 --base_os=alinux2 --enable_efs=true --efs_encryption=true
+```
+$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev03 --base_os=alinux2 --enable_efs=true --efs_encryption=true
 
 [ec2-user@ip-172-31-39-90 ~]$ df -h
 Filesystem      Size  Used Avail Use% Mounted on
@@ -389,7 +492,8 @@ sunrpc on /var/lib/nfs/rpc_pipefs type rpc_pipefs (rw,relatime)
 ```
 
 ### CentOS 6.10
-```./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=centos6 --enable_efs=true --efs_encryption=true
+```
+$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=centos6 --enable_efs=true --efs_encryption=true
 
 [centos@ip-172-31-36-128 ~]$ df -h
 Filesystem            Size  Used Avail Use% Mounted on
@@ -403,7 +507,8 @@ fs-141a50f7.efs.us-east-1.amazonaws.com:/ /efs nfs4 rw,relatime,vers=4,rsize=104
 ```
 
 ### CentOS 7.6.1810
-```./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=centos7 --enable_efs=true --efs_encryption=true
+```
+$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=centos7 --enable_efs=true --efs_encryption=true
 
 [centos@ip-172-31-34-77 ~]$ df -h
 Filesystem      Size  Used Avail Use% Mounted on
@@ -417,7 +522,8 @@ tmpfs            99M     0   99M   0% /run/user/1000
 ```
 
 ### Ubuntu 14.04.06 LTS
-```./make-instance.py -N dev04 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=ubuntu1404 --enable_efs=true --efs_encryption=true
+```
+$ ./make-instance.py -N dev04 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=ubuntu1404 --enable_efs=true --efs_encryption=true
 
 ubuntu@ip-172-31-10-53:~$ df -h
 Filesystem                                 Size  Used Avail Use% Mounted on
@@ -432,7 +538,8 @@ fs-65195386.efs.us-east-1.amazonaws.com:/  8.0E     0  8.0E   0% /efs
 ```
 
 ### Ubuntu 16.04.02 LTS
-```./make-instance.py -N dev04 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=ubuntu1604 --enable_efs=true --efs_encryption=true
+```
+$ ./make-instance.py -N dev04 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=ubuntu1604 --enable_efs=true --efs_encryption=true
 
 ubuntu@ip-172-31-10-1:~$ df -h
 Filesystem      Size  Used Avail Use% Mounted on
@@ -452,7 +559,8 @@ ubuntu@ip-172-31-10-1:~$ mount | grep efs
 ```
 
 ### Ubuntu 18.04.02 LTS
-```./make-instance.py -N dev02 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=ubuntu1804 --enable_efs=true --efs_encryption=true
+```
+$ ./make-instance.py -N dev02 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=ubuntu1804 --enable_efs=true --efs_encryption=true
 
 ubuntu@ip-172-31-9-161:~$ df -h
 Filesystem      Size  Used Avail Use% Mounted on
@@ -478,7 +586,8 @@ at /fsx.  Samples of "df", "df -h", and "aws fsx describe-file-systems" are
 provided for verification purposes.
 
 ### Amazon Linux
-```./make-instance.py -N dev01 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=alinux --enable_fsx=true
+```
+$ ./make-instance.py -N dev01 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=alinux --enable_fsx=true
 
 df[ec2-user@ip-172-31-13-252 ~]$ df
 Filesystem              1K-blocks    Used  Available Use% Mounted on
@@ -491,7 +600,8 @@ tmpfs                      504748       0     504748   0% /dev/shm
 ```
 
 ### Amazon Linux 2
-```./make-instance.py -N dev04 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=alinux2 --enable_fsx=true
+```
+$ ./make-instance.py -N dev04 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=alinux2 --enable_fsx=true
 
 [ec2-user@ip-172-31-12-209 ~]$ df
 Filesystem            1K-blocks    Used  Available Use% Mounted on
@@ -587,7 +697,8 @@ tmpfs                    99M     0   99M   0% /run/user/1000
 ```
 
 ### CentOS 7.6.1810
-```./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=centos7 --enable_fsx=true
+```
+$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=centos7 --enable_fsx=true
 
 [centos@ip-172-31-33-69 ~]$ df
 Filesystem              1K-blocks    Used  Available Use% Mounted on
@@ -611,11 +722,13 @@ bucket.  Existence of the scripts that users will use to push data in/out of
 S3 from the Lustre file system is confirmed.
 
 * Amazon Linux 2
-```./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev02 --request_type=spot --enable_fsx=true --fsx_s3_bucket=rmarable-hydration-test --fsx_s3_path=import --enable_fsx_hydration=true --base_os=alinux2
+```
+$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev02 --request_type=spot --enable_fsx=true --fsx_s3_bucket=rmarable-hydration-test --fsx_s3_path=import --enable_fsx_hydration=true --base_os=alinux2
 ```
 
 * CentOS 7.6.1810
-```./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev03 --request_type=spot --enable_fsx=true --fsx_s3_bucket=rmarable-hydration-test --fsx_s3_path=import --enable_fsx_hydration=true --base_os=centos7
+```
+$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev03 --request_type=spot --enable_fsx=true --fsx_s3_bucket=rmarable-hydration-test --fsx_s3_path=import --enable_fsx_hydration=true --base_os=centos7
 
 $ ./access_instance.py -N dev03
 The authenticity of host '54.152.64.121 (54.152.64.121)' can't be established.
@@ -647,9 +760,7 @@ lrwxrwxrwx. 1 root root 22 Jun 25 02:46 aws -> /usr/local/aws/bin/aws
 
 A standard AMI build script is provided with each new build.  To register a new AMI, please run the following command:
 
-```
-$ ./build-ami.dev01.sh
-```
+`$ ./build-ami.dev01.sh`
 .
 To build a new "golden" AMI or custom image, paste your desired changes into
 the obvious location within `templates/custom_user_script.j2` and they will

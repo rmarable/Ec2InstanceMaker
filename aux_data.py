@@ -2,7 +2,7 @@
 # Name:		aux_data.py
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	June 3, 2019
-# Last Changed:	July 3, 2019
+# Last Changed:	July 4, 2019
 # Purpose:	Data structures and functions to support Ec2InstanceMaker
 ################################################################################
 
@@ -162,6 +162,22 @@ def ctrlC_Abort(sleep_time, line_length, vars_file_path, instance_data_dir, inst
                 print('No EC2 keypair exists for this instance.')
         print('Aborting...')
         sys.exit(1)
+
+# Function: ebs_encryption_check()
+# Purpose: verify the instance_type supports EBS encryption
+
+def ebs_encryption_check(instance_type, instance_name, debug_mode):
+    global supported
+    for item in ec2_instances_ebs_encryption:
+        if item in instance_type:
+            supported = True
+    if supported:
+        print('')
+        print('Enabling: EBS encryption')
+        print('build-ami.' + instance_name + '.sh will create encrypted AMIs!')
+    else:
+        error_msg = instance_type + ' does not support EBS encryption!'
+        refer_to_docs_and_quit(error_msg)
 
 # Function: ec2_placement_group_check()
 # Purpose: verify the instance_type supports EC2 placement groups
@@ -424,6 +440,10 @@ ec2_instances_full_list = ec2_instances_general_purpose + ec2_instances_compute_
 # Instances that support EC2 Placement Groups
 
 ec2_instances_placement_groups = ['a1.', 'm4.', 'm5.', 'c3.', 'c4.', 'c5.', 'cr1.8xlarge', 'r3.', 'r4.', 'r5.', 'x1.', 'x1e.', 'z1d.', 'd2.', 'h1.', 'hs1.8xlarge', 'i2.', 'i3.', 'i3en.', 'f1.', 'g2.', 'g3.', 'p2.', 'p3']
+
+# Instances that support EBS encryption
+
+ec2_instances_ebs_encryption = ['a1.', 't2.', 't3', 'm3.', 'm4.', 'm5.', 'm5a.', 'm5ad.', 'm5d.', 'c3.', 'c4.', 'c5.', 'c5.metal', 'c5d.', 'c5n.', 'cr1.8xlarge', 'r3.', 'r4.', 'r5', 'x1.', 'x1e.', 'z1d.', 'd2.', 'h1.2xlarge', 'hs1.4xlarge', 'i2.', 'i3', 'f1.', 'g2.', 'g3.', 'p2.', 'p3', 'i3.metal', 'm5.metal', 'm5d.metal', 'r5.metal', 'r5d.metal', 'u-6tb1.metal', 'u-9tb1.metal', 'u-12tb1.metal', 'z1d.metal']
 
 # Unsupported instance types by operating system
 
