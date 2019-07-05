@@ -3,8 +3,8 @@
 Ec2InstanceMaker is an Open Source command line interface that makes it easy
 to build, access, and destroy servers and storage resources in the cloud.  It
 is also a useful teaching tool for those who want to dive deep into cloud
-computing and storage paradigms, learn more about infrastructure automation,
-and explore the AWS ecosystem.
+computing, storage, and security paradigms, learn more about infrastructure
+automation, and explore the AWS ecosystem.
 
 ## License Information
 
@@ -46,18 +46,19 @@ visiting:
 * https://aws.amazon.com/efs/
 * https://aws.amazon.com/fsx/lustre/
 
-Ec2InstanceMaker also makes extensive use of Terraform, Ansible, the Amazon
-Web Services SDK for Python (boto3), and jq.  You can find more information
-about these tools by visiting:
+Ec2InstanceMaker makes extensive use of Ansible, Terraform, the Amazon Web
+Services SDK for Python (boto3), and jq.  You can find more information about
+these tools by visiting:
 
-* Terraform: https://www.terraform.io/
 * Ansible: https://www.ansible.com/
+* Terraform: https://www.terraform.io/
 * Boto3: https://boto3.amazonaws.com/v1/documentation/api/latest/index.html
 * jq: https://stedolan.github.io/jq/
 
-Ec2InstanceMaker requires Python 3.6 or greater and a functional Bash shell
-environment.  It can be run locally on OSX or Linux, and on an existing EC2
-Linux instance.  Please refer to the "Installing Ec2InstanceMaker" section
+Ec2InstanceMaker also requires Python 3.6 (or greater) and a functional Bash
+shell environment.  It can be run locally on OSX or Linux, on an existing EC2
+Linux instance, or from an EC2 instance spawned from a previous invocation of
+Ec2InstanceMaker.  Please refer to the "Installing Ec2InstanceMaker" section
 for detailed guidance on how to properly configure your environment.
 
 Running Ec2InstanceMaker locally on a Windows machine is **not** supported,
@@ -86,10 +87,12 @@ type are compatible.
 
 * Administrative control over the allowed EC2 instance types that can be deployed.
 
-* Creation of new AMIs from the spawned EC2 instance to assist with deployment of customized compute environments.  Please see below for additional guidance on how to augment the build templates to incorporate your "personalized" changes.
-
-* Creation of new instances from custom AMIs.  Please see below for additional 
-guidance on enabling EBS root volume encryption.
+* Custom AMI support to enable deployment of standardized cloud computing environments.  Please see "Working with Custom AMIs" below for more details on how to leverage these options which include:
+  * Spawning of new instances from previously built user-supplied "custom AMIs."
+  * Creation of new "golden images" using EC2 instances spawned from Ec2InstanceMaker as the source.
+  * Easy inclusion of user customization scripts within the Ec2InstanceMaker provisioning process.
+  * Optional construction of "golden images" with encrypted root EBS volumes.
+  * Incorporation into existing DevOps CI/CD piplines.
 
 * Multiple instances with identical configurations built at the same time a.k.a. "instance families."
 
