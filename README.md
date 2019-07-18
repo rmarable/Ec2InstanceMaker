@@ -125,6 +125,13 @@ and tags.  Hydration to and from an S3 bucket is also supported.
 
 * Custom i.e. user-provided IAM instance profiles that can be created from user-supplied JSON policy documents or pre-existing IAM roles.  Guidance for how to communicate with your local DevOps team to get their support with deployment of tthe aforementioned policy documents is also provided in the "Note to DevOps Teams" section below.
 
+* Control of the IAM namespace used by roles, instance profiles, and policies
+through the "iam_name_prefix" parameter.  If this switch is not set, all IAM
+entitities default to using "Ec2InstanceMaker" as the prefix.  This makes it
+easier for DevOps teams to incorporate Ec2InstanceMaker into architectures that
+are based on users assuming predefined roles to perform activities in the AWS
+environment.
+
 * Email notifications via SNS whenever an instance is created or deleted.
 
 * Identification of the instance owner, email address, and department using
@@ -181,14 +188,21 @@ As noted above, Ec2InstanceMaker is intended to reduce the administrative burden
   * They do not intentionally modify Route53 configurations, change default routes, or otherwise impact or deploy any infrastructure that is not explicitly documented or easily inferred by reviewing the code.
 
 * **Ec2InstanceMaker creates generic IAM roles, policies, and instance templates that are individualized as much as possible for each instance or instance family.**
-  * These JSON templates contain all required IAM permissions to work with the AWS services listed below and can be easily extended to fit any use case:
+  * These JSON templates are located in the templates/ subdirectory and contain all required IAM permissions to work with the AWS services listed below:
     * EC2
     * AutoScaling
     * S3
     * SQS
     * SNS
-  * They are located in the templates/ subdirectory.  For convenience, "minimal" and "admin" templates are also provided.
   * If you run into permissions problems building instances or provisioning storage resources, it's usually because of an IAM issue.  When speaking with your DevOps professionals, it is suggested that you share this template and work with them to customize an appropriate solution for your environment.
+  * DevOps teams should also be aware that granular control over the IAM namespace can be realized by setting `--iam_name_prefix` to a chosen value.  This makes it eaiser to incorporate Ec2InstanceMaker into environments that perfer to have users assume a set of standard roles to perform tasks in the AWS environment.
+
+For example:
+```
+$ ./make-instance.py -N dev01 -O rmarable -E rodney.marable@gmail.com -A us-west-2b --iam_name_prefix=MyEc2IamPrefix
+```
+
+This command will create an EC2 instance role, instance profile, and policy prepended with MyEc2IamPrefix.  The user can only create, delete, or modify IAM entities that are prepended with "MyEc2IamPrefix."
 
 ## Using Ec2InstanceMaker
 
@@ -250,6 +264,7 @@ usage: make-instance.py [-h] --az AZ --instance_name INSTANCE_NAME
                         [--fsx_s3_path FSX_S3_PATH]
                         [--hyperthreading {true,false}]
                         [--iam_json_policy IAM_JSON_POLICY]
+                        [--iam_name_prefix IAM_NAME_PREFIX]
                         [--iam_role IAM_ROLE]
                         [--instance_owner_department {analytics,clinical,commercial,compbio,compchem,datasci,design,development,hpc,imaging,manufacturing,medical,modeling,operations,proteomics,robotics,qa,research,scicomp}]
                         [--request_type {ondemand,spot}]
@@ -334,6 +349,9 @@ optional arguments:
                         Use a pre-existing JSON policy document in the
                         /templates subdirectory to set permissions for
                         iam_role (default = GenericEc2InstancePolicy.json
+  --iam_name_prefix IAM_NAME_PREFIX
+                        Provide a prefix for the IAM entities associated with
+                        the instance (default = Ec2InstanceMaker)
   --iam_role IAM_ROLE   Apply a pre-existing IAM role to the instance
   --instance_owner_department {analytics,clinical,commercial,compbio,compchem,datasci,design,development,hpc,imaging,manufacturing,medical,modeling,operations,proteomics,robotics,qa,research,scicomp}
                         Department of the instance_owner (default = hpc)
@@ -547,9 +565,9 @@ Deleted EC2 keypair: dev01-53522312062019_us-east-1
 Deleted SSH keypair file: /Users/rmarable/src/public/Ec2InstanceMaker/instance_data/dev01/dev01-53522312062019_us-east-1.pem
 Deleted directory: /Users/rmarable/src/public/Ec2InstanceMaker/instance_data/dev01
 Deleted SNS topic: arn:aws:sns:us-east-1:147724377207:Ec2_Instance_SNS_Alerts_dev01-53522312062019
-Deleted IAM EC2 policy: ec2-instance-policy-dev01-53522312062019
-Deleted IAM EC2 instance profile: ec2-instance-profile-dev01-53522312062019
-Deleted IAM role: ec2-instance-role-dev01-53522312062019
+Deleted IAM EC2 policy: Ec2InstanceMaker-policy-dev01-53522312062019
+Deleted IAM EC2 instance profile: Ec2InstanceMaker-profile-dev01-53522312062019
+Deleted IAM role: Ec2InstanceMaker-role-dev01-53522312062019
 Deleted file: ./vars_files/dev01.yml
 Deleted file: ./active_instances/dev01.serial
 Deleted file: kill-instance.dev01.sh

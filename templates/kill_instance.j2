@@ -2,7 +2,7 @@
 # Name:		kill_instance.{{ instance_name }}.sh
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	June 3, 2019
-# Last Changed:	July 4, 2019
+# Last Changed:	July 17, 2019
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:	Destroy EC2 instance {{ instance_name }}
 ###############################################################################
@@ -182,21 +182,29 @@ echo ""
 if [[ $PRESERVE_IAM_ROLE="false" ]]
 then
 	aws iam delete-role-policy --role-name {{ ec2_iam_instance_role }} --policy-name {{ ec2_iam_instance_policy }}
-	echo "Deleted IAM EC2 policy: {{ ec2_iam_instance_policy }}"
 	aws iam remove-role-from-instance-profile --instance-profile-name {{ ec2_iam_instance_profile }} --role-name {{ ec2_iam_instance_role }}
 	aws iam delete-instance-profile --instance-profile-name {{ ec2_iam_instance_profile }}
 	aws iam delete-role --role-name {{ ec2_iam_instance_role }}
+	echo "Deleted IAM EC2 policy: {{ ec2_iam_instance_policy }}"
 	echo "Deleted IAM EC2 instance profile: {{ ec2_iam_instance_profile }}"
-	echo "Deleted IAM role: {{ ec2_iam_instance_role }}"
-else
+	echo "Deleted IAM EC2 role: {{ ec2_iam_instance_role }}"
+fi
+{% else %}
+
+# Since PRESERVE_IAM_ROLE is true, don't delete any IAM entities associated
+# with the instance(s).
+
+if [[ $PRESERVE_IAM_ROLE="false" ]]
+then
 	echo "Preserved EC2 IAM instance policy: {{ ec2_iam_instance_policy }}"
-	echo "Preserved EC2 IAM instance role: {{ ec2_iam_instance_role }}"
 	echo "Preserved EC2 IAM instance profile: {{ ec2_iam_instance_profile }}"
+	echo "Preserved EC2 IAM instance role: {{ ec2_iam_instance_role }}"
 fi
 {% endif %}
 
 # Remove all state data associated with {{ instance_name }}.
 
+echo ""
 echo "Deleted state files:"
 for file in {{ vars_file_path }} {{ instance_serial_number_file }}
 do
@@ -210,6 +218,7 @@ done
 # Delete symlinks to the top-level shell scripts.
 
 cd $SRC_TREE_DIR
+echo ""
 echo "Removed symlinks:"
 for link in kill-instance.{{ instance_name }}.sh build-ami.{{ instance_name }}.sh
 do

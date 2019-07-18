@@ -336,6 +336,23 @@ def illegal_az_msg(az):
     print('Aborting...')
     sys.exit(1)
 
+# Function: modify_iam_policy_document()
+# Purpose: modify the generic JSON policy document to limit the scope of IAM
+# modification rights to roles, instance profiles, and policies prepended with
+# iam_name_prefix 
+
+def modify_iam_policy_document(instance_json_policy_src, instance_json_policy_stage, iam_name_prefix, instance_serial_number):
+    with open(instance_json_policy_src, 'r') as ec2_iam_role_src:
+        role_stage_0 = ec2_iam_role_src.read()
+        ec2_iam_role_src.close()
+        role_stage_1 = role_stage_0.replace('<EC2_POLICY>', iam_name_prefix + '-policy-' + instance_serial_number)
+        role_stage_2 = role_stage_1.replace('<EC2_ROLE>', iam_name_prefix + '-role-' + instance_serial_number)
+        role_stage_3 = role_stage_2.replace('<EC2_INSTANCE_PROFILE>', iam_name_prefix + '-profile-' + instance_serial_number)
+        filedata = role_stage_3
+    with open(instance_json_policy_stage, 'w') as ec2_iam_role_dest:
+        ec2_iam_role_dest.write(filedata)
+        ec2_iam_role_dest.close()
+
 # Function: p_fail()
 # Purpose: print a failed instance_parameter validation message to stdout
 

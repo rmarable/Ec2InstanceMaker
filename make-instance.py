@@ -4,7 +4,7 @@
 # Name:         make-instance.py
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   June 3, 2019
-# Last Changed: July 4, 2019
+# Last Changed: July 17, 2019
 # Purpose:      Generic command-line EC2 instance creator
 ################################################################################
 
@@ -47,6 +47,7 @@ from aux_data import ec2_placement_group_check
 from aux_data import get_ami_info
 from aux_data import illegal_az_msg
 from aux_data import base_os_instance_check
+from aux_data import modify_iam_policy_document
 from aux_data import p_fail
 from aux_data import p_val
 from aux_data import print_TextHeader
@@ -88,6 +89,7 @@ parser.add_argument('--fsx_s3_bucket', help='Name of an S3 bucket connected to t
 parser.add_argument('--fsx_s3_path', help='Path to a folder on s3://fsx_s3_bucket that Lustre will import/export from (default = fsxRoot)', required=False, default='fsxRoot')
 parser.add_argument('--hyperthreading', '-H', choices=['true', 'false'], help='enable Intel Hyperthreading (default = true)', required=False, default='true')
 parser.add_argument('--iam_json_policy', '-J', help='Use a pre-existing JSON policy document in the /templates subdirectory to set permissions for iam_role (default = GenericEc2InstancePolicy.json', required=False, default='GenericEc2InstancePolicy.json')
+parser.add_argument('--iam_name_prefix', help='Provide a prefix for the IAM entities associated with the instance (default = Ec2InstanceMaker)', required=False, default='Ec2InstanceMaker')
 parser.add_argument('--iam_role', help='Apply a pre-existing IAM role to the instance(s)', required=False, default='UNDEFINED')
 parser.add_argument('--instance_owner_department', choices=['analytics', 'clinical', 'commercial', 'compbio', 'compchem', 'datasci', 'design', 'development', 'hpc', 'imaging', 'manufacturing', 'medical', 'modeling', 'operations', 'proteomics', 'robotics', 'qa', 'research', 'scicomp'], help='Department of the instance_owner (default = hpc)', required=False, default='hpc')
 parser.add_argument('--request_type', choices=['ondemand', 'spot'], help='choose between ondemand or spot instances (default = ondemand)', required=False, default='ondemand')
@@ -129,6 +131,7 @@ fsx_chunk_size = args.fsx_chunk_size
 fsx_size = args.fsx_size
 hyperthreading = args.hyperthreading
 iam_json_policy = args.iam_json_policy
+iam_name_prefix = args.iam_name_prefix
 iam_role = args.iam_role
 instance_name = args.instance_name
 instance_owner = args.instance_owner
@@ -583,16 +586,28 @@ else:
     p_val('ec2_keypair', debug_mode)
 
 # Create and apply an IAM EC2 instance(s) profile from the default template if
-# iam_role was not defined by the operator.  All IAM resources created as part
-# of the life cycle will be terminated along with the instance(s).
+# iam_role was not defined by the operator.
+#
+# If iam_name_prefix was supplied, prepend this string to the IAM role, policy,
+# and instance profile associated with the instance(s) and modify the JSON
+# policy document with the modify_iam_policy_document function.
+#
+# All IAM resources are to be terminated along with the instance(s).
 
 if iam_role == 'UNDEFINED':
-    ec2_iam_instance_role = 'ec2-instance-role-' + instance_serial_number
-    ec2_iam_instance_policy = 'ec2-instance-policy-' + instance_serial_number
-    ec2_iam_instance_profile = 'ec2-instance-profile-' + instance_serial_number
+    if iam_name_prefix == 'Ec2InstanceMaker':
+        ec2_iam_instance_role = 'Ec2InstanceMaker-role-' + instance_serial_number
+        ec2_iam_instance_policy = 'Ec2InstanceMaker-policy-' + instance_serial_number
+        ec2_iam_instance_profile = 'Ec2InstanceMaker-profile-' + instance_serial_number
+    else:
+        ec2_iam_instance_role = iam_name_prefix + '-role-' + instance_serial_number
+        ec2_iam_instance_policy = iam_name_prefix + '-policy-' + instance_serial_number
+        ec2_iam_instance_profile = iam_name_prefix + '-profile-' + instance_serial_number
     instance_json_policy_src = 'templates/' + iam_json_policy
+    instance_json_policy_stage = instance_data_dir + 'stage-' + iam_json_policy 
     instance_json_policy_template = instance_data_dir + iam_json_policy
     preserve_iam_role = 'false'
+    modify_iam_policy_document(instance_json_policy_src, instance_json_policy_stage, iam_name_prefix, instance_serial_number)
     try:
         check_role = iam.get_role(RoleName=ec2_iam_instance_role)
         if debug_mode == 'true':
@@ -600,12 +615,13 @@ if iam_role == 'UNDEFINED':
         print('Found IAM EC2 instance role: ' + ec2_iam_instance_role)
     except ClientError as e:
         if e.response['Error']['Code'] == 'NoSuchEntity':
-            with open(instance_json_policy_src, 'r') as ec2_instance_role_src:
+            with open(instance_json_policy_stage, 'r') as ec2_instance_role_src:
                 filedata = ec2_instance_role_src.read()
                 ec2_instance_role_src.close()
             with open(instance_json_policy_template, 'w') as ec2_instance_role_dest:
                 ec2_instance_role_dest.write(filedata)
                 ec2_instance_role_dest.close()
+                os.remove(instance_json_policy_stage)
             instance_ec2_instance_role = iam.create_role(
                 RoleName=ec2_iam_instance_role,
                 AssumeRolePolicyDocument='{ "Version": "2012-10-17", "Statement": [ { "Effect": "Allow", "Principal": { "Service": [ "ec2.amazonaws.com" ] }, "Action": "sts:AssumeRole" } ] }',
@@ -764,6 +780,7 @@ instance_parameters = {
     'fsx_chunk_size': fsx_chunk_size,
     'instance_type': instance_type,
     'hyperthreading': hyperthreading,
+    'iam_name_prefix': iam_name_prefix,
     'instance_owner': instance_owner,
     'instance_owner_email': instance_owner_email,
     'instance_owner_department': instance_owner_department,
@@ -871,7 +888,7 @@ vars_file_main_part = '''\
 # Name:    	{instance_name}.yml
 # Author:  	Rodney Marable <rodney.marable@gmail.com>
 # Created On:   June 3, 2019
-# Last Changed: July 3, 2019
+# Last Changed: July 17, 2019
 # Deployed On:  {DEPLOYMENT_DATE}
 # Purpose: 	Build template auto-generated by Ec2InstanceMaker
 ################################################################################
@@ -1034,7 +1051,7 @@ if count == 1:
 else:
     print('Generating templates for instance family ' + instance_name + '...')
 
-cmd_string = 'ansible-playbook --extra-vars \"instance_name=' + instance_name + ' instance_serial_number=' + instance_serial_number + ' turbot_account=' + turbot_account + ' enable_efs=' + enable_efs + ' efs_encryption=' + efs_encryption + ' ebs_encryption=' + ebs_encryption + ' preserve_ami=' + preserve_ami + ' preserve_efs=' + preserve_efs + ' enable_placement_group=' + enable_placement_group + ' placement_group_strategy=' + placement_group_strategy + ' enable_fsx=' + enable_fsx + ' enable_fsx_hydration=' + enable_fsx_hydration + ' fsx_s3_bucket=' + fsx_s3_bucket + ' fsx_s3_path=' + fsx_s3_path + '\" create_instance_terraform_templates.yml ' + ansible_verbosity
+cmd_string = 'ansible-playbook --extra-vars \"instance_name=' + instance_name + ' instance_serial_number=' + instance_serial_number + ' turbot_account=' + turbot_account + ' enable_efs=' + enable_efs + ' efs_encryption=' + efs_encryption + ' ebs_encryption=' + ebs_encryption + ' preserve_ami=' + preserve_ami + ' preserve_iam_role=' + preserve_iam_role + ' preserve_efs=' + preserve_efs + ' enable_placement_group=' + enable_placement_group + ' placement_group_strategy=' + placement_group_strategy + ' enable_fsx=' + enable_fsx + ' enable_fsx_hydration=' + enable_fsx_hydration + ' fsx_s3_bucket=' + fsx_s3_bucket + ' fsx_s3_path=' + fsx_s3_path + '\" create_instance_terraform_templates.yml ' + ansible_verbosity
 
 print(cmd_string, file=open(instance_serial_number_file, "a"))
 

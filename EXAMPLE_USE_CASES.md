@@ -756,7 +756,96 @@ lrwxrwxrwx. 1 root root 22 Jun 25 02:46 aws -> /usr/local/aws/bin/aws
 -rwxr-xr-x. 1 root root 71 Jun 25 02:48 import-s3-to-lustre.sh
 ```
 
-## Building a New AMI from a Fresh Instance ##
+## Using a custom prefix for all IAM entities
+
+Building an EC2 instance using a custom prefix to name all IAM entities will only allow the user invoking the build to create, delete, or modify roles, policies, and instance profiles that include the aforementioned prefix.  This parameter defaults to "Ec2InstanceMaker":
+
+```
+$ ./make-instance.py -N dev01 -O rmarable -E rodney.marable@gmail.com -A us-west-2b --iam_name_prefix=MyEc2IamPrefix
+
+Performing parameter validation...
+
+Selected EC2 instance type: t2.micro
+
+Selected base operating system: alinux2
+
+** WARNING **
+t2.micro does not support EBS optimization!
+Disabling ebs_optimization for: dev01
+
+Selected: ondemand (NOTE: spot instances are **MUCH** cheaper!)
+
+Created EC2 keypair: dev01-48051518072019_us-west-2
+Created EC2 instance role: MyEc2IamPrefix-role-dev01-48051518072019
+Created EC2 instance profile: MyEc2IamPrefix-profile-dev01-48051518072019
+Added: MyEc2IamPrefix-role-dev01-48051518072019 to MyEc2IamPrefix-profile-dev01-48051518072019
+
+Saved dev01 build template: ./vars_files/dev01.yml
+
+Generating templates for instance dev01...
+
+PLAY [Provision Terraform templates to build new EC2 instances] **
+
+TASK [Create a state directory for the EC2 instance(s)] **
+ [WARNING]: Platform darwin on host localhost is using the discovered Python
+interpreter at /usr/bin/python, but future installation of another Python
+interpreter could change this. See https://docs.ansible.com/ansible/2.8/referen
+ce_appendices/interpreter_discovery.html for more information.
+
+<snipped>
+
+$ ./kill-instance.dev01.sh
+
+EC2 instance "dev01" is marked for termination.
+
+################################################################################
+################  Please type CTRL-C within 5 seconds to abort  ################
+################################################################################
+
+Destroying instance: dev01
+
+aws_instance.dev01[0]: Refreshing state... [id=i-0bef75a01200a212f]
+aws_instance.dev01[0]: Destroying... [id=i-0bef75a01200a212f]
+aws_instance.dev01[0]: Still destroying... [id=i-0bef75a01200a212f, 10s elapsed]
+aws_instance.dev01[0]: Still destroying... [id=i-0bef75a01200a212f, 20s elapsed]
+aws_instance.dev01[0]: Still destroying... [id=i-0bef75a01200a212f, 30s elapsed]
+aws_instance.dev01[0]: Destruction complete after 35s
+
+Destroy complete! Resources: 1 destroyed.
+Deleted EC2 keypair: dev01-48051518072019_us-west-2
+Deleted SSH keypair file: /Users/rmarable/src/public/Ec2InstanceMaker/instance_data/dev01/dev01-48051518072019_us-west-2.pem
+Deleted directory: /Users/rmarable/src/public/Ec2InstanceMaker/instance_data/dev01
+
+No AMI image tagged with dev01-48051518072019 was found.
+
+Published instance termination message:
+{
+    "MessageId": "d6bb4831-d454-50b6-9754-1d9b129725ad"
+}
+Deleted SNS topic: arn:aws:sns:us-east-1:147724377207:Ec2_Instance_SNS_Alerts_dev01-48051518072019
+
+Deleted IAM EC2 policy: MyEc2IamPrefix-policy-dev01-48051518072019
+Deleted IAM EC2 instance profile: MyEc2IamPrefix-profile-dev01-48051518072019
+Deleted IAM EC2 role: MyEc2IamPrefix-role-dev01-48051518072019
+
+Deleted state files:
+	./vars_files/dev01.yml
+	./active_instances/dev01.serial
+
+Removed symlinks:
+	kill-instance.dev01.sh
+	build-ami.dev01.sh
+
+###############################################################################
+    Finished deleting EC2 instance: dev01
+###############################################################################
+
+Exiting...
+```
+
+Future releases will provide DevOps teams with increased control over user permissions in these more controlled environments.
+
+## Building a New AMI from a Fresh Instance
 
 A standard AMI build script is provided with each new build.  To register a new AMI, please run the following command:
 
