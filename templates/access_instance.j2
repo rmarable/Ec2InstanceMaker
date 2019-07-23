@@ -2,7 +2,7 @@
 # Name:		access_instance.{{ instance_name }}.j2
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   June 8, 2019
-# Last Changed: July 1, 2019
+# Last Changed: July 21, 2019
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 {% if base_os == 'windows2019' %}
 # Purpose:	Provide a quick reference for Windows Administrator passwords
@@ -68,15 +68,37 @@ menu_index = args.menu_index
 {% endif %}
 {% endif %}
 
+{% if count > 1 %}
+# Refresh the Terraform state and parse the IP addresses of the instances.
+{% else %}
+# Refresh the Terraform state and parse the IP address of the instance.
+{% endif %}
+
+subprocess.run('terraform refresh',  stdout=subprocess.DEVNULL, shell=True, stderr=subprocess.DEVNULL, cwd=instance_data_dir)
+ec2_ip_addr_tf = subprocess.run('terraform show | grep instance_ip_addresses | awk \'{print $3}\'', stdout=subprocess.PIPE, shell=True, stderr=subprocess.DEVNULL, cwd=instance_data_dir)
+ec2_IpAddress = ec2_ip_addr_tf.stdout.decode('utf-8').replace('\"', '').strip()
+
+{% if count > 1 %}
+# Parse the instanceId(s).
+{% else %}
+# Parse the instanceId.
+{% endif %}
+
 ec2_instance_id_tf = subprocess.run('terraform show | grep instance_id | awk \'{print $3}\'',  stdout=subprocess.PIPE, shell=True, stderr=subprocess.DEVNULL, cwd=instance_data_dir)
 ec2_InstanceId = ec2_instance_id_tf.stdout.decode('utf-8').replace('\"', '').strip()
 
-# Abort if the menu table is empty because no instances exist.
+# Abort if the menu table is empty because no instance(s) exist(s).
 
 if len(ec2_InstanceId) == 0:
-    print('No instances found!')
+    print('No instance(s) found!')
     print('Aborting...')
     sys.exit(1)
+
+{% if count > 1 %}
+# Parse the names of the instances.
+{% else %}
+# Parse the name of the instance.
+{% endif %}
 
 ec2_instance_name_tf = subprocess.run('terraform show | grep instance_name_index | awk \'{print $3}\'',  stdout=subprocess.PIPE, shell=True, stderr=subprocess.DEVNULL, cwd=instance_data_dir)
 ec2_InstanceName = ec2_instance_name_tf.stdout.decode('utf-8').replace('\"', '').strip()
@@ -88,20 +110,17 @@ for winItemId_tf in str(ec2_InstanceId).split(","):
     adminpw_tf = winItemPw_tf.stdout.decode('utf-8').replace('\"', '').strip()
     winItemAdminPw_tf.append(adminpw_tf)
 windows_AdministratorPassword = ','.join(winItemAdminPw_tf)
+
 {% endif %}
-
-ec2_ip_addr_tf = subprocess.run('terraform show | grep instance_ip_addresses | awk \'{print $3}\'', stdout=subprocess.PIPE, shell=True, stderr=subprocess.DEVNULL, cwd=instance_data_dir)
-ec2_IpAddress = ec2_ip_addr_tf.stdout.decode('utf-8').replace('\"', '').strip()
-
 # Create a temporary CSV file and table header for the instance state data.
 
 csvTempFile = '/tmp/_csvTempFile_' + instance_serial_number + '.csv'
 csv_file = open(csvTempFile, 'w')
-
 {% if base_os == 'windows2019' %}
+
 csv_file.write('Instance Name,IP Address,Adminstrator Password\n')
 {% else %}
-csv_file.write('Item,Instance Name,IP Address\n')
+csv_file.write('Item,Instance Name,IP Address,Instance ID\n')
 {% endif %}
 
 csv_file.close()
@@ -126,16 +145,16 @@ print('')
 print('Reprint this table:')
 print('$ ./access_instance -N ' + instance_name )
 print('')
-{% else %}
 
+{% else %}
 # Compute the number of instances deployed with this instance_name.
 
 ec2_menu_items = len(ec2_IpAddress)
 
 # Append the instance state data to the temporary CSV header file.
 
-for x, y, z in zip(menuCount(1, ec2_menu_items), ec2_InstanceName.split(','), ec2_IpAddress.split(',')):
-    element = str(x) + ',' + y + ',' + z + '\n'
+for w, x, y, z in zip(menuCount(1, ec2_menu_items), ec2_InstanceName.split(','), ec2_IpAddress.split(','), ec2_InstanceId.split(',')):
+    element = str(w) + ',' + x + ',' + y + ',' + z + '\n'
     csv_file.write(element)
 csv_file.close()
 csv_file = open(csvTempFile, 'r')
@@ -168,14 +187,32 @@ with open(csvTempFile, newline='') as infh:
         if str(row[0]) == str(menuchoice):
             ssh_hostname = row[1]
             ssh_ip_address = row[2]
+            ssh_instance_id = row[3]
             print('Opening an SSH connection to: ' + ssh_hostname)
             print('')
-            subprocess.run('ssh -i ' + ec2_keypair + '.pem -l {{ ec2_user }} ' + ssh_ip_address,  shell=True, cwd=instance_data_dir)
+            if ssh_ip_address == '':
+                    print('*** ERROR ***')
+                    print('No IP address found for: ' + ssh_instance_id)
+                    print('Please power on the instance and retry!')
+                    print('Aborting...')
+                    sys.exit(1)
+            else:
+                subprocess.run('ssh -i ' + ec2_keypair + '.pem -l {{ ec2_user }} ' + ssh_ip_address,  shell=True, cwd=instance_data_dir)
 
 {% else %}
 # Make an SSH connection to the new instance.
+#
+# If the IP address is missing, return an error and abort as the instance being
+# accessed is probably powered off.
 
-subprocess.run('ssh -i ' + ec2_keypair + '.pem -l {{ ec2_user }} ' + ec2_IpAddress, shell=True, cwd=instance_data_dir)
+if ec2_IpAddress == '':
+    print('')
+    print('*** ERROR ***')
+    print('No IP address found! Please power on the instance and retry.')
+    print('Aborting...')
+    sys.exit(1)
+else:
+    subprocess.run('ssh -i ' + ec2_keypair + '.pem -l {{ ec2_user }} ' + ec2_IpAddress, shell=True, cwd=instance_data_dir)
 {% endif %}
 
 # Print SSH reconnection information to the console.
