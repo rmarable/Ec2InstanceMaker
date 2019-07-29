@@ -21,28 +21,45 @@ t2.micro instances with 8 GB unencrypted gp2 EBS root volumes.
 `$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=alinux`
 
 ### Amazon Linux 2:
-$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=alinux2`
+`$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=alinux2`
 
 ### CentOS 6.10
-$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev03 --base_os=centos6`
+`$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev03 --base_os=centos6`
 
 ### CentOS 7
-$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=centos7`
+`$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=centos7`
 
 ### Ubuntu 14.04.06 LTS
 ` ./make-instance.py -N dev04 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=ubuntu1404`
 
 ### Ubuntu 16.04.06 LTS
-$ ./make-instance.py -N dev02 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=ubuntu1604`
+`$ ./make-instance.py -N dev02 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=ubuntu1604`
 
 ### Ubuntu 18.04.02 LTS
-$ ./make-instance.py -N dev02 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=ubuntu1804`
+`$ ./make-instance.py -N dev02 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=ubuntu1804`
 
 ## Single Ondemand Instance With Larger EBS Root Volume
 
 t2.micro instances with larger unencrypted gp2 EBS root volumes.  A sampling of "df" output for some operating systems is provided to confirm the root volume was sized as configured on the command line.
 
-### Custom AMI:
+## Spawning Child Instances from Ec2InstanceMaker-created Instances
+
+Ec2InstanceMaker creates generic IAM roles, policies, and instance templates that are individualized as much as possible for each instance or instance family.  However, by default, Ec2InstanceMaker-spawned instances cannot spwan children.
+
+`ExtendedEc2InstancePolicy.json` (found in the templates/ subdirectory) can be used to allow Ec2InstanceMaker-spawned instances to create children.
+
+### Amazon Linux 2
+`$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=alinux2 --iam_json_policy=ExtendedEc2InstancePolicy.json`
+
+## Using a Custom AMI:
+
+DevOps teams may want to further control what AWS API calls that can be made by Ec2InceMaker-spawned instances, including the limiting or granting of the ability to create child instances with more granular permisisons, through the use of ccentralized IAM roles.
+
+If you are encountering issues with "doing" things using these instances, please work with your DevOps team to create appropriate IAM role.
+
+### Amazon Linux 2
+`$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=alinux2 --iam_role=CustomDevOpsIamRole`
+
 ```
 $ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev03 --base_os=alinux2 --ebs_root_volume_size=1000 custom_ami=ami-00c8f252620d3a56e
 

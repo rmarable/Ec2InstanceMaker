@@ -103,16 +103,21 @@ in this toolkit.
 ## Creating an Installation Environment on Linux (local or EC2)
 
 The linux-ec2-setup.sh script can be used to set up the Ec2InstanceMaker
-operating environment on Linux.  This will also work on EC2 instances
-running CentOS, Amazon Linux, or Ubuntu.
+operating environment on Linux.  The script will work on EC2 instances running
+CentOS, Amazon Linux, or Ubuntu, regardless of whether they were created with
+Ec2InstanceMaker or by any other means.
 
 After building a new instance, check out the repository from Github and run
 the script:
 
+```
 $ mkdir -p ~/src && cd ~/src
 $ git clone https://github.com/rmarable/Ec2InstanceMaker.git
 $ cd src/Ec2InstanceMaker
-$ .ec2-setup.sh ack on htw HARDCORE 
+$ ./linux-ec2-setup.sh
+```
+
+Please note that the default IAM permissions granted to Ec2InstanceMaker-spawned instances are *NOT* sufficient to create child instances.  Please see the "Note to DevOps Teams" section in the README for additional guidance.
 
 ## About make-instance.py
 

@@ -187,15 +187,17 @@ As noted above, Ec2InstanceMaker is intended to reduce the administrative burden
   * These tools do not create new VPCs, subnets, Internet or NAT gateways, routes, or Transit Gateways.
   * They do not intentionally modify Route53 configurations, change default routes, or otherwise impact or deploy any infrastructure that is not explicitly documented or easily inferred by reviewing the code.
 
-* **Ec2InstanceMaker creates generic IAM roles, policies, and instance templates that are individualized as much as possible for each instance or instance family.**
+* **Ec2InstanceMaker creates generic IAM roles, policies, and instance templates that are individualized as much as possible for each instance or instance family.  By default, Ec2InstanceMaker-spawned instances cannot spwan children.**
   * These JSON templates are located in the templates/ subdirectory and contain all required IAM permissions to work with the AWS services listed below:
     * EC2
     * AutoScaling
     * S3
     * SQS
     * SNS
-  * If you run into permissions problems building instances or provisioning storage resources, it's usually because of an IAM issue.  When speaking with your DevOps professionals, it is suggested that you share this template and work with them to customize an appropriate solution for your environment.
-  * DevOps teams should also be aware that granular control over the IAM namespace can be realized by setting `--iam_name_prefix` to a chosen value.  This makes it eaiser to incorporate Ec2InstanceMaker into environments that perfer to have users assume a set of standard roles to perform tasks in the AWS environment.
+  * If you run into permissions problems building instances or provisioning storage resources, it's usually because of an IAM issue.  When speaking with your DevOps professionals, the following options are suggested:
+    * Set `--iam_json_policy=ExtendedEc2InstancePolicy.json` to use the included JSON policy document which permits children instances to be spawned.
+    * Work with your DevOps team to construct a custom IAM role that provides appropriate permissions for your environment, then include it by setting `--iam_role=$ROLE_NAME` when invoking `make-instance.py.`  Please refer to the EXAMPLE_USE_CASES document for additional guidance.
+  * DevOps teams should also be aware that additional granular control over the IAM namespace can be realized by setting `--iam_name_prefix` to a chosen value.  This makes it eaiser to incorporate Ec2InstanceMaker into environments that perfer to have users assume a set of standard roles to perform tasks in the AWS environment.
 
 For example:
 ```
@@ -223,7 +225,11 @@ EC2 and S3 API calls.
 "jumphost" spawned by make-instance.py to in turn create additional instances.
 In addition to allowing EC2 and S3, it also permits maintenance of EFS and FSx
 for Lustre file systems, SQS queues, SNS topic administration, IAM role and
-instance profile maintenance, and access to SSM.
+instance profile maintenance, and access to SSM.  However, please note that
+this template does *NOT* provide adequate permissions for instances built with
+Ec2InstanceMzker to spwan children of their own.
+  * **ExtendedEc2InstancePolicy.json** is equivalent to `GenericEc2InstancePolicy.json` permissions for an EC2 except that it grants Ec2InstanceMaker-spawned
+instances appropriate permissions to spawn children.
   * **Ec2AdminInstancePolicy.json** is provides the EC2 instance profile with
 full adminstrator rights over the AWS account in question.  *Use this policy
 judiciously!*
