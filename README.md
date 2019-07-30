@@ -47,19 +47,22 @@ visiting:
 * https://aws.amazon.com/fsx/lustre/
 
 Ec2InstanceMaker makes extensive use of Ansible, Terraform, the Amazon Web
-Services SDK for Python (boto3), and jq.  You can find more information about
-these tools by visiting:
+Services SDK for Python (boto3), and jq.  It can be launched fron a Docker
+container, local OSX or Linux environments, or from an existing EC2 instance.
+You can find more information about these tools by visiting:
 
 * Ansible: https://www.ansible.com/
-* Terraform: https://www.terraform.io/
 * Boto3: https://boto3.amazonaws.com/v1/documentation/api/latest/index.html
+* Docker: https://docs.docker.com/
+* Terraform: https://www.terraform.io/
 * jq: https://stedolan.github.io/jq/
 
 Ec2InstanceMaker also requires Python 3.6 (or greater) and a functional Bash
-shell environment.  It can be run locally on OSX or Linux, on an existing EC2
-Linux instance, or from an EC2 instance spawned from a previous invocation of
-Ec2InstanceMaker.  Please refer to the "Installing Ec2InstanceMaker" section
-for detailed guidance on how to properly configure your environment.
+shell environment.  As noted above, this tool can be run locally on OSX or
+Linux, on an existing EC2 Linux instance, from a Docker container, or from an
+EC2 instance spawned from a previous invocation of Ec2InstanceMaker.  Please
+refer to the "Installing Ec2InstanceMaker" section for detailed guidance on
+how to properly configure your environment.
 
 Running Ec2InstanceMaker locally on a Windows machine is **not** supported,
 although it should work in theory with appropriately configured Python and
