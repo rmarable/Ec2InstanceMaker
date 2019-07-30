@@ -2,7 +2,7 @@
 # Name:		aux_data.py
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	June 3, 2019
-# Last Changed:	July 12, 2019
+# Last Changed:	July 29, 2019
 # Purpose:	Data structures and functions to support Ec2InstanceMaker
 ################################################################################
 
@@ -16,7 +16,7 @@ supported = 0
 
 def add_inbound_security_group_rule(region, sec_grp, protocol, cidr, psource, pdest):
     import boto3
-    ec2 = boto3.resource('ec2', region_name=region)
+    ec2 = boto3.resource('ec2', region_name = region)
     sec_grp.authorize_ingress(
         IpProtocol=protocol,
         CidrIp=cidr,
@@ -85,7 +85,7 @@ def ctrlC_Abort(sleep_time, line_length, vars_file_path, instance_data_dir, inst
     import sys
     import time
     from botocore.exceptions import ClientError
-    ec2client = boto3.client('ec2')
+    ec2client = boto3.client('ec2', region_name = region)
     iam = boto3.client('iam')
     ec2_keypair = instance_serial_number + '_' + region
     secret_key_file = instance_data_dir + ec2_keypair + '.pem'

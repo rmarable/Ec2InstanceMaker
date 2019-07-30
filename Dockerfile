@@ -24,11 +24,21 @@
 #
 ################################################################################
 
+# Uncomment and paste your AWS credentials here. 
+# Otherwise, run "aws configure" on the container before spawning instances.
+
+#ENV AWS_ACCESS_KEY_ID=[aws_access_key_id]
+#ENV AWS_SECRET_ACCESS_KEY=[aws_secret_access_key]
+
+################################################################################
+################      Do *NOT* change anything below this comment!    ##########
+################################################################################
+
 # Build the container from the official Docker Python-3.7 image.
 
 FROM python:3.7-alpine
 
-# Set some critical environment variables.
+# Set the PATH and APP_HOME environment variables.
 
 ENV APP_HOME=/Ec2InstanceMaker PATH=$APP_HOME:${PATH}
 
@@ -56,7 +66,8 @@ RUN apk update -q && apk add \
   libtool \
   linux-headers \
   make \
-  openssl-dev
+  openssh \
+  openssl-dev 
 RUN pip3 install -r requirements.txt
 
 # Install Terraform.
@@ -68,7 +79,8 @@ RUN cp terraform /usr/local/bin && rm terraform_*
 RUN chmod 0755 /usr/local/bin/terraform
 
 # Set the default entrypoint.
-# See above for guidance on interacting with Ec2InstanceMaker interactively.
+# See the README, INSTALL, and EXAMPLE_USE_CASES documents for additional user
+# guidance on interacting with Ec2InstanceMaker interactively.
 # Alternatively, override ENTRYPOINT to run the companion scripts to access
 # the instance(s) over SSH or to delete them.
 

@@ -702,6 +702,31 @@ a placement group.
 
 Ec2InstanceMaker supports building new instances from custom AMIs by using the `--custom_ami` switch.  If the custom_ami is not found, the script will return an error.
 
+## Building with Docker Containers
+
+Ec2InstanceMaker supports launching new EC2 instances from a Docker container.
+
+Install Docker by following the guidelines outlined here:
+
+https://docs.docker.com/install/
+
+Clone the Ec2InstanceMaker repository into $SRC_DIR.
+
+Edit `dockerfile` and provide your AWS credentials where indicated.  You can also run `aws configure` when the container is available to avoid potential security risks.
+
+Build the container and launch Ec2InstanceMaker interactively as follows:
+```
+$ mkdir -p $SRC_DIR
+$ cd $SRC_DIR
+$ git clone https://github.com/rmarable/Ec2InstanceMaker.git
+$ cd $SRC_DIR/Ec2InstanceMaker
+$ docker build -t ec2instancemaker
+$ docker run -it --entrypoint=/bin/bash ec2instancemaker:latest -i
+<nav># pwd
+/Ec2InstanceMaker
+<nav># ./make-instance.py -h
+```
+
 ## Building New AMIs Using the build-ami Script ##
 
 Ec2InstanceMaker provides a customized build script for each instance_serial_number which permits the operator to create and register a new AMI image.  By including custom code in the `build-instance.j2` template, users now have a powerful mechanism for quickly customizing AMIs without requiring DevOps assistance.  Conversely, DevOps professionals now have a means to disseminate curated "golden" AMIs throughout their environment.

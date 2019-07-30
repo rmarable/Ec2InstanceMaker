@@ -929,7 +929,7 @@ Future releases will provide DevOps teams with increased control over user permi
 A standard AMI build script is provided with each new build.  To register a new AMI, please run the following command:
 
 `$ ./build-ami.dev01.sh`
-.
+
 To build a new "golden" AMI or custom image, paste your desired changes into
 the obvious location within `templates/custom_user_script.j2` and they will
 be execuated as part of the instance deployment process.  Then, simply run
@@ -941,6 +941,32 @@ when prompted before the AMI build will continue.
 
 Support for managing multiple AMI images associated with the same instance
 build may be added in a future release.
+
+## Building with Docker Containers
+
+Install Docker by visiting: https://docs.docker.com/install/.
+
+Clone the Ec2InstanceMaker repository into $SRC_DIR.
+```
+$ mkdir -p $SRC_DIR
+$ cd $SRC_DIR
+$ git clone https://github.com/rmarable/Ec2InstanceMaker.git
+```
+
+Edit `dockerfile` and provide your AWS credentials where indicated.  You can also run `aws configure` when the container is available to avoid potential security risks.
+
+Build a Docker container with Ec2InstanceMaker.
+```
+$ cd $SRC_DIR/Ec2InstanceMaker
+$ docker build -t ec2instancemaker
+$ docker run -it --entrypoint=/bin/bash ec2instancemaker:latest -i
+<nav># pwd
+/Ec2InstanceMaker
+<nav># ./make-instance.py -h
+```
+
+Alternatively, you can override the ENTRYPOINT to run the access_instance.py
+or kill_instance.py scripts.
 
 ## Destroying an Instance
 
