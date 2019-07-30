@@ -97,6 +97,8 @@ type are compatible.
   * Optional construction of "golden images" with encrypted root EBS volumes.
   * Incorporation into existing DevOps CI/CD piplines.
 
+* Spawning EC2 instances from a Docker container.
+
 * Multiple instances with identical configurations built at the same time a.k.a. "instance families."
 
 * Command line designation of dev, test, stage, and prod operating levels. 
@@ -705,30 +707,11 @@ a placement group.
 
 Ec2InstanceMaker supports building new instances from custom AMIs by using the `--custom_ami` switch.  If the custom_ami is not found, the script will return an error.
 
-## Building with Docker Containers
+## Launching Instances Using Docker
 
 Ec2InstanceMaker supports launching new EC2 instances from a Docker container.
 
-Install Docker by following the guidelines outlined here:
-
-https://docs.docker.com/install/
-
-Clone the Ec2InstanceMaker repository into $SRC_DIR.
-
-Edit `dockerfile` and provide your AWS credentials where indicated.  You can also run `aws configure` when the container is available to avoid potential security risks.
-
-Build the container and launch Ec2InstanceMaker interactively as follows:
-```
-$ mkdir -p $SRC_DIR
-$ cd $SRC_DIR
-$ git clone https://github.com/rmarable/Ec2InstanceMaker.git
-$ cd $SRC_DIR/Ec2InstanceMaker
-$ docker build -t ec2instancemaker
-$ docker run -it --entrypoint=/bin/bash ec2instancemaker:latest -i
-<nav># pwd
-/Ec2InstanceMaker
-<nav># ./make-instance.py -h
-```
+Please refer to "Launching Instances Using Docker" in the INSTALL document.
 
 ## Building New AMIs Using the build-ami Script ##
 

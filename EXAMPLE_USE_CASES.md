@@ -942,22 +942,12 @@ when prompted before the AMI build will continue.
 Support for managing multiple AMI images associated with the same instance
 build may be added in a future release.
 
-## Building with Docker Containers
+## Launching Instances Using Docker
 
-Install Docker by visiting: https://docs.docker.com/install/.
-
-Clone the Ec2InstanceMaker repository into $SRC_DIR.
+Please refer to "Launching Instances Using Docker" in the INSTALL document to
+set up a Docker container to lauch new instances.  For the lazy, check out the
+repository, build the Docker container, and have at it:
 ```
-$ mkdir -p $SRC_DIR
-$ cd $SRC_DIR
-$ git clone https://github.com/rmarable/Ec2InstanceMaker.git
-```
-
-Edit `dockerfile` and provide your AWS credentials where indicated.  You can also run `aws configure` when the container is available to avoid potential security risks.
-
-Build a Docker container with Ec2InstanceMaker.
-```
-$ cd $SRC_DIR/Ec2InstanceMaker
 $ docker build -t ec2instancemaker
 $ docker run -it --entrypoint=/bin/bash ec2instancemaker:latest -i
 <nav># pwd
@@ -967,6 +957,12 @@ $ docker run -it --entrypoint=/bin/bash ec2instancemaker:latest -i
 
 Alternatively, you can override the ENTRYPOINT to run the access_instance.py
 or kill_instance.py scripts.
+```
+$ docker run -it --entrypoint=access_instance.py ec2instancemaker:latest -i
+usage: access_instance.py [-h] --instance_name INSTANCE_NAME
+                          [--menu_index MENU_INDEX]
+access_instance.py: error: the following arguments are required: --instance_name/-N
+```
 
 ## Destroying an Instance
 

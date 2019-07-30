@@ -3,7 +3,7 @@
 # Author:	Chris Mitchell <chris@ginkgobioworks.com>
 # Modified By:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	July 29, 2019
-# Last Changed:	July 29, 2019
+# Last Changed:	July 30, 2019
 # Purpose:	Run Ec2InstanceMaker from a Docker container
 ################################################################################
 #
@@ -23,10 +23,15 @@
 #   # ./make-instance.py -h
 #
 ################################################################################
-
-# Uncomment and paste your AWS credentials here. 
-# Otherwise, run "aws configure" on the container before spawning instances.
-
+#
+# If needed, run "aws configure" on the container before spawning instances.
+# Since the Docker container needs AWS credentials here, you must choose one
+# of the options below or make-instance.py WILL NOT work:
+# - Paste "aws_access_key_id" and "aws_secret_access_key" where indicated.
+# - Use environment variables per the guidance included in the AWS public 
+#   documentation (this is more secure and is the recommended method):
+#   https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-envvars.html
+#
 #ENV AWS_ACCESS_KEY_ID=[aws_access_key_id]
 #ENV AWS_SECRET_ACCESS_KEY=[aws_secret_access_key]
 

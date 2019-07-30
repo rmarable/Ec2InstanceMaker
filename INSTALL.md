@@ -128,24 +128,37 @@ $ cd ~/src/Ec2InstanceMaker
 $ ./make-instance.py --help
 ```
 
-## Building with Docker Containers
+## Launching Instances Using Docker
 
 Ec2InstanceMaker supports launching new EC2 instances from a Docker container.
+Some users may prefer this method to using a "jumphost" for launching child
+instances.
 
 Install Docker by following the guidelines outlined here:
 
 https://docs.docker.com/install/ 
 
+Create $SRC_DIR (suggested: `~/src`).
+
+`$ mkdir -p $SRC_DIR`
+
 Clone the Ec2InstanceMaker repository into $SRC_DIR.
 
-Edit `dockerfile` and provide your AWS credentials where indicated.  You can also run `aws configure` when the container is available to avoid potential security risks.
-
-Build the container and launch Ec2InstanceMaker interactively as follows:
 ```
-$ mkdir -p $SRC_DIR
 $ cd $SRC_DIR
 $ git clone https://github.com/rmarable/Ec2InstanceMaker.git
-$ cd $SRC_DIR/Ec2InstanceMaker
+$ cd Ec2InstanceMaker
+```
+
+If needed, run `aws configure`.
+
+Edit `dockerfile` and either paste your AWS credentials where indicated or use
+environment variables as suggested in the AWS public documentation:
+
+https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-envvars.html
+
+Build the container, launch it interactively, and start building instances:
+```
 $ docker build -t ec2instancemaker
 $ docker run -it --entrypoint=/bin/bash ec2instancemaker:latest -i
 <nav># pwd
