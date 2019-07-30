@@ -286,7 +286,7 @@ s3_client = boto3.client('s3')
 
 # Create a boto3 client to interact with SNS.
 
-sns_client = boto3.client('sns')
+sns_client = boto3.client('sns', region_name = region)
 
 # Lustre has various package and kernel issues on Ubuntu so we don't support
 # installation when base_os is Ubuntu 14.04LTS, 16.04LTS, or 18.04LTS.
