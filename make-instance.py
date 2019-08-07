@@ -4,7 +4,7 @@
 # Name:         make-instance.py
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   June 3, 2019
-# Last Changed: July 17, 2019
+# Last Changed: August 5, 2019
 # Purpose:      Generic command-line EC2 instance creator
 ################################################################################
 
@@ -451,7 +451,11 @@ else:
     p_val('az', debug_mode)
 
 # Parse the subnet_id, vpc_id, and vpc_name from the selected AWS Region and
-# Availability Zone.
+# Availability Zone.  Since Terraform requires that the selected VPC have a
+# valid Name tag, return an error if this value is missing.
+#
+# Future releases may support vpc_id or vpc_name as command line parameters to
+# increase user flexibility.
 
 subnet_information = ec2_client.describe_subnets(
     Filters=[ { 'Name': 'availabilityZone', 'Values': [ az, ] }, ],
@@ -470,7 +474,7 @@ for vpc in vpc_information["Vpcs"]:
     try:
         vpc_name = vpc_information['Vpcs'][0]['Tags'][0]['Value']
     except KeyError:
-        error_msg=vpc_id + ' (' + az + ') lacks a valid Name tag!'
+        error_msg=vpc_id + ' lacks a valid Name tag! This will break Terraform.'
         refer_to_docs_and_quit(error_msg)
     p_val('vpc_name', debug_mode)
 
