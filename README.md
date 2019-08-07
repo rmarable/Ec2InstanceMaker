@@ -46,8 +46,8 @@ visiting:
 * https://aws.amazon.com/efs/
 * https://aws.amazon.com/fsx/lustre/
 
-Ec2InstanceMaker makes extensive use of Ansible, Terraform, the Amazon Web
-Services SDK for Python (boto3), and jq.  It can be launched fron a Docker
+Ec2InstanceMaker makes extensive use of Ansible, the Amazon Web Services SDK
+for Python (boto3), Terraform, and jq.  It can be launched from a Docker
 container, local OSX or Linux environments, or from an existing EC2 instance.
 You can find more information about these tools by visiting:
 
