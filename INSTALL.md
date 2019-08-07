@@ -159,7 +159,7 @@ https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-envvars.html
 
 Build the container, launch it interactively, and start building instances:
 ```
-$ docker build -t ec2instancemaker
+$ docker build -t ec2instancemaker .
 $ docker run -it --entrypoint=/bin/bash ec2instancemaker:latest -i
 <nav># pwd
 /Ec2InstanceMaker
