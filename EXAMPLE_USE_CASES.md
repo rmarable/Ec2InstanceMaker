@@ -942,6 +942,12 @@ when prompted before the AMI build will continue.
 Support for managing multiple AMI images associated with the same instance
 build may be added in a future release.
 
+## Launching Instances With Private IP Addresses
+
+For environments that require enhanced security, Ec2InstanceMaker supports launching instances with only the private IP address.
+
+$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N fn2187 --base_os=alinux --public_ip=false
+
 ## Launching Instances Using Docker
 
 Please refer to "Launching Instances Using Docker" in the INSTALL document to

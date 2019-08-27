@@ -4,7 +4,7 @@
 # Name:         make-instance.py
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   June 3, 2019
-# Last Changed: August 5, 2019
+# Last Changed: August 27, 2019
 # Purpose:      Generic command-line EC2 instance creator
 ################################################################################
 
@@ -99,6 +99,7 @@ parser.add_argument('--placement_group_strategy', '--pg_strategy', choices=['clu
 parser.add_argument('--preserve_ami', choices=['true', 'false'], help='Preserve any AMI image built from the instance(s) post-termination (default = true)', required=False, default='true')
 parser.add_argument('--preserve_efs', choices=['true', 'false'], help='Preserve the Elastic File System (EFS) created with the instance(s) (default = false)', required=False, default='false')
 parser.add_argument('--project_id', '-P', help='Project name or ID number (default = UNDEFINED)', required=False, default='UNDEFINED')
+parser.add_argument('--public_ip', '-p', help='Attach a public IP address to the instance(s) (default = true)', required=False, default='true')
 parser.add_argument('--security_group', '-S', help='Primary security group for the EC2 instance (default = generic_ec2_sg)', required=False, default='generic_ec2_sg')
 parser.add_argument('--spot_buffer', help='pricing buffer to protect from Spot market fluctuations: spot_price = spot_price + spot_price*spot_buffer', type=float, required=False, default=round((1/pi), 8))
 parser.add_argument('--turbot_account', help='Turbot account ID (default = DISABLED)', required=False, default='DISABLED')
@@ -143,6 +144,7 @@ placement_group_strategy = args.placement_group_strategy
 preserve_efs = args.preserve_efs
 prod_level = args.prod_level
 project_id = args.project_id
+public_ip = args.public_ip
 region = az[:-1]
 spot_buffer = args.spot_buffer
 security_group = args.security_group
@@ -798,6 +800,7 @@ instance_parameters = {
     'prod_level': prod_level,
     'project_id': project_id,
     'preserve_iam_role': preserve_iam_role,
+    'public_ip': public_ip,
     'region': region,
     'security_group': security_group,
     'spot_price': spot_price,
@@ -877,10 +880,11 @@ if debug_mode == 'true':
     print('spot_price = ' + spot_price)
     print('vpc_security_group_ids = ' + vpc_security_group_ids)
     print('subnet_id = ' + subnet_id)
-    print('sns_topic_arn = ' + sns_topic_arn)
+    print('public_ip = ' + public_ip)
     print('vars_file_path = ' + vars_file_path)
     print('vpc_id = ' + vpc_id)
     print('vpc_name = ' + vpc_name)
+    print('sns_topic_arn = ' + sns_topic_arn)
     print('ANSIBLE_VERSION = ' + ANSIBLE_VERSION)
     print('DEPLOYMENT_DATE = ' + DEPLOYMENT_DATE)
     print('TERRAFORM_VERSION = ' + TERRAFORM_VERSION)
@@ -961,6 +965,7 @@ ebs_root_volume_iops: {ebs_root_volume_iops}
 az: {az}
 enable_placement_group: {enable_placement_group}
 placement_group_strategy: {placement_group_strategy}
+public_ip: {public_ip}
 region: {region}
 security_group: {security_group}
 subnet_id: {subnet_id}
@@ -1055,7 +1060,7 @@ if count == 1:
 else:
     print('Generating templates for instance family ' + instance_name + '...')
 
-cmd_string = 'ansible-playbook --extra-vars \"instance_name=' + instance_name + ' instance_serial_number=' + instance_serial_number + ' turbot_account=' + turbot_account + ' enable_efs=' + enable_efs + ' efs_encryption=' + efs_encryption + ' ebs_encryption=' + ebs_encryption + ' preserve_ami=' + preserve_ami + ' preserve_iam_role=' + preserve_iam_role + ' preserve_efs=' + preserve_efs + ' enable_placement_group=' + enable_placement_group + ' placement_group_strategy=' + placement_group_strategy + ' enable_fsx=' + enable_fsx + ' enable_fsx_hydration=' + enable_fsx_hydration + ' fsx_s3_bucket=' + fsx_s3_bucket + ' fsx_s3_path=' + fsx_s3_path + '\" create_instance_terraform_templates.yml ' + ansible_verbosity
+cmd_string = 'ansible-playbook --extra-vars \"instance_name=' + instance_name + ' instance_serial_number=' + instance_serial_number + ' turbot_account=' + turbot_account + ' enable_efs=' + enable_efs + ' efs_encryption=' + efs_encryption + ' ebs_encryption=' + ebs_encryption + ' preserve_ami=' + preserve_ami + ' preserve_iam_role=' + preserve_iam_role + ' preserve_efs=' + preserve_efs + ' public_ip=' + public_ip + ' enable_placement_group=' + enable_placement_group + ' placement_group_strategy=' + placement_group_strategy + ' enable_fsx=' + enable_fsx + ' enable_fsx_hydration=' + enable_fsx_hydration + ' fsx_s3_bucket=' + fsx_s3_bucket + ' fsx_s3_path=' + fsx_s3_path + '\" create_instance_terraform_templates.yml ' + ansible_verbosity
 
 print(cmd_string, file=open(instance_serial_number_file, "a"))
 

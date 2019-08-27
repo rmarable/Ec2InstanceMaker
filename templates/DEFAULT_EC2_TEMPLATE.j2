@@ -2,7 +2,7 @@
 # Name:		{{ instance_name }}.tf
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	June 3, 2019
-# Last Changed:	July 2, 2019
+# Last Changed:	August 27, 2019
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 {% if count > 1 %}
 # Purpose:	Terraform template for instance family {{ instance_name }}
@@ -83,6 +83,11 @@ resource "aws_spot_instance_request"  "{{ instance_name }}" {
 {% if enable_placement_group == 'true' %}
   placement_group           = "ec2pg-{{ instance_serial_number }}"
 {% endif %}
+{% if public_ip == 'true' %}
+  associate_public_ip_address = "true"
+{% else %}
+  associate_public_ip_address = "false"
+{% endif %}
   provider                  = "{{ provider }}"
   root_block_device {
     volume_size             = "{{ ebs_root_volume_size }}"
@@ -145,7 +150,11 @@ resource "aws_spot_instance_request"  "{{ instance_name }}" {
     destination = "/tmp/{{ build_instance_script }}"
   connection {
     type        = "ssh"
+{% if public_ip == 'true' %}
     host        = self.public_ip
+{% else %}
+    host        = self.private_ip
+{% endif %}
     user        = "{{ ec2_user }}"
     agent       =  false
     private_key = "${file("{{ ssh_keypair_file }}")}"
@@ -156,7 +165,11 @@ resource "aws_spot_instance_request"  "{{ instance_name }}" {
     destination = "/tmp/{{ custom_user_script }}"
   connection {
     type        = "ssh"
+{% if public_ip == 'true' %}
     host        = self.public_ip
+{% else %}
+    host        = self.private_ip
+{% endif %}
     user        = "{{ ec2_user }}"
     agent       =  false
     private_key = "${file("{{ ssh_keypair_file }}")}"
@@ -170,7 +183,11 @@ resource "aws_spot_instance_request"  "{{ instance_name }}" {
     ]
   connection {
     type        = "ssh"
+{% if public_ip == 'true' %}
     host        = self.public_ip
+{% else %}
+    host        = self.private_ip
+{% endif %}
     user        = "{{ ec2_user }}"
     agent       =  false
     private_key = "${file("{{ ssh_keypair_file }}")}"
@@ -197,7 +214,11 @@ resource "aws_spot_instance_request"  "{{ instance_name }}" {
     ]
   connection {
     type        = "ssh"
+{% if public_ip == 'true' %}
     host        = self.public_ip
+{% else %}
+    host        = self.private_ip
+{% endif %}
     user        = "{{ ec2_user }}"
     agent       =  false
     private_key = "${file("{{ ssh_keypair_file }}")}"
@@ -216,10 +237,18 @@ resource "aws_spot_instance_request"  "{{ instance_name }}" {
 }
 {% if request_type == "ondemand" %}
 output "instance_ip_addresses" {
+{% if public_ip == 'true' %}
   value = "${join(",", aws_instance.{{ instance_name }}.*.public_ip)}"
+{% else %}
+  value = "${join(",", aws_instance.{{ instance_name }}.*.private_ip)}"
+{% endif %}
 }
 output "instance_public_dns" {
+{% if public_ip == 'true' %}
   value = "${join(",", aws_instance.{{ instance_name }}.*.public_dns)}"
+{% else %}
+  value = "${join(",", aws_instance.{{ instance_name }}.*.private_dns)}"
+{% endif %}
 }
 output "instance_name_index" {
   value = "${join(",", aws_instance.{{ instance_name }}.*.tags.Name)}"
@@ -230,10 +259,18 @@ output "instance_id_list" {
 {% endif %}
 {% if request_type == "spot" %}
 output "instance_ip_addresses" {
+{% if public_ip == 'true' %}
   value = "${join(",", aws_spot_instance_request.{{ instance_name }}.*.public_ip)}"
+{% else %}
+  value = "${join(",", aws_spot_instance_request.{{ instance_name }}.*.private_ip)}"
+{% endif %}
 }
 output "instance_public_dns" {
+{% if public_ip == 'true' %}
   value = "${join(",", aws_spot_instance_request.{{ instance_name }}.*.public_dns)}"
+{% else %}
+  value = "${join(",", aws_spot_instance_request.{{ instance_name }}.*.private_dns)}"
+{% endif %}
 }
 output "instance_name_index" {
   value = "${join(",", aws_spot_instance_request.{{ instance_name }}.*.tags.Name)}"

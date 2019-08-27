@@ -161,6 +161,8 @@ can be pasted into RDC for easy access.
 
 * Operability in Turbot environnments.  Please visit https://www.turbot.com for more information.
 
+* Restriction of attaching public IP addresses for environments that require additional security.
+
 ## Installation Instructions for the Impatient
 
 These instructions are provided for the impatient and/or lazy.
@@ -188,7 +190,13 @@ freshly created virtual Python environment.
 
 As noted above, Ec2InstanceMaker is intended to reduce the administrative burden required for DevOps teams to support the diverse compute and storage needs of their stakeholders; conversely, it can empower scientists, engineers, statisticians, and analysts to compute at scale without needing to get assistnace from their Devops team.
 
-* **Ec2InstanceMaker does not make any changes to the existing networking environment already present in the operator's AWS account**.
+* **Ec2InstanceMaker supports the use of private IP addresses for environments that require enhanced security.**
+  * Deployment of public IP addresses can be disabled by setting `--public_ip=false`.
+  * Please note that if this feature is invoked within a compute environment that does not live in the target VPC, the provisioning process will fail with a "connection refused" error:
+`Error: timeout - last error: dial tcp 172.31.32.161:22: connect: connection refused`
+  * A more descriptive error will be returned in a future release.
+
+* **Ec2InstanceMaker does not make any changes to the existing networking environment already present in the operator's AWS account.**
   * These tools do not create new VPCs, subnets, Internet or NAT gateways, routes, or Transit Gateways.
   * They do not intentionally modify Route53 configurations, change default routes, or otherwise impact or deploy any infrastructure that is not explicitly documented or easily inferred by reviewing the code.
 
@@ -284,6 +292,7 @@ usage: make-instance.py [-h] --az AZ --instance_name INSTANCE_NAME
                         [--preserve_ami {true,false}]
                         [--preserve_efs {true,false}]
                         [--project_id PROJECT_ID]
+                        [--public_ip PUBLIC_IP]`
                         [--security_group SECURITY_GROUP]
                         [--spot_buffer SPOT_BUFFER]
                         [--turbot_account TURBOT_ACCOUNT]
@@ -381,6 +390,9 @@ optional arguments:
                         the instance(s) (default = false)
   --project_id PROJECT_ID, -P PROJECT_ID
                         Project name or ID number (default = UNDEFINED)
+  --public_ip PUBLIC_IP, -p PUBLIC_IP
+                        Attach a public IP address to the instance(s) (default
+                        = true)
   --security_group SECURITY_GROUP, -S SECURITY_GROUP
                         Primary security group for the EC2 instance (default =
                         generic_ec2_sg)
