@@ -4,7 +4,7 @@
 # Name:         make-instance.py
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   June 3, 2019
-# Last Changed: August 27, 2019
+# Last Changed: September 5, 2019
 # Purpose:      Generic command-line EC2 instance creator
 ################################################################################
 
@@ -84,7 +84,7 @@ parser.add_argument('--enable_placement_group', '--enable_pg', choices=['true', 
 parser.add_argument('--enable_fsx', choices=['true', 'false'], help='Deploy and mount a Lustre (FSxL) file system on the instance(s) (default = false)', required=False, default='false')
 parser.add_argument('--enable_fsx_hydration', choices=['true', 'false'], help='enable support for hydrating FSxL from S3 (default = false)', required=False, default='false')
 parser.add_argument('--fsx_chunk_size', help='Chunk size (MB) of S3 objects imported into Lustre (default = 1024)', required=False, type=int, default=1024)
-parser.add_argument('--fsx_size', help='Lustre file system size in GB - must use multiples of 3600 (default = 3600)', required=False, type=int, default=3600)
+parser.add_argument('--fsx_size', help='Lustre file system size in GB - must use multiples of 1200 (default = 1200)', required=False, type=int, default=1200)
 parser.add_argument('--fsx_s3_bucket', help='Name of an S3 bucket connected to the Lustre file system for this instance (default = UNDEFINED)', required=False, default='UNDEFINED')
 parser.add_argument('--fsx_s3_path', help='Path to a folder on s3://fsx_s3_bucket that Lustre will import/export from (default = fsxRoot)', required=False, default='fsxRoot')
 parser.add_argument('--hyperthreading', '-H', choices=['true', 'false'], help='enable Intel Hyperthreading (default = true)', required=False, default='true')
@@ -328,13 +328,14 @@ if enable_fsx == 'true' and enable_fsx_hydration == 'true':
         p_val('fsx_s3_bucket', debug_mode)
         p_val('fsx_s3_path', debug_mode)
 
-# Check to ensure the Lustre volume size is divisible by 3600.
+# Verify the Lustre volume size is divisible by 1200.
+# https://amzn.to/2m25H5j
 
 if enable_fsx == 'true':
-    if fsx_size%3600 == 0:
+    if fsx_size%1200 == 0:
         p_val('fsx_size', debug_mode)
     else:
-        error_msg='fsx_size must be divisible by 3600!'
+        error_msg='fsx_size must be divisible by 1200 GB (https://amzn.to/2m25H5j)!'
         refer_to_docs_and_quit(error_msg)
 
 # Perform error checking and validation on fsx_chunk_size, which should range

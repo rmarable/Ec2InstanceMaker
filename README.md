@@ -356,7 +356,7 @@ optional arguments:
                         Chunk size (MB) of S3 objects imported into Lustre
                         (default = 1024)
   --fsx_size FSX_SIZE   Lustre file system size in GB - must use multiples of
-                        3600 (default = 3600)
+                        1200 (default = 1200)
   --fsx_s3_bucket FSX_S3_BUCKET
                         Name of an S3 bucket connected to the Lustre file
                         system for this instance (default = UNDEFINED)
@@ -653,20 +653,20 @@ process time.
 
 ## Using FSx for Lustre
 
-To add an FSx for Lustre file system that shares both the instance tag collection and lifecycle, set `enable_fsx=true` when the instance is first created.  The example below will attach a 3,600 GB Luster file system mounted at /fsx to a new Amazon Linux 2 instance:
+To add an FSx for Lustre file system that shares both the instance tag collection and lifecycle, set `enable_fsx=true` when the instance is first created.  The example below will attach a 1,200 GB Lustre file system mounted at /fsx to a new Amazon Linux 2 instance:
 
 ```
 $ ./make-instance.py -A us-east-1a -O rmarable -E rmarable@amazon.com -N dev01 --count=3 --request_type=spot --enable_fsx=true
 ```
 
 The size of the file system is controlled with the `fsx_size` flag.  Lustre file
-systems must use multiples of 3,600 GB or an error will be returned.
+systems must use multiples of 1,200 GB or an error will be returned.  Please refer to the product announcement: https://amzn.to/2m25H5j
 
 Hydration of an FSX file system from an S3 bucket is supported by setting 
 `enable_fsx_hydration=true`, designating an existing S3 bucket (`fsx_s3_bucket`)
 and path (`fsx_s3_path`), and optionally choosing a "chunk" size (`fsx_chunk_size`).  The bucket and path, if provided, must exist or an error will be returned.
 
-This example will create a 3.6 TB Lustre file system that will hydrate to and
+This example will create a 1.2 TB Lustre file system that will hydrate to and
 from s3://rmarable-hydration-test/import mounted at /fsx on an Amazon Linux 2
 spot instance family called "dev01."  
 
@@ -675,7 +675,7 @@ spot instance family called "dev01."
 ```
 
 Please note that the size of all Lustre file systems must be provisioned in
-multples of 3,600 TB.  The make-instance.py script will return an error if
+multples of 1,200 TB.  The make-instance.py script will return an error if
 this step is ignored.
 
 To faciliate pushing data in an out of the bucket from Lustre, please use the

@@ -10,8 +10,8 @@ Notes:
   *  centos6 (openssl-1.0.1e dependency)
   *  ubuntu1404 (no amazon-efs-utils native support)
 
-* Lustre on any version of Ubuntu is unsupported due to kernel, package, and
-documentation inconsistencies.
+* Lustre is currently unsupported on all versions due to kernel, package, and
+documentation inconsistencies.  It is suggested that the operator use a custom AMI with the appropriate drivers and kernel changes instead.  This feature may be provided in a future release.
 
 ## Single Ondemand Instance With Defaults
 
@@ -658,15 +658,14 @@ ubuntu@ip-172-31-9-161:~$ mount  | grep efs
 127.0.0.1:/ on /efs type nfs4 (rw,relatime,vers=4.1,rsize=1048576,wsize=1048576,namlen=255,hard,noresvport,proto=tcp,port=20070,timeo=600,retrans=2,sec=sys,clientaddr=127.0.0.1,local_lock=none,addr=127.0.0.1,_netdev)
 ```
 
-## Single ondemand with Lustre (see note about re: Ubuntu support)
+## Single ondemand with an attached 3.6 TB Lustre file system
+# See the note regarding Ubuntu support
 
-t2.micro with 8 GB gp2 EBS root volume and an attached FSx file system mounted
-at /fsx.  Samples of "df", "df -h", and "aws fsx describe-file-systems" are
-provided for verification purposes.
+t2.micro with 8 GB gp2 EBS root volume and an attached 3.6 TB FSx file system mounted at /fsx.  Samples of "df", "df -h", and "aws fsx describe-file-systems" are provided for verification purposes.
 
 ### Amazon Linux
 ```
-$ ./make-instance.py -N dev01 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=alinux --enable_fsx=true
+$ ./make-instance.py -N dev01 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=alinux --enable_fsx=true --fsx_size=3600 
 
 df[ec2-user@ip-172-31-13-252 ~]$ df
 Filesystem              1K-blocks    Used  Available Use% Mounted on
@@ -680,7 +679,7 @@ tmpfs                      504748       0     504748   0% /dev/shm
 
 ### Amazon Linux 2
 ```
-$ ./make-instance.py -N dev04 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=alinux2 --enable_fsx=true
+$ ./make-instance.py -N dev04 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=alinux2 --enable_fsx=true --fsx_size=3600
 
 [ec2-user@ip-172-31-12-209 ~]$ df
 Filesystem            1K-blocks    Used  Available Use% Mounted on
@@ -759,7 +758,7 @@ tmpfs                    100736       0     100736   0% /run/user/1000
 
 ### CentOS 6.10
 ```
-./make-instance.py -N dev02 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=centos6 --enable_fsx=true
+./make-instance.py -N dev02 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=centos6 --enable_fsx=true --fsx_size=3600
 
 [ec2-user@ip-172-31-43-229 ~]$ df -h
 Filesystem              Size  Used Avail Use% Mounted on
@@ -777,7 +776,7 @@ tmpfs                    99M     0   99M   0% /run/user/1000
 
 ### CentOS 7.6.1810
 ```
-$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=centos7 --enable_fsx=true
+$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=centos7 --enable_fsx=true --fsx_size=3600
 
 [centos@ip-172-31-33-69 ~]$ df
 Filesystem              1K-blocks    Used  Available Use% Mounted on
@@ -793,21 +792,21 @@ tmpfs                      101320       0     101320   0% /run/user/1000
 172.31.33.248@tcp:/fsx on /fsx type lustre (rw,seclabel,lazystatfs)
 ```
 
-## Multiple spot instances with Lustre with S3 hydration
+## Multiple spot instances mounting Lustre with S3 hydration
 
 Multiple t2.micro spot instances, each with an 8 GB gp2 EBS root volume.  All
-are attached to a Lustre file system that will hydrate to and from an S3
+are attached to a 3.6 TB Lustre file system that will hydrate to and from an S3
 bucket.  Existence of the scripts that users will use to push data in/out of
 S3 from the Lustre file system is confirmed.
 
 * Amazon Linux 2
 ```
-$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev02 --request_type=spot --enable_fsx=true --fsx_s3_bucket=rmarable-hydration-test --fsx_s3_path=import --enable_fsx_hydration=true --base_os=alinux2
+$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev02 --request_type=spot --enable_fsx=true --fsx_s3_bucket=rmarable-hydration-test --fsx_s3_path=import --enable_fsx_hydration=true --base_os=alinux2 --fsx_size=3600
 ```
 
 * CentOS 7.6.1810
 ```
-$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev03 --request_type=spot --enable_fsx=true --fsx_s3_bucket=rmarable-hydration-test --fsx_s3_path=import --enable_fsx_hydration=true --base_os=centos7
+$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev03 --request_type=spot --enable_fsx=true --fsx_s3_bucket=rmarable-hydration-test --fsx_s3_path=import --enable_fsx_hydration=true --base_os=centos7 --fsx_size=3600
 
 $ ./access_instance.py -N dev03
 The authenticity of host '54.152.64.121 (54.152.64.121)' can't be established.
