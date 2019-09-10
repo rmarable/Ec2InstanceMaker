@@ -75,7 +75,9 @@ RUN yum install -y \
   openssl-devel \
   python3 \
   python3-devel \
-  python3-pip
+  python3-pip \
+  wget \
+  zip
 
 RUN pip3 install -r requirements.txt
 
