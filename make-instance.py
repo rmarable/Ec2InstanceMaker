@@ -77,6 +77,9 @@ parser.add_argument('--ebs_optimized', choices=['true', 'false'],help='use optim
 parser.add_argument('--ebs_root_volume_iops', help='amount of provisioned IOPS for the EBS root volume when ebs_root_volume_type=io1 (default = 0)', required=False, type=int, default=0)
 parser.add_argument('--ebs_root_volume_size', help='EBS volume size in GB (Linux default = 8, Windows default = 30)', required=False, type=int, default=8)
 parser.add_argument('--ebs_root_volume_type', choices=['gp2', 'io1', 'st1'], help='EBS volume type (default = gp2)', required=False, default='gp2')
+parser.add_argument('--ebs_device_volume_iops', help='amount of provisioned IOPS for the EBS secondary volume when ebs_root_volume_type=io1 (default = 0)', required=False, type=int, default=0)
+parser.add_argument('--ebs_device_volume_size', help='Secondary EBS volume size in GB (Linux default = 8, Windows default = 30)', required=False, type=int, default=8)
+parser.add_argument('--ebs_device_volume_type', choices=['gp2', 'io1', 'st1'], help='EBS secondary volume type (default = gp2)', required=False, default='gp2')
 parser.add_argument('--efs_encryption', choices=['true', 'false'], help='enable EFS encryption in transit and at rest (default = false)', required=False, default='false')
 parser.add_argument('--efs_performance_mode', choices=['generalPurpose', 'maxIO'], help='select the EFS performance mode (default = generalPurpose)', required=False, default='generalPurpose')
 parser.add_argument('--enable_efs', choices=['true', 'false'], help='Deploy and mount an Elastic File System (EFS) on the instance(s) (default = false)', required=False, default='false')
@@ -120,6 +123,9 @@ ebs_optimized = args.ebs_optimized
 ebs_root_volume_iops = args.ebs_root_volume_iops
 ebs_root_volume_size = args.ebs_root_volume_size
 ebs_root_volume_type = args.ebs_root_volume_type
+ebs_device_volume_iops = args.ebs_device_volume_iops
+ebs_device_volume_size = args.ebs_device_volume_size
+ebs_device_volume_type = args.ebs_device_volume_type
 efs_encryption = args.efs_encryption
 efs_performance_mode = args.efs_performance_mode
 enable_efs = args.enable_efs
@@ -156,6 +162,7 @@ turbot_account = args.turbot_account
 if ebs_encryption == 'true':
     p_val('ebs_encryption', debug_mode)
 p_val('ebs_root_volume_type', debug_mode)
+p_val('ebs_device_volume_type', debug_mode)
 p_val('request_type', debug_mode)
 p_val('prod_level', prod_level)
 
@@ -374,12 +381,20 @@ if ebs_root_volume_size > 16000:
     error_msg='Maximum allowed EBS volume size is 16 TB (16000 GB)!'
     refer_to_docs_and_quit(error_msg)
 
+# Check to ensure requested EBS volume size is not larger than 16 TB.
+
+if ebs_device_volume_size > 16000:
+    error_msg='Maximum allowed secondary EBS device volume size is 16 TB (16000 GB)!'
+    refer_to_docs_and_quit(error_msg)
+
 # Resize the EBS volume for Windows Server if the selected value is less than
 # the AWS recommended minimum (30 GB).
 
 if base_os == 'windows2019':
     if ebs_root_volume_size <= 30:
         ebs_root_volume_size = 30
+    if ebs_device_volume_size <= 30:
+        ebs_device_volume_size = 30
 
 # If provisioned EBS was selected for ebs_root_volume_type, check to ensure
 # the requested amount of IOPS is between 100-16,000.
@@ -388,13 +403,16 @@ if ebs_root_volume_type == 'io1':
     if (ebs_root_volume_iops == 0) or (ebs_root_volume_iops > 16000):
         error_msg='ebs_root_volume_iops must be set to a value between 100 and 16,000!'
         refer_to_docs_and_quit(error_msg)
+    if (ebs_device_volume_iops == 0) or (ebs_device_volume_iops > 16000):
+        error_msg='ebs_device_volume_iops must be set to a value between 100 and 16,000!'
+        refer_to_docs_and_quit(error_msg)
 
 # Print a friendly reminder that spot is cheaper than ondemand to the console
 # if ondemand instances were chosen.  If using spot instances, add spot_price
 # to spot_buffer to protect against market fluctuations:
 #
 # spot_price = spot_price * spot_buffer, rounded off to 8 decimal places.
-# Default value of spot_buffer = 1/pi 
+# Default value of spot_buffer = 1/pi
 #
 # Current AWS spot instance prices: https://aws.amazon.com/ec2/spot/pricing/
 
@@ -481,7 +499,7 @@ for vpc in vpc_information["Vpcs"]:
         refer_to_docs_and_quit(error_msg)
     p_val('vpc_name', debug_mode)
 
-# If the user fails to supply a valid security_group, create a new default 
+# If the user fails to supply a valid security_group, create a new default
 # EC2 security group that permits only inbound SSH (Linux) or RDP (Windows)
 # traffic to access the instance(s).
 #
@@ -611,7 +629,7 @@ if iam_role == 'UNDEFINED':
         ec2_iam_instance_policy = iam_name_prefix + '-policy-' + instance_serial_number
         ec2_iam_instance_profile = iam_name_prefix + '-profile-' + instance_serial_number
     instance_json_policy_src = 'templates/' + iam_json_policy
-    instance_json_policy_stage = instance_data_dir + 'stage-' + iam_json_policy 
+    instance_json_policy_stage = instance_data_dir + 'stage-' + iam_json_policy
     instance_json_policy_template = instance_data_dir + iam_json_policy
     preserve_iam_role = 'false'
     modify_iam_policy_document(instance_json_policy_src, instance_json_policy_stage, iam_name_prefix, instance_serial_number)
@@ -693,7 +711,7 @@ if debug_mode == 'true':
     p_val('ec2_iam_instance_role', debug_mode)
     p_val('ec2_iam_instance_profile', debug_mode)
 
-# Validate EFS based on the selected performance mode and if the EFS file 
+# Validate EFS based on the selected performance mode and if the EFS file
 # system should be preserved after the instance(s) is terminated.
 # If EFS encryption was enabled, check the operating system to ensure stunnel
 # behaves as expected to enable encryption in flight.
@@ -751,7 +769,7 @@ sns_month = DateTime.utcnow().strftime('%m')
 sns_day = DateTime.utcnow().strftime('%d')
 sns_hour = DateTime.utcnow().strftime('%H')
 sns_minute = DateTime.utcnow().strftime('%M')
-sns_datestamp = sns_month + '-' + sns_day + '-' + sns_year 
+sns_datestamp = sns_month + '-' + sns_day + '-' + sns_year
 sns_timestamp = sns_hour + ':' +sns_minute
 
 # Define the instance_parameters dictionary for populating the vars_file.
@@ -768,6 +786,9 @@ instance_parameters = {
     'ebs_root_volume_size': ebs_root_volume_size,
     'ebs_root_volume_type': ebs_root_volume_type,
     'ebs_root_volume_iops': ebs_root_volume_iops,
+    'ebs_device_volume_size': ebs_device_volume_size,
+    'ebs_device_volume_type': ebs_device_volume_type,
+    'ebs_device_volume_iops': ebs_device_volume_iops,
     'instance_type': instance_type,
     'ec2_keypair': ec2_keypair,
     'ec2_user': ec2_user,
@@ -839,6 +860,9 @@ if debug_mode == 'true':
     print('ebs_root_volume_size = ' + str(ebs_root_volume_size))
     print('ebs_root_volume_type = ' + ebs_root_volume_type)
     print('ebs_root_volume_iops = ' + str(ebs_root_volume_iops))
+    print('ebs_device_volume_size = ' + str(ebs_device_volume_size))
+    print('ebs_device_volume_type = ' + ebs_device_volume_type)
+    print('ebs_device_volume_iops = ' + str(ebs_device_volume_iops))
     print('instance_type = ' + instance_type)
     print('ec2_keypair = ' + ec2_keypair)
     print('ec2_user = ' + ec2_user)
@@ -960,6 +984,10 @@ ebs_optimized: {ebs_optimized}
 ebs_root_volume_size: {ebs_root_volume_size}
 ebs_root_volume_type: {ebs_root_volume_type}
 ebs_root_volume_iops: {ebs_root_volume_iops}
+
+ebs_device_volume_size: {ebs_device_volume_size}
+ebs_device_volume_type: {ebs_device_volume_type}
+ebs_device_volume_iops: {ebs_device_volume_iops}
 
 # AWS networking
 
