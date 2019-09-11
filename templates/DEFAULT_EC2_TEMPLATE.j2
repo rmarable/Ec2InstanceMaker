@@ -92,9 +92,14 @@ resource "aws_spot_instance_request"  "{{ instance_name }}" {
   root_block_device {
     volume_size             = "{{ ebs_root_volume_size }}"
     volume_type             = "{{ ebs_root_volume_type }}"
-{% if ebs_root_volume_type == 'io1' %}
-    iops                    = "{{ ebs_root_volume_iops }}"
-{% endif %}
+    {% if ebs_root_volume_type == 'io1' %}
+      iops                    = "{{ ebs_root_volume_iops }}"
+    {% endif %}
+  }
+  ebs_block_device {
+    device_name             = "/dev/sdf"
+    volume_size             = "{{ ebs_device_volume_size }}"
+    volume_type             = "{{ ebs_device_volume_type }}"
   }
   vpc_security_group_ids    = ["{{ vpc_security_group_ids }}"]
   subnet_id                 = "{{ subnet_id }}"
