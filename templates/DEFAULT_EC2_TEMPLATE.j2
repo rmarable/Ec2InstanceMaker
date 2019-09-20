@@ -2,7 +2,7 @@
 # Name:		{{ instance_name }}.tf
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	June 3, 2019
-# Last Changed:	August 27, 2019
+# Last Changed:	September 19, 2019
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 {% if count > 1 %}
 # Purpose:	Terraform template for instance family {{ instance_name }}
@@ -24,13 +24,14 @@ resource "aws_efs_file_system"  "efs-{{ instance_name }}" {
   provider                  = "{{ provider }}"
   creation_token            = "{{ instance_serial_number }}"
   tags =  {
-    Name                    = "efs-{{ instance_name }}"
+    Name            = "efs-{{ instance_name }}"
 {% if count > 1 %}
     Purpose                 = "EFS for EC2 instance family {{ instance_name }} built by {{ instance_owner }}"
 {% else %}
     Purpose                 = "EFS for EC2 instance {{ instance_name }} built by {{ instance_owner }}"
 {% endif %}
-    EC2InstanceBuilder      = "Terraform"
+    EC2InstanceBuilderTool  = "Terraform"
+    EFSEncryption           = "{{ efs_encryption | bool | lower }}"
     InstanceSerialNumber    = "{{ instance_serial_number }}"
     InstanceOwner           = "{{ instance_owner }}"
     InstanceOwnerEmail      = "{{ instance_owner_email }}"
@@ -59,10 +60,10 @@ resource "aws_instance"  "{{ instance_name }}" {
 {% endif %}
 {% if request_type == 'spot' %}
 resource "aws_spot_instance_request"  "{{ instance_name }}" {
-  spot_price           = "{{ spot_price }}"
-  spot_type            = "one-time"
+  spot_price                = "{{ spot_price }}"
+  spot_type                 = "one-time"
 {% if count > 1 %}
-  launch_group         = "{{ instance_serial_number }}-lg"
+  launch_group              = "{{ instance_serial_number }}-lg"
 {% endif %}
   wait_for_fulfillment = true
 {% endif %}
@@ -92,6 +93,7 @@ resource "aws_spot_instance_request"  "{{ instance_name }}" {
   root_block_device {
     volume_size             = "{{ ebs_root_volume_size }}"
     volume_type             = "{{ ebs_root_volume_type }}"
+    encrypted               = "{{ ebs_encryption | bool | lower }}"
 {% if ebs_root_volume_type == 'io1' %}
     iops                    = "{{ ebs_root_volume_iops }}"
 {% endif %}
@@ -106,7 +108,8 @@ resource "aws_spot_instance_request"  "{{ instance_name }}" {
     Name                    = "{{ instance_name }}"
     Purpose                 = "EC2 instance built by {{ instance_owner }}"
 {% endif %}
-    EC2InstanceBuilder      = "Terraform"
+    EBSEncryption           = "{{ ebs_encryption | bool | lower }}"
+    EC2InstanceBuilderTool  = "Terraform"
     InstanceSerialNumber    = "{{ instance_serial_number }}"
     InstanceOwner           = "{{ instance_owner }}"
     InstanceOwnerEmail      = "{{ instance_owner_email }}"
@@ -117,11 +120,13 @@ resource "aws_spot_instance_request"  "{{ instance_name }}" {
     DEPLOYMENT_DATE         = "{{ DEPLOYMENT_DATE_TAG }}"
   }
   volume_tags =  {
-    EC2InstanceBuilder      = "Terraform"
+    EC2InstanceBuilderTool  = "Terraform"
 {% if count > 1 %}
+    Name                    = "{{ instance_name }}-${count.index}"
     MountedBy               = "{{ instance_name }}-${count.index}"
     Purpose                 = "EC2 instance family built by {{ instance_owner }}"
 {% else %}
+    Name                    = "{{ instance_name }}"
     MountedBy               = "{{ instance_name }}"
     Purpose                 = "EC2 instance built by {{ instance_owner }}"
 {% endif %}
@@ -133,13 +138,14 @@ resource "aws_spot_instance_request"  "{{ instance_name }}" {
     ProjectID               = "{{ project_id }}"
 {% endif %}
     DEPLOYMENT_DATE         = "{{ DEPLOYMENT_DATE_TAG }}"
+    EBSEncryption           = "{{ ebs_encryption | bool | lower }}"
   }
 {% if request_type == "spot" %}
   provisioner "local-exec" {
 {% if count > 1 %}
-    command = "aws --region {{ region }} ec2 create-tags --resource ${self.spot_instance_id} --tags Key=Name,Value={{ instance_name }}-${count.index} Key=InstanceSerialNumber,Value={{ instance_serial_number }} Key=InstanceOwner,Value={{ instance_owner }} Key=InstanceOwnerEmail,Value={{ instance_owner_email }} Key=InstanceOwnerDepartment,Value={{ instance_owner_department }} Key=InstanceFamily,Value={{ instance_serial_number }}-{{ instance_type }} Key=EC2RequestType,Value={{ request_type }}{% if 'UNDEFINED' not in project_id %} Key=ProjectId,Value={{ project_id }}{% endif %} Key=DEPLOYMENT_DATE,Value=\"{{ DEPLOYMENT_DATE_TAG }}\" Key=OperatingSystem,Value={{ base_os }}"
+    command = "aws --region {{ region }} ec2 create-tags --resource ${self.spot_instance_id} --tags Key=Name,Value={{ instance_name }}-${count.index} Key=InstanceSerialNumber,Value={{ instance_serial_number }} Key=InstanceOwner,Value={{ instance_owner }} Key=InstanceOwnerEmail,Value={{ instance_owner_email }} Key=InstanceOwnerDepartment,Value={{ instance_owner_department }} Key=InstanceFamily,Value={{ instance_serial_number }}-{{ instance_type }} Key=EC2RequestType,Value={{ request_type }}{% if 'UNDEFINED' not in project_id %} Key=ProjectId,Value={{ project_id }}{% endif %} Key=DEPLOYMENT_DATE,Value=\"{{ DEPLOYMENT_DATE_TAG }}\" Key=OperatingSystem,Value={{ base_os }} Key=EBSEncryption,Value={{ ebs_encryption | bool | lower }}"
 {% else %}
-    command = "aws --region {{ region }} ec2 create-tags --resource ${self.spot_instance_id} --tags Key=Name,Value={{ instance_name }} Key=InstanceSerialNumber,Value={{ instance_serial_number }} Key=InstanceOwner,Value={{ instance_owner }} Key=InstanceOwnerEmail,Value={{ instance_owner_email }} Key=InstanceOwnerDepartment,Value={{ instance_owner_department }} Key=InstanceFamily,Value={{ instance_serial_number }}-{{ instance_type }} Key=EC2RequestType,Value={{ request_type }}{% if 'UNDEFINED' not in project_id %} Key=ProjectId,Value={{ project_id }}{% endif %} Key=DEPLOYMENT_DATE,Value=\"{{ DEPLOYMENT_DATE_TAG }}\" Key=OperatingSystem,Value={{ base_os }}"
+    command = "aws --region {{ region }} ec2 create-tags --resource ${self.spot_instance_id} --tags Key=Name,Value={{ instance_name }} Key=InstanceSerialNumber,Value={{ instance_serial_number }} Key=InstanceOwner,Value={{ instance_owner }} Key=InstanceOwnerEmail,Value={{ instance_owner_email }} Key=InstanceOwnerDepartment,Value={{ instance_owner_department }} Key=InstanceFamily,Value={{ instance_serial_number }}-{{ instance_type }} Key=EC2RequestType,Value={{ request_type }}{% if 'UNDEFINED' not in project_id %} Key=ProjectId,Value={{ project_id }}{% endif %} Key=DEPLOYMENT_DATE,Value=\"{{ DEPLOYMENT_DATE_TAG }}\" Key=OperatingSystem,Value={{ base_os }} Key=EBSEncryption,Value={{ ebs_encryption | bool | lower }}"
 {% endif %}
   }
 {% endif %}

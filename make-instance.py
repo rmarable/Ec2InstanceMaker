@@ -4,7 +4,7 @@
 # Name:         make-instance.py
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   June 3, 2019
-# Last Changed: September 5, 2019
+# Last Changed: September 19, 2019
 # Purpose:      Generic command-line EC2 instance creator
 ################################################################################
 
@@ -91,7 +91,7 @@ parser.add_argument('--hyperthreading', '-H', choices=['true', 'false'], help='e
 parser.add_argument('--iam_json_policy', '-J', help='Use a pre-existing JSON policy document in the /templates subdirectory to set permissions for iam_role (default = GenericEc2InstancePolicy.json', required=False, default='GenericEc2InstancePolicy.json')
 parser.add_argument('--iam_name_prefix', help='Provide a prefix for the IAM entities associated with the instance (default = Ec2InstanceMaker)', required=False, default='Ec2InstanceMaker')
 parser.add_argument('--iam_role', help='Apply a pre-existing IAM role to the instance(s)', required=False, default='UNDEFINED')
-parser.add_argument('--instance_owner_department', choices=['analytics', 'clinical', 'commercial', 'compbio', 'compchem', 'datasci', 'design', 'development', 'hpc', 'imaging', 'manufacturing', 'medical', 'modeling', 'operations', 'proteomics', 'robotics', 'qa', 'research', 'scicomp'], help='Department of the instance_owner (default = hpc)', required=False, default='hpc')
+parser.add_argument('--instance_owner_department', choices=['analytics', 'clinical', 'commercial', 'compbio', 'compchem', 'datasci', 'design', 'development', 'hpc', 'imaging', 'manufacturing', 'medical', 'modeling', 'operations', 'proteomics', 'robotics', 'qa', 'research', 'scicomp'], help='Department of the instance_owner (default = compbio)', required=False, default='compbio')
 parser.add_argument('--request_type', choices=['ondemand', 'spot'], help='choose between ondemand or spot instances (default = ondemand)', required=False, default='ondemand')
 parser.add_argument('--instance_type', '-T', help='EC2 instance type (default = t2.micro)', required=False, default='t2.micro')
 parser.add_argument('--prod_level', choices=['dev', 'test', 'stage', 'prod'], help='Operating stage of the jumphost  (default = dev)', required=False, default='dev')
@@ -103,6 +103,7 @@ parser.add_argument('--public_ip', '-p', help='Attach a public IP address to the
 parser.add_argument('--security_group', '-S', help='Primary security group for the EC2 instance (default = generic_ec2_sg)', required=False, default='generic_ec2_sg')
 parser.add_argument('--spot_buffer', help='pricing buffer to protect from Spot market fluctuations: spot_price = spot_price + spot_price*spot_buffer', type=float, required=False, default=round((1/pi), 8))
 parser.add_argument('--turbot_account', help='Turbot account ID (default = DISABLED)', required=False, default='DISABLED')
+parser.add_argument('--vpc_name', help='Name of the VPC (default = vpc_default)', required=False, default='vpc_default')
 
 # Create variables from the optional instance parameter values provided from
 # the command line.
@@ -149,6 +150,7 @@ region = az[:-1]
 spot_buffer = args.spot_buffer
 security_group = args.security_group
 turbot_account = args.turbot_account
+vpc_name = args.vpc_name
 
 # Validate parameters that have successfully passed the argument parser checks
 # and don't require additional error checking.
@@ -460,33 +462,47 @@ else:
 # Future releases may support vpc_id or vpc_name as command line parameters to
 # increase user flexibility.
 
-subnet_information = ec2_client.describe_subnets(
-    Filters=[ { 'Name': 'availabilityZone', 'Values': [ az, ] }, ],
-)
-vpc_information = ec2_client.describe_vpcs()
+#vpc_information = ec2_client.describe_vpcs()
 
+# Parse the vpc_id using vpc_name.
+# If vpc_name was not supplied on the command line, use the default VPC.
+
+if vpc_name == 'vpc_default':
+    vpc_information = ec2_client.describe_vpcs(Filters=[{'Name': 'isDefault', 'Values': ['true']}])
+else:
+    vpc_information = ec2_client.describe_vpcs(Filters=[{'Name': 'tag:Name', 'Values': [ vpc_name ]}])
+
+for vpc in vpc_information["Vpcs"]:
+    vpc_id = vpc["VpcId"]
+    try:
+        vpc_name = vpc_information['Vpcs'][0]['Tags'][0]['Value']
+    except KeyError:
+        error_msg = vpc_id + ' lacks a valid Name tag! This will break Terraform.'
+        refer_to_docs_and_quit(error_msg)
+
+# Parse the subnet_id.
+
+try:
+    subnet_information = ec2_client.describe_subnets(
+        Filters=[ {'Name': 'availabilityZone', 'Values': [ az, ]}, {'Name': 'vpc-id', 'Values': [ vpc_id, ]} ],
+    )
+except NameError:
+    error_msg = '"' + vpc_name + '" is an undefined VPC!'
+    refer_to_docs_and_quit(error_msg)
+p_val('vpc_name', debug_mode)
 try:
     subnet_id = subnet_information['Subnets'][0]['SubnetId']
 except IndexError:
     error_msg='AvailabilityZone ' + az + ' does not contain any valid subnets!'
     refer_to_docs_and_quit(error_msg)
 p_val('subnet_id', debug_mode)
-for vpc in vpc_information["Vpcs"]:
-    vpc_id = vpc["VpcId"]
-    p_val('vpc_id', debug_mode)
-    try:
-        vpc_name = vpc_information['Vpcs'][0]['Tags'][0]['Value']
-    except KeyError:
-        error_msg=vpc_id + ' lacks a valid Name tag! This will break Terraform.'
-        refer_to_docs_and_quit(error_msg)
-    p_val('vpc_name', debug_mode)
 
 # If the user fails to supply a valid security_group, create a new default 
 # EC2 security group that permits only inbound SSH (Linux) or RDP (Windows)
 # traffic to access the instance(s).
 #
-# If enable_efs=true, permit NFS traffic on port 2049/tcp.
-# If enable_fsx=true, permit Lustre traffic on port 988/tcp.
+# If enable_efs=true, also permit NFS traffic on port 2049/tcp.
+# If enable_fsx=true, also permit Lustre traffic on port 988/tcp.
 
 if security_group == 'generic_ec2_sg':
     security_group = security_group + '_' + instance_serial_number
@@ -1147,9 +1163,9 @@ if enable_fsx == 'true':
 
 print('Invoking Terraform to build ' + instance_name + '...')
 if debug_mode == 'true':
-    subprocess.run('TF_LOG= DEBUG terraform init -input=false', shell=True, cwd=instance_data_dir)
-    subprocess.run('TF_LOG= DEBUG terraform plan -out terraform_environment', shell=True, cwd=instance_data_dir)
-    subprocess.run('TF_LOG= DEBUG terraform apply \"terraform_environment\"', shell=True, cwd=instance_data_dir)
+    subprocess.run('TF_LOG=DEBUG terraform init -input=false', shell=True, cwd=instance_data_dir)
+    subprocess.run('TF_LOG=DEBUG terraform plan -out terraform_environment', shell=True, cwd=instance_data_dir)
+    subprocess.run('TF_LOG=DEBUG terraform apply \"terraform_environment\"', shell=True, cwd=instance_data_dir)
 else:
     subprocess.run('terraform init -input=false', shell=True, cwd=instance_data_dir)
     subprocess.run('terraform plan -out terraform_environment', shell=True, cwd=instance_data_dir)

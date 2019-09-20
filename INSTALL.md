@@ -42,25 +42,21 @@ $ /usr/bin/ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/inst
 * Use Homebrew to install some other critical applications (OSX users only):
 
 ```
-$ brew install ansible autoconf automake gcc jq libtool make readline
+$ brew install ansible autoconf automake gcc jq libtool make python readline
 ```
-
-* Install Python3 using the guidance provided here:
-
-  https://realpython.com/installing-python/
 
 * Configure the AWS CLI according to the guidelines provided in the AWS public
 documentation:
 
   https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-getting-started.html
 
-* Install and activate a virtual Python environment using virtualenv or pyenv.
-Please visit "https://docs.python-guide.org/dev/virtualenvs/" for more details
-on Python virtual envirionments.  This is something everyone should be using!
+* Install and activate a virtual Python 3.x environment using virtualenv or pyenv.  Anything above version 3.6 should work fine.  Please visit these links for more details on configuring and using Python virtual environments:
+  * https://realpython.com/intro-to-pyenv/
+  * https://docs.python-guide.org/dev/virtualenvs/
 
-pyenv is cleaner and preferred, but it doesn't provide a prompt that will
-display the current Python version like virtualenv does without some
-additional steps.  Please follow the installation guidelines provided
+pyenv is preferred by the author but it doesn't provide a prompt that will
+display the current Python version like virtualenv does without performing
+some additional steps.  Please follow the installation guidelines provided
 here: https://github.com/pyenv/pyenv#installation
 
 Please be **very** careful or you may inadvertedly damage your local Python
@@ -69,18 +65,17 @@ environment:
 ```
 $ brew install pyenv
 $ brew install pyenv-virtualenv
-$ pyenv version 3.7.2
+$ pyenv install 3.7.4
 $ pyenv virtualenv ec2instancemaker
 $ pyenv activate ec2instancemaker
 ```
 
-virtualenv should **not** be installed in the Ec2InstanceMaker source folder
-to help keep your source tree clean and organized:
+If you prefer virtualenv, install it using pip, taking careful note **not** to deploy into the Ec2InstanceMaker source folder to help keep your source tree clean and organized:
 
 ```
 $ pip install virtualenv
 $ virtualenv --version
-16.4.3
+16.7.5
 $ mkdir -p ~/src/ec2instancemaker
 $ virtualenv -p /usr/local/bin/python3.7 ~/src/ec2instancemaker
 $ export VIRTUALENVWRAPPER_PYTHON=/usr/local/bin/python3.7
@@ -152,7 +147,7 @@ $ cd Ec2InstanceMaker
 
 If needed, run `aws configure`.
 
-Edit `dockerfile` and either paste your AWS credentials where indicated or use
+Edit `Dockerfile` and either paste your AWS credentials where indicated or use
 environment variables as suggested in the AWS public documentation:
 
 https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-envvars.html
