@@ -77,6 +77,7 @@ parser.add_argument('--ebs_optimized', choices=['true', 'false'],help='use optim
 parser.add_argument('--ebs_root_volume_iops', help='amount of provisioned IOPS for the EBS root volume when ebs_root_volume_type=io1 (default = 0)', required=False, type=int, default=0)
 parser.add_argument('--ebs_root_volume_size', help='EBS volume size in GB (Linux default = 8, Windows default = 30)', required=False, type=int, default=8)
 parser.add_argument('--ebs_root_volume_type', choices=['gp2', 'io1', 'st1'], help='EBS volume type (default = gp2)', required=False, default='gp2')
+parser.add_argument('--ec2_keypair', help='define an EC2 key pair name to provide SSH or Remote Desktop access (default = ec2_keypair_default)', required=False, default='ec2_keypair_default')
 parser.add_argument('--efs_encryption', choices=['true', 'false'], help='enable EFS encryption in transit and at rest (default = false)', required=False, default='false')
 parser.add_argument('--efs_performance_mode', choices=['generalPurpose', 'maxIO'], help='select the EFS performance mode (default = generalPurpose)', required=False, default='generalPurpose')
 parser.add_argument('--enable_efs', choices=['true', 'false'], help='Deploy and mount an Elastic File System (EFS) on the instance(s) (default = false)', required=False, default='false')
@@ -121,6 +122,7 @@ ebs_optimized = args.ebs_optimized
 ebs_root_volume_iops = args.ebs_root_volume_iops
 ebs_root_volume_size = args.ebs_root_volume_size
 ebs_root_volume_type = args.ebs_root_volume_type
+ec2_keypair = args.ec2_keypair
 efs_encryption = args.efs_encryption
 efs_performance_mode = args.efs_performance_mode
 enable_efs = args.enable_efs
@@ -567,7 +569,9 @@ p_val('aws_ami', debug_mode)
 # Create a new EC2 key pair and secret key file for the instance(s) within the
 # deployment region of choice if either entity doesn't already exist.
 
-ec2_keypair = instance_serial_number + '_' + region
+if ec2_keypair == 'ec2_keypair_default':
+    ec2_keypair = instance_serial_number + '_' + region
+
 secret_key_file = instance_data_dir + ec2_keypair + '.pem'
 
 try:
@@ -582,16 +586,16 @@ except ClientError as e:
         subprocess.run('chmod 0600 ' + secret_key_file, shell=True)
         print('Created EC2 keypair: ' + ec2_keypair)
 
-# If the secret key file is missing but the EC2 keypair still exists, provide
-# guidance to the operator on how to resolve this discrepancy.
+# If the secret key file is missing but the EC2 key pair exists in the region,
+# provide guidance to the operator on how to resolve this discrepancy.
 
 if not os.path.isfile(secret_key_file):
     print('')
     print('*** ERROR ***')
     print('Missing: ' + secret_key_file)
     print('')
-    print('Please resolve this issue and retry, perhaps deleting the original keypair')
-    print('by pasting this command into the shell:')
+    print('If you are sure this is an error, please delete the original key pair')
+    print('by pasting this command into the shell and retrying:')
     print('')
     print('$ aws --region ' + region + ' ec2 delete-key-pair --key-name ' + ec2_keypair)
     print('')
