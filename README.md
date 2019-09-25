@@ -400,7 +400,7 @@ optional arguments:
                         = true)
   --security_group SECURITY_GROUP, -S SECURITY_GROUP
                         Primary security group for the EC2 instance (default =
-                        generic_ec2_sg)
+                        ec2instancemaker_sg)
   --spot_buffer SPOT_BUFFER
                         pricing buffer to protect from Spot market
                         fluctuations: spot_price = spot_price +
