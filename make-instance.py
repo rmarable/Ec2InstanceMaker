@@ -4,7 +4,7 @@
 # Name:         make-instance.py
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   June 3, 2019
-# Last Changed: September 19, 2019
+# Last Changed: September 25, 2019
 # Purpose:      Generic command-line EC2 instance creator
 ################################################################################
 
@@ -100,7 +100,7 @@ parser.add_argument('--preserve_ami', choices=['true', 'false'], help='Preserve 
 parser.add_argument('--preserve_efs', choices=['true', 'false'], help='Preserve the Elastic File System (EFS) created with the instance(s) (default = false)', required=False, default='false')
 parser.add_argument('--project_id', '-P', help='Project name or ID number (default = UNDEFINED)', required=False, default='UNDEFINED')
 parser.add_argument('--public_ip', '-p', help='Attach a public IP address to the instance(s) (default = true)', required=False, default='true')
-parser.add_argument('--security_group', '-S', help='Primary security group for the EC2 instance (default = generic_ec2_sg)', required=False, default='generic_ec2_sg')
+parser.add_argument('--security_group', '-S', help='Primary security group name for the EC2 instance (default = ec2instancemaker_sg)', required=False, default='ec2instancemaker_sg')
 parser.add_argument('--spot_buffer', help='pricing buffer to protect from Spot market fluctuations: spot_price = spot_price + spot_price*spot_buffer', type=float, required=False, default=round((1/pi), 8))
 parser.add_argument('--turbot_account', help='Turbot account ID (default = DISABLED)', required=False, default='DISABLED')
 parser.add_argument('--vpc_name', help='Name of the VPC (default = vpc_default)', required=False, default='vpc_default')
@@ -455,15 +455,9 @@ else:
     p_val('region', debug_mode)
     p_val('az', debug_mode)
 
-# Parse the subnet_id, vpc_id, and vpc_name from the selected AWS Region and
-# Availability Zone.  Since Terraform requires that the selected VPC have a
-# valid Name tag, return an error if this value is missing.
+# Determine subnet_id, vpc_id, and vpc_name from the selected AWS Region and
+# Availability Zone.  Return an error if this value is missing.
 #
-# Future releases may support vpc_id or vpc_name as command line parameters to
-# increase user flexibility.
-
-#vpc_information = ec2_client.describe_vpcs()
-
 # Parse the vpc_id using vpc_name.
 # If vpc_name was not supplied on the command line, use the default VPC.
 
@@ -504,7 +498,7 @@ p_val('subnet_id', debug_mode)
 # If enable_efs=true, also permit NFS traffic on port 2049/tcp.
 # If enable_fsx=true, also permit Lustre traffic on port 988/tcp.
 
-if security_group == 'generic_ec2_sg':
+if security_group == 'ec2instancemaker_sg':
     security_group = security_group + '_' + instance_serial_number
 filters = [ { 'Name': 'group-name', 'Values': [ security_group, ] }, ]
 sg_id = list(ec2.security_groups.filter(Filters=filters))
@@ -819,7 +813,7 @@ instance_parameters = {
     'preserve_iam_role': preserve_iam_role,
     'public_ip': public_ip,
     'region': region,
-    'security_group': security_group,
+    'security_group_name': security_group_name,
     'spot_price': spot_price,
     'vpc_security_group_ids': vpc_security_group_ids,
     'sns_topic_arn': sns_topic_arn,
@@ -879,28 +873,28 @@ if debug_mode == 'true':
     print('instance_owner = ' + instance_owner)
     print('instance_owner_email = ' + instance_owner_email)
     print('instance_owner_department = ' + instance_owner_department)
-    print('request_type = ' + request_type)
     print('instance_serial_number = ' + instance_serial_number)
     print('instance_serial_number_file = ' + instance_serial_number_file)
+    print('request_type = ' + request_type)
     print('preserve_ami = ' + preserve_ami)
     print('prod_devel = ' + prod_level)
     if project_id != 'UNDEFINED':
         print('project_id = ' + project_id)
-    print('region = ' + region)
-    print('security_group = ' + str(security_group))
     if ec2_iam_instance_profile:
         print('preserve_iam_role = ' + preserve_iam_role)
         if 'UNDEFINED' not in ec2_iam_instance_policy:
             print('ec2_iam_instance_policy = ' + ec2_iam_instance_policy)
         print('ec2_iam_instance_profile = ' + ec2_iam_instance_profile)
         print('ec2_iam_instance_role = ' + ec2_iam_instance_role)
-    print('spot_price = ' + spot_price)
-    print('vpc_security_group_ids = ' + vpc_security_group_ids)
-    print('subnet_id = ' + subnet_id)
     print('public_ip = ' + public_ip)
+    print('region = ' + region)
+    print('security_group_name = ' + str(security_group_name))
+    print('spot_price = ' + spot_price)
+    print('subnet_id = ' + subnet_id)
     print('vars_file_path = ' + vars_file_path)
     print('vpc_id = ' + vpc_id)
     print('vpc_name = ' + vpc_name)
+    print('vpc_security_group_ids = ' + vpc_security_group_ids)
     print('sns_topic_arn = ' + sns_topic_arn)
     print('ANSIBLE_VERSION = ' + ANSIBLE_VERSION)
     print('DEPLOYMENT_DATE = ' + DEPLOYMENT_DATE)
@@ -984,7 +978,7 @@ enable_placement_group: {enable_placement_group}
 placement_group_strategy: {placement_group_strategy}
 public_ip: {public_ip}
 region: {region}
-security_group: {security_group}
+security_group_name: {security_group_name}
 subnet_id: {subnet_id}
 vpc_id: {vpc_id}
 vpc_name: {vpc_name}

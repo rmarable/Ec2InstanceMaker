@@ -2,7 +2,7 @@
 # Name:		{{ instance_name }}.tf
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	June 3, 2019
-# Last Changed:	September 19, 2019
+# Last Changed:	September 25, 2019
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 {% if count > 1 %}
 # Purpose:	Terraform template for instance family {{ instance_name }}
@@ -54,6 +54,22 @@ resource "aws_efs_mount_target" "efs-mountTarget-{{ instance_name }}" {
   security_groups           = ["{{ vpc_security_group_ids }}"]
 }
 {% endif %}
+
+resource "aws_security_group" "{{ security_group_name }}" {
+  tags = {
+    Name                    = "{{ security_group_name }}"
+    Purpose                 = "EC2 security group built by {{ instance_owner }}"
+    EC2InstanceBuilderTool  = "Terraform"
+    InstanceSerialNumber    = "{{ instance_serial_number }}"
+    InstanceOwner           = "{{ instance_owner }}"
+    InstanceOwnerEmail      = "{{ instance_owner_email }}"
+    InstanceOwnerDepartment = "{{ instance_owner_department }}"
+{% if 'UNDEFINED' not in project_id %}
+    ProjectID               = "{{ project_id }}"
+{% endif %}
+    DEPLOYMENT_DATE         = "{{ DEPLOYMENT_DATE_TAG }}"
+  }
+}
 
 {% if request_type == 'ondemand' %}
 resource "aws_instance"  "{{ instance_name }}" {
