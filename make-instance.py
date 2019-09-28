@@ -1103,7 +1103,6 @@ if enable_fsx == 'true':
         { 'Key': 'InstanceOwner', 'Value': instance_owner },
         { 'Key': 'InstanceOwnerEmail', 'Value': instance_owner_email },
         { 'Key': 'InstanceOwnerDepartment', 'Value': instance_owner_department },
-        { 'Key': 'ProjectID', 'Value': project_id },
         { 'Key': 'DEPLOYMENT_DATE_TAG', 'Value': DEPLOYMENT_DATE_TAG }
     ]
     if 'UNDEFINED' not in project_id:
