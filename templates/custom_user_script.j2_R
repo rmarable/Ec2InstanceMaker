@@ -1,0 +1,132 @@
+#!/bin/bash
+#
+################################################################################
+# Name:		custom_user_script.{{ instance_name }}.sh
+# Author:	{{ instance_owner_email }}
+# Created On:	September 26, 2019
+# Last Changed:	September 27, 2019
+# Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
+# Purpose:	Install multiple versions of R from source with Latex support
+################################################################################
+
+{% if 'alinux' in base_os %}
+# Install some critical Yum packages.
+
+sudo yum install -y gcc-c++ gcc-gfortran java-1.8.0-openjdk-devel perl-App-cpanminus python3-devel tcl-devel tk-devel 
+sudo yum install -y bzip2-devel curl-devel pcre-devel readline-devel zlib-devel
+sudo yum install -y libXt-devel xauth xorg-x11-apps xorg-x11-server-devel xpdf-devel xterm xz-devel
+sudo yum install -y blas64-devel cairo-devel lapack64-devel libjpeg-turbo-devel libtiff-devel libicu-devel valgrind-devel 
+
+# Download Teklive2019 from CTAN.
+
+mkdir -p ~/src/texlive2019
+cd ~/src/texlive2019
+wget http://mirror.ctan.org/systems/texlive/tlnet/install-tl-unx.tar.gz
+tar xvzf install-tl-unx.tar.gz
+cd install-tl-*
+
+# Create an unattended installation profile for Teklive2019.
+
+echo "# texlive.profile written on Thu Sep 26 22:38:25 2019 UTC
+# It will NOT be updated and reflects only the
+# installation profile at installation time.
+selected_scheme scheme-custom
+TEXDIR /usr/local/texlive/2019
+TEXMFCONFIG ~/.texlive2019/texmf-config
+TEXMFHOME ~/texmf
+TEXMFLOCAL /usr/local/texlive/texmf-local
+TEXMFSYSCONFIG /usr/local/texlive/2019/texmf-config
+TEXMFSYSVAR /usr/local/texlive/2019/texmf-var
+TEXMFVAR ~/.texlive2019/texmf-var
+binary_x86_64-linux 1
+collection-basic 1
+collection-bibtexextra 1
+collection-binextra 1
+collection-context 1
+collection-fontsextra 1
+collection-fontsrecommended 1
+collection-fontutils 1
+collection-formatsextra 1
+collection-games 1
+collection-humanities 1
+collection-langarabic 1
+collection-langchinese 1
+collection-langcjk 1
+collection-langcyrillic 1
+collection-langczechslovak 1
+collection-langenglish 1
+collection-langeuropean 1
+collection-langfrench 1
+collection-langgerman 1
+collection-langgreek 1
+collection-langitalian 1
+collection-langjapanese 1
+collection-langkorean 1
+collection-langother 1
+collection-langpolish 1
+collection-langportuguese 1
+collection-langspanish 1
+collection-latex 1
+collection-latexextra 1
+collection-latexrecommended 1
+collection-luatex 1
+collection-mathscience 1
+collection-metapost 1
+collection-music 1
+collection-pictures 1
+collection-plaingeneric 1
+collection-pstricks 1
+collection-publishers 1
+collection-texworks 1
+collection-xetex 1
+instopt_adjustpath 0
+instopt_adjustrepo 1
+instopt_letter 1
+instopt_portable 0
+instopt_write18_restricted 1
+tlpdbopt_autobackup 1
+tlpdbopt_backupdir tlpkg/backups
+tlpdbopt_create_formats 1
+tlpdbopt_desktop_integration 1
+tlpdbopt_file_assocs 1
+tlpdbopt_generate_updmap 0
+tlpdbopt_install_docfiles 1
+tlpdbopt_install_srcfiles 1
+tlpdbopt_post_code 1
+tlpdbopt_sys_bin /usr/local/bin
+tlpdbopt_sys_info /usr/local/share/info
+tlpdbopt_sys_man /usr/local/share/man
+tlpdbopt_w32_multi_user 1" > texlive.profile
+
+# Install Teklive2019.
+
+sudo ./install-tl -profile texlive.profile
+echo "PATH=/usr/local/texlive/2019/bin/x86_64-linux:$PATH" | sudo tee /etc/profile.d/texlive.sh
+echo "PATH=/usr/local/texlive/2019/bin/x86_64-linux:$PATH" | sudo tee /etc/profile.d/texlive.sh
+sudo chmod 0755 /etc/profile.d/texlive.*sh
+source /etc/profile.d/texlive.sh
+
+# Download and install R.
+
+cp /usr/share/zoneinfo/Etc /etc/localtime
+R_SRC_DIR=~/src/R
+mkdir -p $R_SRC_DIR
+cd $R_SRC_DIR
+for R_VERSION in 3.6.1 3.5.3 3.4.4
+do
+	wget https://cloud.r-project.org/src/base/R-3/R-${R_VERSION}.tar.gz
+	tar xvzf R-${R_VERSION}.tar.gz
+	cd R-${R_VERSION}
+	./configure --prefix=/usr/local/R/${R_VERSION} --enable-memory-profiling --enable-R-shlib --with-blas --with-lapack --with-system-valgrind-headers 
+	make
+	make check
+	sudo make install 
+	cd ..
+done
+{% else %}
+
+###############################################################
+# This installation script is only supported on Amazon Linux! #
+###############################################################
+
+{% endif %}

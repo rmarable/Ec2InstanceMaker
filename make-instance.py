@@ -4,7 +4,7 @@
 # Name:         make-instance.py
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   June 3, 2019
-# Last Changed: September 25, 2019
+# Last Changed: September 28, 2019
 # Purpose:      Generic command-line EC2 instance creator
 ################################################################################
 
@@ -504,8 +504,8 @@ if security_group == 'ec2instancemaker_sg':
     security_group = security_group + '_' + instance_serial_number
 filters = [ { 'Name': 'group-name', 'Values': [ security_group, ] }, ]
 sg_id = list(ec2.security_groups.filter(Filters=filters))
+security_group_name = security_group
 if not sg_id:
-    security_group_name = security_group
     security_group = ec2.create_security_group(
         GroupName=security_group_name,
         Description='EC2 security group - created by Ec2InstanceMaker',
@@ -965,9 +965,6 @@ ssh_keypair_file: "{{{{ ec2_keypair }}}}.pem"
 ssh_known_hosts: ~/.ssh/known_hosts
 
 # EBS parameters
-# Note: Terraform does not currently support encryption of root devices at
-# instance creation.  Please use a custom_ami with an already-encrypted EBS
-# root volume instead.  Additional guidance is provided in README.md.
 
 ebs_encryption: {ebs_encryption}
 ebs_optimized: {ebs_optimized}
@@ -1098,29 +1095,19 @@ fsx_client = boto3.client('fsx', region_name = region)
 # command line parameters provided (or not) by the operator.
 
 if enable_fsx == 'true':
+    LustreTags=[
+        { 'Key': 'Name', 'Value': instance_name },
+        { 'Key': 'Purpose', 'Value': 'FSx for Lustre storage attached to ' + instance_name },
+        { 'Key': 'FileSystemBuilder', 'Value': 'boto3' },
+        { 'Key': 'InstanceSerialNumber', 'Value': instance_serial_number },
+        { 'Key': 'InstanceOwner', 'Value': instance_owner },
+        { 'Key': 'InstanceOwnerEmail', 'Value': instance_owner_email },
+        { 'Key': 'InstanceOwnerDepartment', 'Value': instance_owner_department },
+        { 'Key': 'ProjectID', 'Value': project_id },
+        { 'Key': 'DEPLOYMENT_DATE_TAG', 'Value': DEPLOYMENT_DATE_TAG }
+    ]
     if 'UNDEFINED' not in project_id:
-        Lustre_Tags=[
-            { 'Key': 'Name', 'Value': instance_name },
-            { 'Key': 'Purpose', 'Value': 'FSx for Lustre storage attached to ' + instance_name },
-            { 'Key': 'FileSystemBuilder', 'Value': 'boto3' },
-            { 'Key': 'InstanceSerialNumber', 'Value': instance_serial_number },
-            { 'Key': 'InstanceOwner', 'Value': instance_owner },
-            { 'Key': 'InstanceOwnerEmail', 'Value': instance_owner_email },
-            { 'Key': 'InstanceOwnerDepartment', 'Value': instance_owner_department },
-            { 'Key': 'ProjectID', 'Value': project_id },
-            { 'Key': 'DEPLOYMENT_DATE_TAG', 'Value': DEPLOYMENT_DATE_TAG }
-        ]
-    else:
-        Lustre_Tags=[
-            { 'Key': 'Name', 'Value': instance_name },
-            { 'Key': 'Purpose', 'Value': 'FSx for Lustre storage attached to ' + instance_name },
-            { 'Key': 'FileSystemBuilder', 'Value': 'boto3' },
-            { 'Key': 'InstanceSerialNumber', 'Value': instance_serial_number },
-            { 'Key': 'InstanceOwner', 'Value': instance_owner },
-            { 'Key': 'InstanceOwnerEmail', 'Value': instance_owner_email },
-            { 'Key': 'InstanceOwnerDepartment', 'Value': instance_owner_department },
-            { 'Key': 'DEPLOYMENT_DATE_TAG', 'Value': DEPLOYMENT_DATE_TAG }
-        ]
+        LustreTags.append( { 'Key': 'ProjectID', 'Value': project_id } )
     if enable_fsx_hydration == 'true':
         Lustre_Fsx_Configuration={
             'WeeklyMaintenanceStartTime': '4:20:00',
@@ -1139,7 +1126,7 @@ if enable_fsx == 'true':
         StorageCapacity=fsx_size,
         SubnetIds=[subnet_id,],
         SecurityGroupIds=[vpc_security_group_ids,],
-        Tags=Lustre_Tags,
+        Tags=LustreTags,
         LustreConfiguration=Lustre_Fsx_Configuration
         )
 
@@ -1157,7 +1144,7 @@ if enable_fsx == 'true':
     print('')
     print('Finished building: ' + lustre_file_system_dnsName.replace('\"', '').strip())
 
-# Create the new EC2 instance(s) and supporting infrastructure with Terraform.
+# Create the new EC2 instance(s) with Terraform.
 
 print('Invoking Terraform to build ' + instance_name + '...')
 if debug_mode == 'true':
@@ -1168,6 +1155,29 @@ else:
     subprocess.run('terraform init -input=false', shell=True, cwd=instance_data_dir)
     subprocess.run('terraform plan -out terraform_environment', shell=True, cwd=instance_data_dir)
     subprocess.run('terraform apply \"terraform_environment\"', shell=True, cwd=instance_data_dir)
+
+# Apply the common tag set to the EC2 security group.
+
+SecurityGroupTags=[
+    { 'Key': 'Name', 'Value': security_group_name },
+    { 'Key': 'Purpose', 'Value': 'EC2 security group for ' + instance_name },
+    { 'Key': 'Ec2InstanceBuilderTool', 'Value': 'boto3' },
+    { 'Key': 'InstanceSerialNumber', 'Value': instance_serial_number },
+    { 'Key': 'InstanceOwner', 'Value': instance_owner },
+    { 'Key': 'InstanceOwnerEmail', 'Value': instance_owner_email },
+    { 'Key': 'InstanceOwnerDepartment', 'Value': instance_owner_department },
+    { 'Key': 'DEPLOYMENT_DATE_TAG', 'Value': DEPLOYMENT_DATE_TAG }
+]
+if 'UNDEFINED' not in project_id:
+    SecurityGroupTags.append( { 'Key': 'ProjectID', 'Value': project_id } )
+security_group_tags = ec2_client.create_tags(
+    Resources=[vpc_security_group_ids],
+    Tags=SecurityGroupTags
+)
+
+# Reboot the instance(s) if a Lustre file system was created or if the base
+# operating system is centos6.
+
 if enable_fsx == 'true' or base_os == 'centos6':
     print('')
     if enable_fsx == 'true':

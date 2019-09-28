@@ -1,0 +1,114 @@
+#!/bin/bash
+#
+################################################################################
+# Name:		custom_user_script.{{ instance_name }}.sh
+# Author:	{{ instance_owner_email }}
+# Created On:	September 27, 2019
+# Last Changed:	September 28, 2019
+# Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
+# Purpose:	CellRanger
+################################################################################
+#
+# Notes:
+# - r5.4xlarge (16 cores, 128GB memory) takes about 20m to build.
+
+# Define some critical parameters.
+
+CELLRANGER_VERSION=3.1.0
+HUMAN_REF_VERSION=3.0.0
+PGET=$HOME/go/bin/pget
+SRC_DIR=$HOME/cellranger
+RUN_DIR=$SRC_DIR/cellranger-${CELLRANGER_VERSION}
+
+# Create a staging directory for the installation.
+
+if [ ! -d $SRC_DIR ]
+then
+	mkdir -p $SRC_DIR
+fi
+cd $SRC_DIR
+
+# Set the allowed value of concurrent S3 requests and maximum queue size 
+# based on the number of system cores.
+
+CORE_COUNT=`lscpu | grep ^CPU\(s\) | awk '{print $2}'`
+if [ $CORE_COUNT -le 4 ]
+then
+	aws configure set default.s3.max_concurrent_requests 16
+	aws configure set max_queue_size 1024
+elif [ $CORE_COUNT -le 8 ]
+then
+	aws configure set default.s3.max_concurrent_requests 32
+	aws configure set max_queue_size 2048
+elif [ $CORE_COUNT -le 16 ]
+then
+	aws configure set default.s3.max_concurrent_requests 64
+	aws configure set max_queue_size 4096
+elif [ $CORE_COUNT -le 32 ]
+then
+	aws configure set default.s3.max_concurrent_requests 128
+	aws configure set max_queue_size 8192
+else
+	aws configure set default.s3.max_concurrent_requests 256
+	aws configure set max_queue_size 16384
+fi
+
+# Install some tools to accelerate data transfer.
+
+sudo yum install -y pigz golang
+go get github.com/Code-Hex/pget/cmd/pget
+
+# Download and install CellRanger along with a reference data set.
+
+aws s3 cp s3://sana-data-architecture-apps/cellranger/cellranger-3.1.0.tar.gz .
+unpigz cellranger-${CELLRANGER_VERSION}.tar.gz
+tar xvf cellranger-${CELLRANGER_VERSION}.tar
+aws s3 cp s3://sana-data-architecture-apps/cellranger/refdata-cellranger-GRCh38-${HUMAN_REF_VERSION}.tar.gz .
+unpigz refdata-cellranger-GRCh38-${HUMAN_REF_VERSION}.tar.gz
+tar xvf refdata-cellranger-GRCh38-${HUMAN_REF_VERSION}.tar
+
+# Download and install bcl2fastq.
+
+wget https://support.illumina.com/content/dam/illumina-support/documents/downloads/software/bcl2fastq/bcl2fastq2-v2-20-0-linux-x86-64.zip
+unzip bcl2fastq2-v2-20-0-linux-x86-64.zip
+sudo yum install -y bcl2fastq2-v2.20.0.422-Linux-x86_64.rpm
+
+# Configure the operating environment.
+
+echo "export PATH=`echo $SRC_DIR`/cellranger-${CELLRANGER_VERSION}:$PATH
+ulimit -u 16384" | sudo tee /etc/profile.d/cellranger.sh
+source /etc/profile.d/cellranger.sh
+
+# Test the tools by dumping their version outputs to the console.
+
+cd $RUN_DIR
+cellranger --version
+bcl2fastq --version
+
+# Download the FASTQs referred to in "Getting Started with CellRanger" on 
+# Dave Tang's blog.  Start with the "Test Run" section.
+# Ref: https://davetang.org/muse/2018/08/09/getting-started-with-cell-ranger/
+
+cd $SRC_DIR
+$PGET -p $CORE_COUNT http://s3-us-west-2.amazonaws.com/10x.files/samples/cell-exp/2.1.0/pbmc8k/pbmc8k_fastqs.tar
+tar xvf pbmc8k_fastqs.tar
+
+# Download the BCL sample sheet and tarball.
+
+wget http://cf.10xgenomics.com/supp/cell-exp/cellranger-tiny-bcl-simple-1.2.0.csv
+wget http://cf.10xgenomics.com/supp/cell-exp/cellranger-tiny-bcl-1.2.0.tar.gz
+gunzip cellranger-tiny-bcl-1.2.0.tar.gz
+tar xvf cellranger-tiny-bcl-1.2.0.tar
+
+# Cleanup and exit.
+
+echo "Cleaning up..."
+rm bcl2fastq2-v2-20-0-linux-x86-64.zip
+rm bcl2fastq2-v2.20.0.422-Linux-x86_64.rpm
+rm cellranger-${CELLRANGER_VERSION}.tar
+rm cellranger-tiny-bcl-1.2.0.tar
+rm pbmc8k_fastqs.tar
+rm refdata-cellranger-GRCh38-${HUMAN_REF_VERSION}.tar
+echo "Installation of CellRanger finished successfully!"
+echo "Exiting..."
+exit 0
