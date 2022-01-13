@@ -26,61 +26,69 @@ including Homebrew which may createe other unforeseen problems with your local
 environment.
 
 * Clone the Ec2InstanceMaker toolkit into your local ~/src directory:
-
 ```
 $ mkdir ~/src
 $ cd ~/src
 $ git clone https://github.com/rmarable/Ec2InstanceMaker.git
 ```
 
-* Install Homebrew (OSX users only):
+* Install the Command Line Tools for Xcode:
+```
+$ sudo installer -pkg /Library/Developer/CommandLineTools/Packages/macOS_SDK_headers_for_macOS_10.14.pkg -target /
+```
 
+* Install Homebrew:
 ```
 $ /usr/bin/ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"
 ```
 
-* Use Homebrew to install some other critical applications (OSX users only):
-
+* Use Homebrew to install some other critical applications:
 ```
-$ brew install ansible autoconf automake gcc jq libtool make readline
+$ brew install ansible autoconf automake gcc jq libtool make python readline
 ```
-
-* Install Python3 using the guidance provided here:
-
-  https://realpython.com/installing-python/
 
 * Configure the AWS CLI according to the guidelines provided in the AWS public
 documentation:
 
   https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-getting-started.html
 
-* Install and activate a virtual Python environment using virtualenv or pyenv.
-Please visit "https://docs.python-guide.org/dev/virtualenvs/" for more details
-on Python virtual envirionments.  This is something everyone should be using!
+* Install and activate a virtual Python 3.x environment using virtualenv or pyenv.  Anything above version 3.6 should work fine.  Please visit these links for more details on configuring and using Python virtual environments:
+  * https://realpython.com/intro-to-pyenv/
+  * https://docs.python-guide.org/dev/virtualenvs/
 
-pyenv is cleaner and preferred, but it doesn't provide a prompt that will
-display the current Python version like virtualenv does without some
-additional steps.  Please follow the installation guidelines provided
+pyenv is preferred by the author but it doesn't provide a prompt that will
+display the current Python version like virtualenv does without performing
+some additional steps.  Please follow the installation guidelines provided
 here: https://github.com/pyenv/pyenv#installation
 
 Please be **very** careful or you may inadvertedly damage your local Python
 environment:
-
 ```
 $ brew install pyenv
 $ brew install pyenv-virtualenv
-$ pyenv version 3.7.2
+$ pyenv install 3.7.4
+```
+
+If the Python build fails, reinstall the Xcode CLT:
+```
+$ sudo rm -rf /Library/Developer/CommandLineTools
+$ xcode-select --install
+$ pyenv install 3.7.4 -v
+$ python —version
+3.7.4
+```
+
+Create and activate a virtual Python environment to support Ec2InstanceMaker:
+```
 $ pyenv virtualenv ec2instancemaker
 $ pyenv activate ec2instancemaker
 ```
 
-virtualenv should **not** be installed in the Ec2InstanceMaker source folder
-to help keep your source tree clean and organized:
-
+If you prefer using virtualenv, install it using pip, taking careful note **not** to deploy into the Ec2InstanceMaker source folder to keep your source tree clean and organized:
 ```
 $ pip install virtualenv
 $ virtualenv --version
-16.4.3
+16.7.5
 $ mkdir -p ~/src/ec2instancemaker
 $ virtualenv -p /usr/local/bin/python3.7 ~/src/ec2instancemaker
 $ export VIRTUALENVWRAPPER_PYTHON=/usr/local/bin/python3.7
@@ -89,27 +97,19 @@ $ source ~/src/ec2instancemaker/bin/activate
 
 * Install the required Python libraries into the Python virtual environment
 using the included requirements.txt files:
-
 ```
 $ cd ~/src/Ec2InstanceMaker
 $ pip install -r requirements.txt
 $ cd ~
 ```
 
-* You are now ready to build EC2 instances.  Please consult README.md and 
-EXAMPLE_USE_CASES.md for more detailed information on leveraging the scripts
-in this toolkit.
+* You are now ready to build EC2 instances on OSX.  Please consult README.md and EXAMPLE_USE_CASES.md for more detailed information on leveraging this toolkit.
 
 ## Creating an Installation Environment on Linux (local or EC2)
 
-The linux-ec2-setup.sh script can be used to set up the Ec2InstanceMaker
-operating environment on Linux.  The script will work on EC2 instances running
-CentOS, Amazon Linux, or Ubuntu, regardless of whether they were created with
-Ec2InstanceMaker or by any other means.
+The linux-ec2-setup.sh script can be used to set up the Ec2InstanceMaker operating environment on EC2 instances, virtual machines, or physical servers running CentOS, Amazon Linux, or Ubuntu.  Instances created with Ec2InstanceMaker can also be used to spawn additional children.
 
-After building a new instance, check out the repository from Github and run
-the script:
-
+After building a fresh EC2 instance, clone the repository to a local $SRC_DIR run the installer:
 ```
 $ mkdir -p ~/src && cd ~/src
 $ git clone https://github.com/rmarable/Ec2InstanceMaker.git
@@ -122,7 +122,6 @@ Please note that the default IAM permissions granted to Ec2InstanceMaker-spawned
 ## About make-instance.py
 
 To view all available options for make-instance.py:
-
 ```
 $ cd ~/src/Ec2InstanceMaker
 $ ./make-instance.py --help
@@ -131,33 +130,31 @@ $ ./make-instance.py --help
 ## Launching Instances Using Docker
 
 Ec2InstanceMaker supports launching new EC2 instances from a Docker container.
-Some users may prefer this method to using a "jumphost" for launching child
+Some users may prefer this method over using a "jumphost" for launching child
 instances.
 
-Install Docker by following the guidelines outlined here:
+* Install Docker by following the guidelines outlined here:
 
 https://docs.docker.com/install/ 
 
-Create $SRC_DIR (suggested: `~/src`).
-
+* Create $SRC_DIR (suggested: `~/src`):
 `$ mkdir -p $SRC_DIR`
 
-Clone the Ec2InstanceMaker repository into $SRC_DIR.
-
+* Clone the Ec2InstanceMaker repository into $SRC_DIR.
 ```
 $ cd $SRC_DIR
 $ git clone https://github.com/rmarable/Ec2InstanceMaker.git
 $ cd Ec2InstanceMaker
 ```
 
-If needed, run `aws configure`.
+* If needed, run `aws configure`.
 
-Edit `dockerfile` and either paste your AWS credentials where indicated or use
+* Edit `Dockerfile` and either paste your AWS credentials where indicated or use
 environment variables as suggested in the AWS public documentation:
 
 https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-envvars.html
 
-Build the container, launch it interactively, and start building instances:
+* Build the container, launch it interactively, and start building instances:
 ```
 $ docker build -t ec2instancemaker .
 $ docker run -it --entrypoint=/bin/bash ec2instancemaker:latest -i
@@ -178,14 +175,12 @@ running Amazon Linux 2 with a 20 GB gp2 EBS root volume using the default
 IAM role which grants "general" S3 and EC2 permissions in us-east-1c.  The
 instance is owned by the computational biology team ("compbio") and used by
 project "XRV-243":
-
 ```
 $ ./make-instance.py -A us-east-1c -N dev01 -O rmarable -E rodney.marable@gmail.com -B alinux2 --ebs_root_volume_size=20 --instance_owner_department=compbio --project_id="XRV-243"
 ```
 
 Building the same instance using Spot (which can achieve up to 90% savings over
 ondemand pricing):
-
 ```
 $ ./make-instance.py -A us-east-1c -N dev01 -O rmarable -E rodney.marable@gmail.com -B alinux2 --ebs_root_volume_size=20 --instance_owner_department=compbio --project_id="XRV-243" --request_type=spot
 ```
@@ -197,14 +192,12 @@ running Windows Server 2019 with a 30 GB gp2 EBS root volume using the default
 IAM role which grants "general" S3 and EC2 permissions in us-west-2b.  The
 instance is owned by the computational chemistry team ("compchem") and is not
 used by any active project:
-
 ```
 $ ./make-instance.py -A us-west-2b -N dev001 -O rmarable -E rodney.marable@gmail.com -B windows2019 --instance_owner_department=compchem
 ```
 
 Again, building this same instance using Spot (which can achieve up to 90%
 savings over ondemand pricing):
-
 ```
 $ ./make-instance.py -A us-west-2b -N dev001 -O rmarable -E rodney.marable@gmail.com -B windows2019 --instance_owner_department=compchem --request_type=spot
 ```
@@ -214,19 +207,16 @@ $ ./make-instance.py -A us-west-2b -N dev001 -O rmarable -E rodney.marable@gmail
 This example builds a family of five t3.micro test instances called "fam01"
 running Ubuntu 18.04 LTS, each with a 10 GB gp2 EBS root volume using the
 default IAM role in eu-central-1a.  These instances are owned by the HPC team:
-
 ```
 $ ./make-instance.py -A eu-central-1a -N fam01 -B ubuntu1804 -O rmarable -E rodney.marable@gmail.com --ebs_root_volume_size=10 --instance_owner_department=hpc --request_type=spot --instance_type=t3.micro -C 5
 ```
 
 Building the same instance family using Spot:
-
 ```
 $ ./make-instance.py -A eu-central-1a -N fam01 -B ubuntu1804 -O rmarable -E rodney.marable@gmail.com --ebs_root_volume_size=10 --instance_owner_department=hpc --request_type=spot --instance_type=t3.micro -C 5 --request_type=spot
 ```
 
 Building this instance family using Spot and Windows:
-
 ```
 $ ./make-instance.py -A eu-central-1a -N fam01 -B windows2019 -O rmarable -E rodney.marable@gmail.com --ebs_root_volume_size=10 --instance_owner_department=hpc --request_type=spot --instance_type=t3.micro -C 5
 ```
@@ -242,7 +232,6 @@ index of the instance to avoid parsing the menu.  This is also useful for
 scripting actions against instance families created by this tool.
 
 To access the single instance "dev01" created above:
-
 ```
 $ ./access_instance.py -N dev01
 The authenticity of host '54.211.214.242 (54.211.214.242)' can't be established.
@@ -262,7 +251,6 @@ Connection to 54.211.214.242 closed.
 ```
 
 To access members of the instance family "fam01" created above:
-
 ```
 $ ./access_instance.py -N fam01
 
@@ -318,7 +306,6 @@ $ ./access_instance.py -N fam01
 ```
 
 Connecting to the instance directly could also be achieved using this command:
-
 ```
 $ ./access_instancepy -N fam01 -n 3
 ```
@@ -328,7 +315,6 @@ $ ./access_instancepy -N fam01 -n 3
 Ec2InstanceMaker deploys a custom "kill-instance" script for each single instance or all members of an "instance family."
 
 To delete the "dev01" instance created above:
-
 ```
 $ ./kill-instance.dev01.sh
 
@@ -367,7 +353,6 @@ Exiting...
 
 Deleting the instance family "fam01" follows the exact same steps as deleting
 a single instance:
-
 ```
 $ ./kill-instance.fam01.sh
 
@@ -437,13 +422,11 @@ it is a good practice to disable it when you are finished with your instance
 maintenance activities.
 
 For pyenv:
-
 ```
 $ pyenv deactivate
 ```
 
 For virtualenv:
-
 ```
 $ deactivate
 ```

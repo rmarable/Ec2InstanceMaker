@@ -163,6 +163,8 @@ can be pasted into RDC for easy access.
 
 * Restriction of attaching public IP addresses for environments that require additional security.
 
+* Selection of a specific VPC.  Note that the VPC *must* be named or Terraform will fail.
+
 ## Installation Instructions for the Impatient
 
 These instructions are provided for the impatient and/or lazy.
@@ -196,9 +198,11 @@ As noted above, Ec2InstanceMaker is intended to reduce the administrative burden
 `Error: timeout - last error: dial tcp 172.31.32.161:22: connect: connection refused`
   * A more descriptive error will be returned in a future release.
 
+* **Ec2InstanceMaker can deploy into any active VPC that is named.**
+
 * **Ec2InstanceMaker does not make any changes to the existing networking environment already present in the operator's AWS account.**
   * These tools do not create new VPCs, subnets, Internet or NAT gateways, routes, or Transit Gateways.
-  * They do not intentionally modify Route53 configurations, change default routes, or otherwise impact or deploy any infrastructure that is not explicitly documented or easily inferred by reviewing the code.
+  * They do not modify Route53 configurations, change default routes, or otherwise impact or deploy any infrastructure that is not explicitly documented or easily inferred by reviewing the code.
 
 * **Ec2InstanceMaker creates generic IAM roles, policies, and instance templates that are individualized as much as possible for each instance or instance family.  By default, Ec2InstanceMaker-spawned instances cannot spwan children.**
   * These JSON templates are located in the templates/ subdirectory and contain all required IAM permissions to work with the AWS services listed below:
@@ -296,6 +300,7 @@ usage: make-instance.py [-h] --az AZ --instance_name INSTANCE_NAME
                         [--security_group SECURITY_GROUP]
                         [--spot_buffer SPOT_BUFFER]
                         [--turbot_account TURBOT_ACCOUNT]
+                        [--vpc_name VPC_NAME]
 
 make-instance.py: Command-line interface to build EC2 instances
 
@@ -395,13 +400,14 @@ optional arguments:
                         = true)
   --security_group SECURITY_GROUP, -S SECURITY_GROUP
                         Primary security group for the EC2 instance (default =
-                        generic_ec2_sg)
+                        ec2instancemaker_sg)
   --spot_buffer SPOT_BUFFER
                         pricing buffer to protect from Spot market
                         fluctuations: spot_price = spot_price +
                         spot_price*spot_buffer
   --turbot_account TURBOT_ACCOUNT, -T TURBOT_ACCOUNT
                         Turbot account ID (default = DISABLED)
+  --vpc_name VPC_NAME   Name of the VPC (default = vpc_default)
 ```
 
 ### Building Instances
@@ -785,17 +791,8 @@ installation process, which would subsequently be encrypted when
 `--enable_ebs_encryption=true`.  This feature will be provided in a future
 release.
 
-* Encryption of root volumes during the instance installation process is not
-supported by Terraform at this time.  Please see this open issue on Github:
-
-https://github.com/terraform-providers/terraform-provider-aws/issues/8624)
-
-If your use case requires an encrypted EBS root volume, please follow these
-steps:
-
-  * Add `ebs_encryption=true` to the `make-instance.py` invocation.
-  * When the instance is finished building, build a new encrypted AMI with the
-included `build-ami` script using the symlink in the top-level SRC tree.
+* Encryption of root volumes during the instance installation process is now
+supported by Terraform.  When the instance is finished building, build a new encrypted AMI with the included `build-ami` script using the symlink in the top-level SRC tree.
   * Note the resulting AMI ID value and use it to launch subsequent instances with "--custom_ami=$AMI_ID".
 
 You can also enable EBS encryption by default for all instances in the account by reviewing this link to the AWS public documentation:

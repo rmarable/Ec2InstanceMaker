@@ -2,7 +2,7 @@
 # Name:         linux-ec2-setup.sh
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   June 14, 2019
-# Last Changed: July 29, 2019
+# Last Changed: September 19, 2019
 # Purpose:      Configure an instance spawned by Ec2InstanceMaker to create 
 #		new instances using Ec2InstanceMaker
 ################################################################################
@@ -12,7 +12,7 @@
 # Define the Terraform version to deploy.
 # https://www.terraform.io/downloads.html
 
-TERRAFORM_VERSION=0.12.3
+TERRAFORM_VERSION=0.12.9
 
 ################################################################################
 #           	No more user-configurable options exist below here!            #

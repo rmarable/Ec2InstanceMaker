@@ -4,7 +4,7 @@
 # Name:         make-instance.py
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   June 3, 2019
-# Last Changed: September 5, 2019
+# Last Changed: September 28, 2019
 # Purpose:      Generic command-line EC2 instance creator
 ################################################################################
 
@@ -80,6 +80,7 @@ parser.add_argument('--ebs_root_volume_type', choices=['gp2', 'io1', 'st1'], hel
 parser.add_argument('--ebs_device_volume_iops', help='amount of provisioned IOPS for the EBS secondary volume when ebs_root_volume_type=io1 (default = 0)', required=False, type=int, default=0)
 parser.add_argument('--ebs_device_volume_size', help='Secondary EBS volume size in GB (Linux default = 8, Windows default = 30)', required=False, type=int, default=8)
 parser.add_argument('--ebs_device_volume_type', choices=['gp2', 'io1', 'st1'], help='EBS secondary volume type (default = gp2)', required=False, default='gp2')
+parser.add_argument('--ec2_keypair', help='define an EC2 key pair name to provide SSH or Remote Desktop access (default = ec2_keypair_default)', required=False, default='ec2_keypair_default')
 parser.add_argument('--efs_encryption', choices=['true', 'false'], help='enable EFS encryption in transit and at rest (default = false)', required=False, default='false')
 parser.add_argument('--efs_performance_mode', choices=['generalPurpose', 'maxIO'], help='select the EFS performance mode (default = generalPurpose)', required=False, default='generalPurpose')
 parser.add_argument('--enable_efs', choices=['true', 'false'], help='Deploy and mount an Elastic File System (EFS) on the instance(s) (default = false)', required=False, default='false')
@@ -94,7 +95,7 @@ parser.add_argument('--hyperthreading', '-H', choices=['true', 'false'], help='e
 parser.add_argument('--iam_json_policy', '-J', help='Use a pre-existing JSON policy document in the /templates subdirectory to set permissions for iam_role (default = GenericEc2InstancePolicy.json', required=False, default='GenericEc2InstancePolicy.json')
 parser.add_argument('--iam_name_prefix', help='Provide a prefix for the IAM entities associated with the instance (default = Ec2InstanceMaker)', required=False, default='Ec2InstanceMaker')
 parser.add_argument('--iam_role', help='Apply a pre-existing IAM role to the instance(s)', required=False, default='UNDEFINED')
-parser.add_argument('--instance_owner_department', choices=['analytics', 'clinical', 'commercial', 'compbio', 'compchem', 'datasci', 'design', 'development', 'hpc', 'imaging', 'manufacturing', 'medical', 'modeling', 'operations', 'proteomics', 'robotics', 'qa', 'research', 'scicomp'], help='Department of the instance_owner (default = hpc)', required=False, default='hpc')
+parser.add_argument('--instance_owner_department', choices=['analytics', 'clinical', 'commercial', 'compbio', 'compchem', 'datasci', 'design', 'development', 'hpc', 'imaging', 'manufacturing', 'medical', 'modeling', 'operations', 'proteomics', 'robotics', 'qa', 'research', 'scicomp'], help='Department of the instance_owner (default = compbio)', required=False, default='compbio')
 parser.add_argument('--request_type', choices=['ondemand', 'spot'], help='choose between ondemand or spot instances (default = ondemand)', required=False, default='ondemand')
 parser.add_argument('--instance_type', '-T', help='EC2 instance type (default = t2.micro)', required=False, default='t2.micro')
 parser.add_argument('--prod_level', choices=['dev', 'test', 'stage', 'prod'], help='Operating stage of the jumphost  (default = dev)', required=False, default='dev')
@@ -103,9 +104,10 @@ parser.add_argument('--preserve_ami', choices=['true', 'false'], help='Preserve 
 parser.add_argument('--preserve_efs', choices=['true', 'false'], help='Preserve the Elastic File System (EFS) created with the instance(s) (default = false)', required=False, default='false')
 parser.add_argument('--project_id', '-P', help='Project name or ID number (default = UNDEFINED)', required=False, default='UNDEFINED')
 parser.add_argument('--public_ip', '-p', help='Attach a public IP address to the instance(s) (default = true)', required=False, default='true')
-parser.add_argument('--security_group', '-S', help='Primary security group for the EC2 instance (default = generic_ec2_sg)', required=False, default='generic_ec2_sg')
+parser.add_argument('--security_group', '-S', help='Primary security group name for the EC2 instance (default = ec2instancemaker_sg)', required=False, default='ec2instancemaker_sg')
 parser.add_argument('--spot_buffer', help='pricing buffer to protect from Spot market fluctuations: spot_price = spot_price + spot_price*spot_buffer', type=float, required=False, default=round((1/pi), 8))
 parser.add_argument('--turbot_account', help='Turbot account ID (default = DISABLED)', required=False, default='DISABLED')
+parser.add_argument('--vpc_name', help='Name of the VPC (default = vpc_default)', required=False, default='vpc_default')
 
 # Create variables from the optional instance parameter values provided from
 # the command line.
@@ -126,6 +128,7 @@ ebs_root_volume_type = args.ebs_root_volume_type
 ebs_device_volume_iops = args.ebs_device_volume_iops
 ebs_device_volume_size = args.ebs_device_volume_size
 ebs_device_volume_type = args.ebs_device_volume_type
+ec2_keypair = args.ec2_keypair
 efs_encryption = args.efs_encryption
 efs_performance_mode = args.efs_performance_mode
 enable_efs = args.enable_efs
@@ -155,6 +158,7 @@ region = az[:-1]
 spot_buffer = args.spot_buffer
 security_group = args.security_group
 turbot_account = args.turbot_account
+vpc_name = args.vpc_name
 
 # Validate parameters that have successfully passed the argument parser checks
 # and don't require additional error checking.
@@ -471,47 +475,55 @@ else:
     p_val('region', debug_mode)
     p_val('az', debug_mode)
 
-# Parse the subnet_id, vpc_id, and vpc_name from the selected AWS Region and
-# Availability Zone.  Since Terraform requires that the selected VPC have a
-# valid Name tag, return an error if this value is missing.
+# Determine subnet_id, vpc_id, and vpc_name from the selected AWS Region and
+# Availability Zone.  Return an error if this value is missing.
 #
-# Future releases may support vpc_id or vpc_name as command line parameters to
-# increase user flexibility.
+# Parse the vpc_id using vpc_name.
+# If vpc_name was not supplied on the command line, use the default VPC.
 
-subnet_information = ec2_client.describe_subnets(
-    Filters=[ { 'Name': 'availabilityZone', 'Values': [ az, ] }, ],
-)
-vpc_information = ec2_client.describe_vpcs()
+if vpc_name == 'vpc_default':
+    vpc_information = ec2_client.describe_vpcs(Filters=[{'Name': 'isDefault', 'Values': ['true']}])
+else:
+    vpc_information = ec2_client.describe_vpcs(Filters=[{'Name': 'tag:Name', 'Values': [ vpc_name ]}])
 
+for vpc in vpc_information["Vpcs"]:
+    vpc_id = vpc["VpcId"]
+    try:
+        vpc_name = vpc_information['Vpcs'][0]['Tags'][0]['Value']
+    except KeyError:
+        error_msg = vpc_id + ' lacks a valid Name tag! This will break Terraform.'
+        refer_to_docs_and_quit(error_msg)
+
+# Parse the subnet_id.
+
+try:
+    subnet_information = ec2_client.describe_subnets(
+        Filters=[ {'Name': 'availabilityZone', 'Values': [ az, ]}, {'Name': 'vpc-id', 'Values': [ vpc_id, ]} ],
+    )
+except NameError:
+    error_msg = '"' + vpc_name + '" is an undefined VPC!'
+    refer_to_docs_and_quit(error_msg)
+p_val('vpc_name', debug_mode)
 try:
     subnet_id = subnet_information['Subnets'][0]['SubnetId']
 except IndexError:
     error_msg='AvailabilityZone ' + az + ' does not contain any valid subnets!'
     refer_to_docs_and_quit(error_msg)
 p_val('subnet_id', debug_mode)
-for vpc in vpc_information["Vpcs"]:
-    vpc_id = vpc["VpcId"]
-    p_val('vpc_id', debug_mode)
-    try:
-        vpc_name = vpc_information['Vpcs'][0]['Tags'][0]['Value']
-    except KeyError:
-        error_msg=vpc_id + ' lacks a valid Name tag! This will break Terraform.'
-        refer_to_docs_and_quit(error_msg)
-    p_val('vpc_name', debug_mode)
 
 # If the user fails to supply a valid security_group, create a new default
 # EC2 security group that permits only inbound SSH (Linux) or RDP (Windows)
 # traffic to access the instance(s).
 #
-# If enable_efs=true, permit NFS traffic on port 2049/tcp.
-# If enable_fsx=true, permit Lustre traffic on port 988/tcp.
+# If enable_efs=true, also permit NFS traffic on port 2049/tcp.
+# If enable_fsx=true, also permit Lustre traffic on port 988/tcp.
 
-if security_group == 'generic_ec2_sg':
+if security_group == 'ec2instancemaker_sg':
     security_group = security_group + '_' + instance_serial_number
 filters = [ { 'Name': 'group-name', 'Values': [ security_group, ] }, ]
 sg_id = list(ec2.security_groups.filter(Filters=filters))
+security_group_name = security_group
 if not sg_id:
-    security_group_name = security_group
     security_group = ec2.create_security_group(
         GroupName=security_group_name,
         Description='EC2 security group - created by Ec2InstanceMaker',
@@ -575,7 +587,9 @@ p_val('aws_ami', debug_mode)
 # Create a new EC2 key pair and secret key file for the instance(s) within the
 # deployment region of choice if either entity doesn't already exist.
 
-ec2_keypair = instance_serial_number + '_' + region
+if ec2_keypair == 'ec2_keypair_default':
+    ec2_keypair = instance_serial_number + '_' + region
+
 secret_key_file = instance_data_dir + ec2_keypair + '.pem'
 
 try:
@@ -590,16 +604,16 @@ except ClientError as e:
         subprocess.run('chmod 0600 ' + secret_key_file, shell=True)
         print('Created EC2 keypair: ' + ec2_keypair)
 
-# If the secret key file is missing but the EC2 keypair still exists, provide
-# guidance to the operator on how to resolve this discrepancy.
+# If the secret key file is missing but the EC2 key pair exists in the region,
+# provide guidance to the operator on how to resolve this discrepancy.
 
 if not os.path.isfile(secret_key_file):
     print('')
     print('*** ERROR ***')
     print('Missing: ' + secret_key_file)
     print('')
-    print('Please resolve this issue and retry, perhaps deleting the original keypair')
-    print('by pasting this command into the shell:')
+    print('If you are sure this is an error, please delete the original key pair')
+    print('by pasting this command into the shell and retrying:')
     print('')
     print('$ aws --region ' + region + ' ec2 delete-key-pair --key-name ' + ec2_keypair)
     print('')
@@ -824,7 +838,7 @@ instance_parameters = {
     'preserve_iam_role': preserve_iam_role,
     'public_ip': public_ip,
     'region': region,
-    'security_group': security_group,
+    'security_group_name': security_group_name,
     'spot_price': spot_price,
     'vpc_security_group_ids': vpc_security_group_ids,
     'sns_topic_arn': sns_topic_arn,
@@ -887,28 +901,28 @@ if debug_mode == 'true':
     print('instance_owner = ' + instance_owner)
     print('instance_owner_email = ' + instance_owner_email)
     print('instance_owner_department = ' + instance_owner_department)
-    print('request_type = ' + request_type)
     print('instance_serial_number = ' + instance_serial_number)
     print('instance_serial_number_file = ' + instance_serial_number_file)
+    print('request_type = ' + request_type)
     print('preserve_ami = ' + preserve_ami)
     print('prod_devel = ' + prod_level)
     if project_id != 'UNDEFINED':
         print('project_id = ' + project_id)
-    print('region = ' + region)
-    print('security_group = ' + str(security_group))
     if ec2_iam_instance_profile:
         print('preserve_iam_role = ' + preserve_iam_role)
         if 'UNDEFINED' not in ec2_iam_instance_policy:
             print('ec2_iam_instance_policy = ' + ec2_iam_instance_policy)
         print('ec2_iam_instance_profile = ' + ec2_iam_instance_profile)
         print('ec2_iam_instance_role = ' + ec2_iam_instance_role)
-    print('spot_price = ' + spot_price)
-    print('vpc_security_group_ids = ' + vpc_security_group_ids)
-    print('subnet_id = ' + subnet_id)
     print('public_ip = ' + public_ip)
+    print('region = ' + region)
+    print('security_group_name = ' + str(security_group_name))
+    print('spot_price = ' + spot_price)
+    print('subnet_id = ' + subnet_id)
     print('vars_file_path = ' + vars_file_path)
     print('vpc_id = ' + vpc_id)
     print('vpc_name = ' + vpc_name)
+    print('vpc_security_group_ids = ' + vpc_security_group_ids)
     print('sns_topic_arn = ' + sns_topic_arn)
     print('ANSIBLE_VERSION = ' + ANSIBLE_VERSION)
     print('DEPLOYMENT_DATE = ' + DEPLOYMENT_DATE)
@@ -975,9 +989,6 @@ ssh_keypair_file: "{{{{ ec2_keypair }}}}.pem"
 ssh_known_hosts: ~/.ssh/known_hosts
 
 # EBS parameters
-# Note: Terraform does not currently support encryption of root devices at
-# instance creation.  Please use a custom_ami with an already-encrypted EBS
-# root volume instead.  Additional guidance is provided in README.md.
 
 ebs_encryption: {ebs_encryption}
 ebs_optimized: {ebs_optimized}
@@ -996,7 +1007,7 @@ enable_placement_group: {enable_placement_group}
 placement_group_strategy: {placement_group_strategy}
 public_ip: {public_ip}
 region: {region}
-security_group: {security_group}
+security_group_name: {security_group_name}
 subnet_id: {subnet_id}
 vpc_id: {vpc_id}
 vpc_name: {vpc_name}
@@ -1112,29 +1123,18 @@ fsx_client = boto3.client('fsx', region_name = region)
 # command line parameters provided (or not) by the operator.
 
 if enable_fsx == 'true':
+    LustreTags=[
+        { 'Key': 'Name', 'Value': instance_name },
+        { 'Key': 'Purpose', 'Value': 'FSx for Lustre storage attached to ' + instance_name },
+        { 'Key': 'FileSystemBuilder', 'Value': 'boto3' },
+        { 'Key': 'InstanceSerialNumber', 'Value': instance_serial_number },
+        { 'Key': 'InstanceOwner', 'Value': instance_owner },
+        { 'Key': 'InstanceOwnerEmail', 'Value': instance_owner_email },
+        { 'Key': 'InstanceOwnerDepartment', 'Value': instance_owner_department },
+        { 'Key': 'DEPLOYMENT_DATE_TAG', 'Value': DEPLOYMENT_DATE_TAG }
+    ]
     if 'UNDEFINED' not in project_id:
-        Lustre_Tags=[
-            { 'Key': 'Name', 'Value': instance_name },
-            { 'Key': 'Purpose', 'Value': 'FSx for Lustre storage attached to ' + instance_name },
-            { 'Key': 'FileSystemBuilder', 'Value': 'boto3' },
-            { 'Key': 'InstanceSerialNumber', 'Value': instance_serial_number },
-            { 'Key': 'InstanceOwner', 'Value': instance_owner },
-            { 'Key': 'InstanceOwnerEmail', 'Value': instance_owner_email },
-            { 'Key': 'InstanceOwnerDepartment', 'Value': instance_owner_department },
-            { 'Key': 'ProjectID', 'Value': project_id },
-            { 'Key': 'DEPLOYMENT_DATE_TAG', 'Value': DEPLOYMENT_DATE_TAG }
-        ]
-    else:
-        Lustre_Tags=[
-            { 'Key': 'Name', 'Value': instance_name },
-            { 'Key': 'Purpose', 'Value': 'FSx for Lustre storage attached to ' + instance_name },
-            { 'Key': 'FileSystemBuilder', 'Value': 'boto3' },
-            { 'Key': 'InstanceSerialNumber', 'Value': instance_serial_number },
-            { 'Key': 'InstanceOwner', 'Value': instance_owner },
-            { 'Key': 'InstanceOwnerEmail', 'Value': instance_owner_email },
-            { 'Key': 'InstanceOwnerDepartment', 'Value': instance_owner_department },
-            { 'Key': 'DEPLOYMENT_DATE_TAG', 'Value': DEPLOYMENT_DATE_TAG }
-        ]
+        LustreTags.append( { 'Key': 'ProjectID', 'Value': project_id } )
     if enable_fsx_hydration == 'true':
         Lustre_Fsx_Configuration={
             'WeeklyMaintenanceStartTime': '4:20:00',
@@ -1153,7 +1153,7 @@ if enable_fsx == 'true':
         StorageCapacity=fsx_size,
         SubnetIds=[subnet_id,],
         SecurityGroupIds=[vpc_security_group_ids,],
-        Tags=Lustre_Tags,
+        Tags=LustreTags,
         LustreConfiguration=Lustre_Fsx_Configuration
         )
 
@@ -1171,17 +1171,40 @@ if enable_fsx == 'true':
     print('')
     print('Finished building: ' + lustre_file_system_dnsName.replace('\"', '').strip())
 
-# Create the new EC2 instance(s) and supporting infrastructure with Terraform.
+# Create the new EC2 instance(s) with Terraform.
 
 print('Invoking Terraform to build ' + instance_name + '...')
 if debug_mode == 'true':
-    subprocess.run('TF_LOG= DEBUG terraform init -input=false', shell=True, cwd=instance_data_dir)
-    subprocess.run('TF_LOG= DEBUG terraform plan -out terraform_environment', shell=True, cwd=instance_data_dir)
-    subprocess.run('TF_LOG= DEBUG terraform apply \"terraform_environment\"', shell=True, cwd=instance_data_dir)
+    subprocess.run('TF_LOG=DEBUG terraform init -input=false', shell=True, cwd=instance_data_dir)
+    subprocess.run('TF_LOG=DEBUG terraform plan -out terraform_environment', shell=True, cwd=instance_data_dir)
+    subprocess.run('TF_LOG=DEBUG terraform apply \"terraform_environment\"', shell=True, cwd=instance_data_dir)
 else:
     subprocess.run('terraform init -input=false', shell=True, cwd=instance_data_dir)
     subprocess.run('terraform plan -out terraform_environment', shell=True, cwd=instance_data_dir)
     subprocess.run('terraform apply \"terraform_environment\"', shell=True, cwd=instance_data_dir)
+
+# Apply the common tag set to the EC2 security group.
+
+SecurityGroupTags=[
+    { 'Key': 'Name', 'Value': security_group_name },
+    { 'Key': 'Purpose', 'Value': 'EC2 security group for ' + instance_name },
+    { 'Key': 'Ec2InstanceBuilderTool', 'Value': 'boto3' },
+    { 'Key': 'InstanceSerialNumber', 'Value': instance_serial_number },
+    { 'Key': 'InstanceOwner', 'Value': instance_owner },
+    { 'Key': 'InstanceOwnerEmail', 'Value': instance_owner_email },
+    { 'Key': 'InstanceOwnerDepartment', 'Value': instance_owner_department },
+    { 'Key': 'DEPLOYMENT_DATE_TAG', 'Value': DEPLOYMENT_DATE_TAG }
+]
+if 'UNDEFINED' not in project_id:
+    SecurityGroupTags.append( { 'Key': 'ProjectID', 'Value': project_id } )
+security_group_tags = ec2_client.create_tags(
+    Resources=[vpc_security_group_ids],
+    Tags=SecurityGroupTags
+)
+
+# Reboot the instance(s) if a Lustre file system was created or if the base
+# operating system is centos6.
+
 if enable_fsx == 'true' or base_os == 'centos6':
     print('')
     if enable_fsx == 'true':

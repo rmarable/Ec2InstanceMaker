@@ -190,34 +190,31 @@ tmpfs           100M     0  100M   0% /run/user/1000
 /dev/loop1       18M   18M     0 100% /snap/amazon-ssm-agent/1335
 ```
 
-## Single Ondemand Instance with Encrypted EBS Root Volume
+## Single Ondemand Instance with Encrypted EBS Root Volume in a Non-Default VPC
 
-Starting with a t2.micro instance with an 8 GB unencrypted gp2 EBS root volume serving as the source for an encrypted AMI.  After the initial instance is created, the build-ami script is used to generate an encrypted AMI, which can then be leveraged to create a new instance with an encrypted EBS root volume.
-
-Because the source instance was originally built with `ebs_encryption=true`, the resulting AMI that is produced by this script will have its root EBS volume encrypted.
-
-Support for user-owned KMS keys will be provided in a future release.
+Note: support for user-owned KMS keys will be provided in a future release.
 
 ### Amazon Linux 2:
 ```
-$ ./make-instance.py -A us-east-2a -O rmarable -E rodney.marable@gmail.com -N dev01 --ebs_encryption=true --preserve_ami=false
+$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --ebs_encryption=true --preserve_ami=false
 ```
 
-* Because `preserve_ami=false`, this AMI will **NOT** be preserved after the parent instance is terminated and will be not be available for launching new instances.  This is counterproductive for real-world use cases and thus is not a recommended best practice.  A more practical command line invocation looks like this:
+* Because `preserve_ami=false`, this AMI will **NOT** be preserved after the parent instance is terminated and will remain unavailable for launching new instances.  This is counterproductive for real-world use cases and thus is not a recommended best practice.  A more practical command line invocation for building new AMIs looks like this:
 
 ```
-$ ./make-instance.py -A us-east-2a -O rmarable -E rodney.marable@gmail.com -N dev01 --ebs_encryption=true
-```
-
-The `build_ami` script, located in the top-level SRC tree, is then used to create a new encrypted AMI:
+$ ./make-instance.py -A us-east-1a -N rmarable-foo-01 -O rmarable -E rodney.marable@gmail.com --vpc_name=vpc-prod --ebs_encryption=true --preserve_ami=true
 
 ```
-$ ./build-ami.dev01.sh
+
+The resulting `build_ami` script will be located in the top-level SRC tree and can now be used to create a new encrypted AMI:
+
+```
+$ ./build-ami.rmarable-foo-01.sh
 
 Parsing the InstanceId of the AMI source...
 
 ##############################################################################
-#                              ** WARNING **                               #
+#                              *** WARNING ***                               #
 #                 Preparing to shut down the source instance!                #
 #    Please type CTRL-C within 5 seconds if this is *NOT* what you wanted!   #
 ##############################################################################
@@ -232,7 +229,7 @@ This may take a few minutes so please be patient!
                 "Code": 64,
                 "Name": "stopping"
             },
-            "InstanceId": "i-04e684dba550beba3",
+            "InstanceId": "i-0634e32e9d5ab3136",
             "PreviousState": {
                 "Code": 16,
                 "Name": "running"
@@ -241,15 +238,11 @@ This may take a few minutes so please be patient!
     ]
 }
 
-Creating an unencrypted source AMI...
+Creating the new AMI...
 
-Waiting for the unencrypted source AMI to become available...
+Waiting for the new AMI to become available...
 
-Creating an encrypted AMI from the unencrypted source...
-
-Waiting for the encrypted AMI to become available...
-
-Waiting for the ecrypted EBS snapshotting process to complete...
+Waiting for the EBS snapshotting process to complete...
 
 Tagging the new AMI...
 
@@ -264,7 +257,7 @@ Restarting the source EC2 instance...
                 "Code": 0,
                 "Name": "pending"
             },
-            "InstanceId": "i-04e684dba550beba3",
+            "InstanceId": "i-0634e32e9d5ab3136",
             "PreviousState": {
                 "Code": 80,
                 "Name": "stopped"
@@ -273,10 +266,11 @@ Restarting the source EC2 instance...
     ]
 }
 
-Finished building: ami-0c83f12c460b868d1
+Finished building: ami-01e6876676987e00e
 
-Launch a new encrypted instance with this AMI:
-$ ./make-instance.py -A us-east-2a -O rmarable -E rodney.marable@gmail.com -N dev01 --ebs_encryption=true --custom_ami=ami-0c83f12c460b868d1
+To relaunch rmarable-foo-01 with this new AMI:
+$ ./kill-instance.rmarable-foo-01.sh
+$ ./make-instance.py -A us-east-1a -N rmarable-foo-01 -O rmarabro1 -E rodney.marable@sana.com --vpc_name=vpc-prod --ebs_encryption=true --preserve_ami=true --custom_ami=ami-01e6876676987e00e
 
 Exiting...
 ```
@@ -946,6 +940,16 @@ build may be added in a future release.
 For environments that require enhanced security, Ec2InstanceMaker supports launching instances with only the private IP address.
 
 $ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N fn2187 --base_os=alinux --public_ip=false
+
+## Launching Instances In Another VPC
+
+To launch instances in non-default VPCs, provide the name of the desired destination VPC using the `vpc_name` flag:
+
+```
+$ ./make-instance.py -A us-east-1a -N rmarable-foo-01 -O rmarable -E rodney.marable@gmail.com --vpc_name=vpc-dev
+```
+
+If a subnet does not exist for the Availability Zone that was selected, the script will return an error.  The default VPC will be used if an explicit value is nnot provided.
 
 ## Launching Instances Using Docker
 
