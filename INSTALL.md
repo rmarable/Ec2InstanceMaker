@@ -7,7 +7,7 @@ Please refer to the LICENSE and DISCLAIMER.md documents included with this Open 
 ## Introduction
 
 Ec2InstanceMaker is Open Source software that simplifies the automation
-of creating, deleting, and administering cloud computing server and storage 
+of creating, deleting, and administering cloud computing server and storage
 resources through an easy-to-use command line interface.  It can also be used
 as a teaching tool for those who wish to dive deep into cloud automation and
 to learn more about the AWS ecosystem.
@@ -44,7 +44,7 @@ $ /usr/bin/ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/inst
 
 * Use Homebrew to install some other critical applications:
 ```
-$ brew install ansible autoconf automake gcc jq libtool make python readline
+$ brew install autoconf automake gcc jq libtool make python@3.12 readline
 ```
 
 * Configure the AWS CLI according to the guidelines provided in the AWS public
@@ -52,47 +52,14 @@ documentation:
 
   https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-getting-started.html
 
-* Install and activate a virtual Python 3.x environment using virtualenv or pyenv.  Anything above version 3.6 should work fine.  Please visit these links for more details on configuring and using Python virtual environments:
-  * https://realpython.com/intro-to-pyenv/
-  * https://docs.python-guide.org/dev/virtualenvs/
+* Create and activate a virtual Python environment using the standard
+library `venv` module.  Python 3.12 is the default supported version.
+Please visit this link for more details on Python virtual environments:
+  * https://docs.python.org/3/library/venv.html
 
-pyenv is preferred by the author but it doesn't provide a prompt that will
-display the current Python version like virtualenv does without performing
-some additional steps.  Please follow the installation guidelines provided
-here: https://github.com/pyenv/pyenv#installation
-
-Please be **very** careful or you may inadvertedly damage your local Python
-environment:
 ```
-$ brew install pyenv
-$ brew install pyenv-virtualenv
-$ pyenv install 3.7.4
-```
-
-If the Python build fails, reinstall the Xcode CLT:
-```
-$ sudo rm -rf /Library/Developer/CommandLineTools
-$ xcode-select --install
-$ pyenv install 3.7.4 -v
-$ python —version
-3.7.4
-```
-
-Create and activate a virtual Python environment to support Ec2InstanceMaker:
-```
-$ pyenv virtualenv ec2instancemaker
-$ pyenv activate ec2instancemaker
-```
-
-If you prefer using virtualenv, install it using pip, taking careful note **not** to deploy into the Ec2InstanceMaker source folder to keep your source tree clean and organized:
-```
-$ pip install virtualenv
-$ virtualenv --version
-16.7.5
-$ mkdir -p ~/src/ec2instancemaker
-$ virtualenv -p /usr/local/bin/python3.7 ~/src/ec2instancemaker
-$ export VIRTUALENVWRAPPER_PYTHON=/usr/local/bin/python3.7
-$ source ~/src/ec2instancemaker/bin/activate
+$ python3.12 -m venv .venv
+$ source .venv/bin/activate
 ```
 
 * Install the required Python libraries into the Python virtual environment
@@ -127,48 +94,12 @@ $ cd ~/src/Ec2InstanceMaker
 $ ./make-instance.py --help
 ```
 
-## Launching Instances Using Docker
-
-Ec2InstanceMaker supports launching new EC2 instances from a Docker container.
-Some users may prefer this method over using a "jumphost" for launching child
-instances.
-
-* Install Docker by following the guidelines outlined here:
-
-https://docs.docker.com/install/ 
-
-* Create $SRC_DIR (suggested: `~/src`):
-`$ mkdir -p $SRC_DIR`
-
-* Clone the Ec2InstanceMaker repository into $SRC_DIR.
-```
-$ cd $SRC_DIR
-$ git clone https://github.com/rmarable/Ec2InstanceMaker.git
-$ cd Ec2InstanceMaker
-```
-
-* If needed, run `aws configure`.
-
-* Edit `Dockerfile` and either paste your AWS credentials where indicated or use
-environment variables as suggested in the AWS public documentation:
-
-https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-envvars.html
-
-* Build the container, launch it interactively, and start building instances:
-```
-$ docker build -t ec2instancemaker .
-$ docker run -it --entrypoint=/bin/bash ec2instancemaker:latest -i
-<nav># pwd
-/Ec2InstanceMaker
-<nav># ./make-instance.py -h
-```
-
 ## Example Use Cases
 
-Please review these common use cases that this tool can help address.  More 
+Please review these common use cases that this tool can help address.  More
 details are provided in the EXAMPLE_USE-CASES.md document.
 
-### Example: Building a Single Linux Instance 
+### Example: Building a Single Linux Instance
 
 This example builds a single t2.micro development instance called "dev01"
 running Amazon Linux 2 with a 20 GB gp2 EBS root volume using the default
@@ -185,7 +116,7 @@ ondemand pricing):
 $ ./make-instance.py -A us-east-1c -N dev01 -O rmarable -E rodney.marable@gmail.com -B alinux2 --ebs_root_volume_size=20 --instance_owner_department=compbio --project_id="XRV-243" --request_type=spot
 ```
 
-### Example: Building a Single Windows Instance 
+### Example: Building a Single Windows Instance
 
 This example builds a single t2a.micro development instance called "dev001"
 running Windows Server 2019 with a 30 GB gp2 EBS root volume using the default
@@ -205,15 +136,15 @@ $ ./make-instance.py -A us-west-2b -N dev001 -O rmarable -E rodney.marable@gmail
 ### Example: Building Multiple Spot Instances
 
 This example builds a family of five t3.micro test instances called "fam01"
-running Ubuntu 18.04 LTS, each with a 10 GB gp2 EBS root volume using the
+running Ubuntu 24.04 LTS, each with a 10 GB gp2 EBS root volume using the
 default IAM role in eu-central-1a.  These instances are owned by the HPC team:
 ```
-$ ./make-instance.py -A eu-central-1a -N fam01 -B ubuntu1804 -O rmarable -E rodney.marable@gmail.com --ebs_root_volume_size=10 --instance_owner_department=hpc --request_type=spot --instance_type=t3.micro -C 5
+$ ./make-instance.py -A eu-central-1a -N fam01 -B ubuntu2404 -O rmarable -E rodney.marable@gmail.com --ebs_root_volume_size=10 --instance_owner_department=hpc --request_type=spot --instance_type=t3.micro -C 5
 ```
 
 Building the same instance family using Spot:
 ```
-$ ./make-instance.py -A eu-central-1a -N fam01 -B ubuntu1804 -O rmarable -E rodney.marable@gmail.com --ebs_root_volume_size=10 --instance_owner_department=hpc --request_type=spot --instance_type=t3.micro -C 5 --request_type=spot
+$ ./make-instance.py -A eu-central-1a -N fam01 -B ubuntu2404 -O rmarable -E rodney.marable@gmail.com --ebs_root_volume_size=10 --instance_owner_department=hpc --request_type=spot --instance_type=t3.micro -C 5 --request_type=spot
 ```
 
 Building this instance family using Spot and Windows:
@@ -221,14 +152,14 @@ Building this instance family using Spot and Windows:
 $ ./make-instance.py -A eu-central-1a -N fam01 -B windows2019 -O rmarable -E rodney.marable@gmail.com --ebs_root_volume_size=10 --instance_owner_department=hpc --request_type=spot --instance_type=t3.micro -C 5
 ```
 
-### Example: Accessing an Instance 
+### Example: Accessing an Instance
 
 Ec2InstanceMaker provides an easy mechanism to access individual instances or
-specific members of a particular instance family over SSH.  Following every 
+specific members of a particular instance family over SSH.  Following every
 build, Ec2InstanceMaker will dump access and deletion information to the
 console for user convenience.  For mulitple instance "families," a selection
-menu for each instance will be provided.  The operator can also provide the 
-index of the instance to avoid parsing the menu.  This is also useful for 
+menu for each instance will be provided.  The operator can also provide the
+index of the instance to avoid parsing the menu.  This is also useful for
 scripting actions against instance families created by this tool.
 
 To access the single instance "dev01" created above:
@@ -307,7 +238,7 @@ $ ./access_instance.py -N fam01
 
 Connecting to the instance directly could also be achieved using this command:
 ```
-$ ./access_instancepy -N fam01 -n 3
+$ ./access_instance.py -N fam01 -m 3
 ```
 
 ### Example: Deleting an Instance
@@ -421,19 +352,13 @@ If you are using a virtual Python environment to work with Ec2InstanceMaker,
 it is a good practice to disable it when you are finished with your instance
 maintenance activities.
 
-For pyenv:
-```
-$ pyenv deactivate
-```
-
-For virtualenv:
 ```
 $ deactivate
 ```
 
 Please consult README.md for additional information on how to use the
 make-instance.py script.
- 
+
 ## Reporting Bugs & Requesting New Features
 
 Please report any bugs, issues, or otherwise unexpected behavior to Rodney Marable (rodney.marable@gmail.com) through the normal Github issue reporting channel for this project:

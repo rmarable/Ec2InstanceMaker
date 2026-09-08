@@ -1,0 +1,84 @@
+---
+# Local: `pre-commit install` once, then hooks run automatically on `git commit`.
+# CI runs the identical config via .github/workflows/lint.yml (pre-commit/action),
+# so there is exactly one source of truth for what counts as "clean" here.
+# Run everything on demand with: pre-commit run --all-files
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+      - id: check-json
+      - id: check-symlinks
+      - id: destroyed-symlinks
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.6
+    hooks:
+      - id: ruff
+        args: ["--fix", "--exit-non-zero-on-fix"]
+      - id: ruff-format
+
+  - repo: https://github.com/PyCQA/bandit
+    rev: "1.9.4"
+    hooks:
+      - id: bandit
+        # -ll: only fail on Medium/High severity. This is a CLI tool that
+        # exists to shell out to terraform/aws/jq; bandit's Low-severity
+        # findings (bare-name subprocess calls, the mere `import subprocess`)
+        # are inherent to that and not actionable. Medium/High (real
+        # shell=True + interpolated/untrusted input, insecure temp files,
+        # etc.) still fail the build.
+        args: ["-c", "pyproject.toml", "-ll"]
+        additional_dependencies: ["bandit[toml]"]
+
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
+        files: \.sh$
+
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: ["--baseline", ".secrets.baseline"]
+        exclude: ^\.secrets\.baseline$
+
+  - repo: https://github.com/pypa/pip-audit
+    rev: v2.9.0
+    hooks:
+      - id: pip-audit
+        args: ["-r", "requirements.txt"]
+
+  - repo: local
+    hooks:
+      - id: pytest
+        name: Run pytest (tests/)
+        description: >
+          Unit tests for aux_data.py's pure-logic functions, mocked-AWS
+          tests for the boto3-calling functions, and behavioral assertions
+          on rendered template output (not just syntax -- see
+          scripts/lint_templates.py below for that).
+        entry: python3 -m pytest
+        language: system
+        pass_filenames: false
+
+      - id: render-and-lint-templates
+        name: Render templates/*.j2 and lint the output (shellcheck/ruff/terraform)
+        description: >
+          templates/*.j2 aren't real .py/.sh/.tf files, so shellcheck/ruff/terraform
+          never see them directly. This renders each template with synthetic
+          contexts (via template_engine.py, the same code make-instance.py uses)
+          and lints the rendered output instead.
+        entry: python3 scripts/lint_templates.py
+        language: system
+        pass_filenames: false
+        files: ^(templates/|template_engine\.py)

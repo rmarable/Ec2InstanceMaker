@@ -1,4 +1,3 @@
-ansible
 appdirs
 asn1crypto
 awscli

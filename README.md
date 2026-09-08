@@ -1,10 +1,10 @@
-# Ec2InstanceMaker - Easy Automation for Building Cloud Servers With Attached Storage
+# Ec2InstanceMaker - Easy Automation for Building Cloud Servers
 
 Ec2InstanceMaker is an Open Source command line interface that makes it easy
-to build, access, and destroy servers and storage resources in the cloud.  It
-is also a useful teaching tool for those who want to dive deep into cloud
-computing, storage, and security paradigms, learn more about infrastructure
-automation, and explore the AWS ecosystem.
+to build, access, and destroy servers in the cloud.  It is also a useful
+teaching tool for those who want to dive deep into cloud computing and
+security paradigms, learn more about infrastructure automation, and explore
+the AWS ecosystem.
 
 ## License Information
 
@@ -33,34 +33,28 @@ You cannot create cases with AWS Technical Support or engage AWS support enginee
 
 Ec2InstanceMaker is an Open Source command line wrapper toolkit that eases the
 automation, creation, and destruction of Amazon Elastic Compute Cloud (EC2)
-instance fleets that can optionally be attached to Elastic File System (EFS)
-or FSx for Lustre storage resources.  This tool is designed to enable anyone
-to leverage cloud computing and storage resources at scale without requiring
-deep infrastructure knowledge or extensive experience with the AWS stack.
+instance fleets.  This tool is designed to enable anyone to leverage cloud
+computing at scale without requiring deep infrastructure knowledge or
+extensive experience with the AWS stack.
 
-You can find more information about EC2, EC2 Spot, EFS, and FSx for Lustre by
-visiting:
+You can find more information about EC2 and EC2 Spot by visiting:
 
 * https://aws.amazon.com/ec2/
 * https://aws.amazon.com/ec2/spot/
-* https://aws.amazon.com/efs/
-* https://aws.amazon.com/fsx/lustre/
 
-Ec2InstanceMaker makes extensive use of Ansible, the Amazon Web Services SDK
-for Python (boto3), Terraform, and jq.  It can be launched from a Docker
-container, local OSX or Linux environments, or from an existing EC2 instance.
+Ec2InstanceMaker makes extensive use of the Amazon Web Services SDK for
+Python (boto3), Terraform, and jq.  It can be launched from local OSX or
+Linux environments, or from an existing EC2 instance.
 You can find more information about these tools by visiting:
 
-* Ansible: https://www.ansible.com/
 * Boto3: https://boto3.amazonaws.com/v1/documentation/api/latest/index.html
-* Docker: https://docs.docker.com/
 * Terraform: https://www.terraform.io/
 * jq: https://stedolan.github.io/jq/
 
-Ec2InstanceMaker also requires Python 3.6 (or greater) and a functional Bash
+Ec2InstanceMaker also requires Python 3.12 (or greater) and a functional Bash
 shell environment.  As noted above, this tool can be run locally on OSX or
-Linux, on an existing EC2 Linux instance, from a Docker container, or from an
-EC2 instance spawned from a previous invocation of Ec2InstanceMaker.  Please
+Linux, on an existing EC2 Linux instance, or from an EC2 instance spawned
+from a previous invocation of Ec2InstanceMaker.  Please
 refer to the "Installing Ec2InstanceMaker" section for detailed guidance on
 how to properly configure your environment.
 
@@ -74,19 +68,33 @@ Ec2InstanceMaker provides the following features through its command line
 interface:
 
 * Installation of multiple operating systems on EC2 instances:
-  * Amazon Linux
+  * Amazon Linux 2023
   * Amazon Linux 2
-  * CentOS 6
-  * CentOS 7
-  * Ubuntu 14.04LTS
-  * Ubuntu 16.04LTS
-  * Ubuntu 18.04LTS
+  * AlmaLinux 9
+  * AlmaLinux 10
+  * Red Hat Enterprise Linux 9
+  * Red Hat Enterprise Linux 10
+  * Rocky Linux 9
+  * Rocky Linux 10
+  * Ubuntu 24.04LTS
+  * Ubuntu 26.04LTS
   * Windows Server 2019
+  * Windows Server 2022
+  * Windows Server 2025
 
-    Redhat, OpenSuse, and SLES may be supported in future releases.
+    OpenSuse and SLES may be supported in future releases.
 
 * Error checking to ensure that the selected operating system and EC2 instance
 type are compatible.
+
+* Automatic support for both x86_64 and AWS Graviton (ARM64) EC2 instance
+types.  The correct CPU architecture is detected directly from the
+`--instance_type` you select -- there is no separate architecture flag to
+set, and no way to accidentally request a mismatched OS/instance-type pair.
+Just pick a Graviton instance type (e.g. `m7g.large`, `c8g.xlarge`) and the
+matching AMI is selected automatically.  (Windows Server does not run on
+Graviton -- AWS does not publish Windows AMIs for ARM64 -- so Windows
+`base_os` values are restricted to x86_64 instance types.)
 
 * Administrative control over the allowed EC2 instance types that can be deployed.
 
@@ -97,11 +105,9 @@ type are compatible.
   * Optional construction of "golden images" with encrypted root EBS volumes.
   * Incorporation into existing DevOps CI/CD piplines.
 
-* Spawning EC2 instances from a Docker container.
-
 * Multiple instances with identical configurations built at the same time a.k.a. "instance families."
 
-* Command line designation of dev, test, stage, and prod operating levels. 
+* Command line designation of dev, test, stage, and prod operating levels.
 
 * Deployment of EC2 Spot instances with a adjustable price buffer to help
 prevent terminations caused by Spot market fluctuations.
@@ -115,14 +121,6 @@ prevent terminations caused by Spot market fluctuations.
 
 * Attachment of provisioned IOPS, throughput optizimed, and general purpose
 (gp2) SSD EBS volumes during the instance creation process.
-
-* Creation of EFS file systems that share the instance lifecycle and tags.
-  * Provisioned EFS throughput is NOT supported by this toolkit; please use Lustre if your use cases require high throughput or large IOPS beyond what "maxIO" or "burst mode" can provide.
-
-* Command line option to enable encryption of EFS at rest and in flight.
-
-* Create of FSx for Lustre file systems that share the instance(s) lifecycle
-and tags.  Hydration to and from an S3 bucket is also supported.
 
 * Selective disabling of Intel HyperThreading.
 
@@ -145,7 +143,7 @@ with a specific project identification tag.  The department tagging mechanism
 is easily customizable to meet your use case.
 
 * Additional instance customization hooks using EC2 instance userdata or
-post-installation shell scripts.  Please see the "Instance Customization" 
+post-installation shell scripts.  Please see the "Instance Customization"
 section for more details.
 
 * Custom scripting to automate deletion the instance or all members of the
@@ -175,18 +173,16 @@ These instructions are provided for the impatient and/or lazy.
 
 * Install Terraform.
 
-* Install Ansible.
-
 * Install jq.
 
-* Create and enable a virtual Python-3.7.x environment.
+* Create and activate a virtual Python 3.12 environment: `python3.12 -m venv .venv`.
 
 * Install the Python libraries in Ec2InstanceMaker/requirements.txt into the
 freshly created virtual Python environment.
 
 * Build away!
 
-**It is strongly suggested that the reader carefully review the installation documentation (INSTALL.md) to avoid potentially costly and time-consuming mistakes.** 
+**It is strongly suggested that the reader carefully review the installation documentation (INSTALL.md) to avoid potentially costly and time-consuming mistakes.**
 
 ## Note to DevOps Teams
 
@@ -211,6 +207,11 @@ As noted above, Ec2InstanceMaker is intended to reduce the administrative burden
     * S3
     * SQS
     * SNS
+    * IAM
+    * SSM
+    * STS
+    * Directory Service (DS)
+    * EC2 Messages
   * If you run into permissions problems building instances or provisioning storage resources, it's usually because of an IAM issue.  When speaking with your DevOps professionals, the following options are suggested:
     * Set `--iam_json_policy=ExtendedEc2InstancePolicy.json` to use the included JSON policy document which permits children instances to be spawned.
     * Work with your DevOps team to construct a custom IAM role that provides appropriate permissions for your environment, then include it by setting `--iam_role=$ROLE_NAME` when invoking `make-instance.py.`  Please refer to the EXAMPLE_USE_CASES document for additional guidance.
@@ -240,9 +241,9 @@ that is used to create the instance profiles that are created by the toolkit.
 EC2 and S3 API calls.
   * **GenericEc2InstancePolicy.json** provides enough permissions for an EC2
 "jumphost" spawned by make-instance.py to in turn create additional instances.
-In addition to allowing EC2 and S3, it also permits maintenance of EFS and FSx
-for Lustre file systems, SQS queues, SNS topic administration, IAM role and
-instance profile maintenance, and access to SSM.  However, please note that
+In addition to allowing EC2 and S3, it also permits maintenance of SQS
+queues, SNS topic administration, IAM role and instance profile maintenance,
+and access to SSM.  However, please note that
 this template does *NOT* provide adequate permissions for instances built with
 Ec2InstanceMzker to spwan children of their own.
   * **ExtendedEc2InstancePolicy.json** is equivalent to `GenericEc2InstancePolicy.json` permissions for an EC2 except that it grants Ec2InstanceMaker-spawned
@@ -260,15 +261,14 @@ https://docs.aws.amazon.com/AWSEC2/latest/WindowsGuide/ec2-instance-metadata.htm
 
 ### Using make-instance.py
 
-**make-instance.py** builds EC2 instances for a wide variety of use cases. 
+**make-instance.py** builds EC2 instances for a wide variety of use cases.
 
 ```
 $ ./make-instance.py -h
 usage: make-instance.py [-h] --az AZ --instance_name INSTANCE_NAME
                         --instance_owner INSTANCE_OWNER --instance_owner_email
                         INSTANCE_OWNER_EMAIL
-                        [--ansible_verbosity ANSIBLE_VERBOSITY]
-                        [--base_os {alinux,alinux2,centos6,centos7,ubuntu1404,ubuntu1604,ubuntu1804,windows2019}]
+                        [--base_os {al2023,alinux2,alma9,alma10,rhel9,rhel10,rocky9,rocky10,ubuntu2404,ubuntu2604,windows2019,windows2022,windows2025}]
                         [--count COUNT] [--custom_ami CUSTOM_AMI]
                         [--debug_mode {true,false}]
                         [--ebs_encryption {true,false}]
@@ -276,15 +276,11 @@ usage: make-instance.py [-h] --az AZ --instance_name INSTANCE_NAME
                         [--ebs_root_volume_iops EBS_ROOT_VOLUME_IOPS]
                         [--ebs_root_volume_size EBS_ROOT_VOLUME_SIZE]
                         [--ebs_root_volume_type {gp2,io1,st1}]
-                        [--efs_encryption {true,false}]
-                        [--efs_performance_mode {generalPurpose,maxIO}]
-                        [--enable_efs {true,false}]
-                        [--enable_fsx {true,false}]
-                        [--enable_fsx_hydration {true,false}]
+                        [--ebs_device_volume_iops EBS_DEVICE_VOLUME_IOPS]
+                        [--ebs_device_volume_size EBS_DEVICE_VOLUME_SIZE]
+                        [--ebs_device_volume_type {gp2,io1,st1}]
+                        [--ec2_keypair EC2_KEYPAIR]
                         [--enable_placement_group {true,false}]
-                        [--fsx_chunk_size FSX_CHUNK_SIZE]
-                        [--fsx_size FSX_SIZE] [--fsx_s3_bucket FSX_S3_BUCKET]
-                        [--fsx_s3_path FSX_S3_PATH]
                         [--hyperthreading {true,false}]
                         [--iam_json_policy IAM_JSON_POLICY]
                         [--iam_name_prefix IAM_NAME_PREFIX]
@@ -293,10 +289,9 @@ usage: make-instance.py [-h] --az AZ --instance_name INSTANCE_NAME
                         [--request_type {ondemand,spot}]
                         [--instance_type INSTANCE_TYPE]
                         [--prod_level {dev,test,stage,prod}]
+                        [--placement_group_strategy {cluster,spread}]
                         [--preserve_ami {true,false}]
-                        [--preserve_efs {true,false}]
-                        [--project_id PROJECT_ID]
-                        [--public_ip PUBLIC_IP]`
+                        [--project_id PROJECT_ID] [--public_ip PUBLIC_IP]
                         [--security_group SECURITY_GROUP]
                         [--spot_buffer SPOT_BUFFER]
                         [--turbot_account TURBOT_ACCOUNT]
@@ -304,20 +299,17 @@ usage: make-instance.py [-h] --az AZ --instance_name INSTANCE_NAME
 
 make-instance.py: Command-line interface to build EC2 instances
 
-optional arguments:
+options:
   -h, --help            show this help message and exit
   --az AZ, -A AZ        AWS Availability Zone (REQUIRED)
   --instance_name INSTANCE_NAME, -N INSTANCE_NAME
-                        name of the instance (REQUIRED)
+                        name of the instance(s) (REQUIRED)
   --instance_owner INSTANCE_OWNER, -O INSTANCE_OWNER
-                        ActiveDirectory username of the instance
-                        instance_owner (REQUIRED)
-  --instance_owner_email INSTANCE_OWNER_EMAIL, -E INSTANCE_OWNER_EMAIL
-                        Email address of the instance instance_owner
+                        ActiveDirectory username of the instance_owner
                         (REQUIRED)
-  --ansible_verbosity ANSIBLE_VERBOSITY, -V ANSIBLE_VERBOSITY
-                        Set the Ansible verbosity level (default = none)
-  --base_os {alinux,alinux2,centos6,centos7,ubuntu1404,ubuntu1604,ubuntu1804,windows2019}, -B {alinux,alinux2,centos6,centos7,ubuntu1404,ubuntu1604,ubuntu1804,windows2019}
+  --instance_owner_email INSTANCE_OWNER_EMAIL, -E INSTANCE_OWNER_EMAIL
+                        Email address of the instance_owner (REQUIRED)
+  --base_os {al2023,alinux2,alma9,alma10,rhel9,rhel10,rocky9,rocky10,ubuntu2404,ubuntu2604,windows2019,windows2022,windows2025}, -B {al2023,alinux2,alma9,alma10,rhel9,rhel10,rocky9,rocky10,ubuntu2404,ubuntu2604,windows2019,windows2022,windows2025}
                         instance base operating system (default = alinux2
                         a.k.a. Amazon Linux 2)
   --count COUNT, -C COUNT
@@ -328,7 +320,7 @@ optional arguments:
   --debug_mode {true,false}, -D {true,false}
                         Enable debug mode (default = false)
   --ebs_encryption {true,false}
-                        enable EBS encryption (default = false)
+                        enable EBS encryption where possible (default = false)
   --ebs_optimized {true,false}
                         use optimized EBS volumes (default = yes)
   --ebs_root_volume_iops EBS_ROOT_VOLUME_IOPS
@@ -339,35 +331,20 @@ optional arguments:
                         default = 30)
   --ebs_root_volume_type {gp2,io1,st1}
                         EBS volume type (default = gp2)
-  --efs_encryption {true,false}
-                        enable EFS encryption in transit and at rest (default
-                        = false)
-  --efs_performance_mode {generalPurpose,maxIO}
-                        select the EFS performance mode (default =
-                        generalPurpose)
-  --enable_efs {true,false}
-                        Deploy and mount an Elastic File System (EFS) on the
-                        instance(s) (default = false)
-  --enable_fsx {true,false}
-                        Deploy and mount a Lustre (FSxL) file system on the
-                        instance(s) (default = false)
-  --enable_fsx_hydration {true,false}
-                        enable support for hydrating FSxL from S3 (default =
-                        false)
-  --enable_placement_group {true,false}
+  --ebs_device_volume_iops EBS_DEVICE_VOLUME_IOPS
+                        amount of provisioned IOPS for the EBS secondary
+                        volume when ebs_root_volume_type=io1 (default = 0)
+  --ebs_device_volume_size EBS_DEVICE_VOLUME_SIZE
+                        Secondary EBS volume size in GB (Linux default = 8,
+                        Windows default = 30)
+  --ebs_device_volume_type {gp2,io1,st1}
+                        EBS secondary volume type (default = gp2)
+  --ec2_keypair EC2_KEYPAIR
+                        define an EC2 key pair name to provide SSH or Remote
+                        Desktop access (default = ec2_keypair_default)
+  --enable_placement_group {true,false}, --enable_pg {true,false}
                         Place the new instances in an EC2 placement group
                         using the "cluster" strategy (default = false)
-  --fsx_chunk_size FSX_CHUNK_SIZE
-                        Chunk size (MB) of S3 objects imported into Lustre
-                        (default = 1024)
-  --fsx_size FSX_SIZE   Lustre file system size in GB - must use multiples of
-                        1200 (default = 1200)
-  --fsx_s3_bucket FSX_S3_BUCKET
-                        Name of an S3 bucket connected to the Lustre file
-                        system for this instance (default = UNDEFINED)
-  --fsx_s3_path FSX_S3_PATH
-                        Path to a folder on s3://fsx_s3_bucket that Lustre
-                        will import/export from (default = fsxRoot)
   --hyperthreading {true,false}, -H {true,false}
                         enable Intel Hyperthreading (default = true)
   --iam_json_policy IAM_JSON_POLICY, -J IAM_JSON_POLICY
@@ -377,35 +354,37 @@ optional arguments:
   --iam_name_prefix IAM_NAME_PREFIX
                         Provide a prefix for the IAM entities associated with
                         the instance (default = Ec2InstanceMaker)
-  --iam_role IAM_ROLE   Apply a pre-existing IAM role to the instance
+  --iam_role IAM_ROLE   Apply a pre-existing IAM role to the instance(s)
   --instance_owner_department {analytics,clinical,commercial,compbio,compchem,datasci,design,development,hpc,imaging,manufacturing,medical,modeling,operations,proteomics,robotics,qa,research,scicomp}
-                        Department of the instance_owner (default = hpc)
+                        Department of the instance_owner (default = compbio)
   --request_type {ondemand,spot}
                         choose between ondemand or spot instances (default =
                         ondemand)
-  --instance_type INSTANCE_TYPE, -I INSTANCE_TYPE
-                        EC2 instance type (default = t2.micro)
+  --instance_type INSTANCE_TYPE, -T INSTANCE_TYPE
+                        EC2 instance type (default = t2.micro); CPU
+                        architecture (x86_64 or Graviton/ARM64) is auto-
+                        detected, no separate flag needed
   --prod_level {dev,test,stage,prod}
                         Operating stage of the jumphost (default = dev)
+  --placement_group_strategy {cluster,spread}, --pg_strategy {cluster,spread}
+                        Designate an EC2 placement group strategy (default =
+                        cluster)
   --preserve_ami {true,false}
                         Preserve any AMI image built from the instance(s)
                         post-termination (default = true)
-  --preserve_efs {true,false}
-                        Preserve the Elastic File System (EFS) created with
-                        the instance(s) (default = false)
   --project_id PROJECT_ID, -P PROJECT_ID
                         Project name or ID number (default = UNDEFINED)
   --public_ip PUBLIC_IP, -p PUBLIC_IP
                         Attach a public IP address to the instance(s) (default
                         = true)
   --security_group SECURITY_GROUP, -S SECURITY_GROUP
-                        Primary security group for the EC2 instance (default =
-                        ec2instancemaker_sg)
+                        Primary security group name for the EC2 instance
+                        (default = ec2instancemaker_sg)
   --spot_buffer SPOT_BUFFER
                         pricing buffer to protect from Spot market
                         fluctuations: spot_price = spot_price +
                         spot_price*spot_buffer
-  --turbot_account TURBOT_ACCOUNT, -T TURBOT_ACCOUNT
+  --turbot_account TURBOT_ACCOUNT
                         Turbot account ID (default = DISABLED)
   --vpc_name VPC_NAME   Name of the VPC (default = vpc_default)
 ```
@@ -426,11 +405,11 @@ $ ./make-instance.py -A us-east-2a -N ec2-testinstance01 -O rmarable -E rodney.m
 To build a Windows instance using (mostly) default values:
 
 ```
-./make-instance.py -N dev01 -O rmarable -E rmarable@amazon.com -A us-east-1b -I t3a.micro -B windows2019
+./make-instance.py -N dev01 -O rmarable -E rmarable@amazon.com -A us-east-1b -T t3a.micro -B windows2019
 ```
 
 If the user provides illegal parameter values or if any of the required AWS
-resources fail to deploy, the script will loudly echo an appropriate error 
+resources fail to deploy, the script will loudly echo an appropriate error
 before aborting.  In the example below, the user attempts to build an EBS root
 device that is larger than 16 TB:
 
@@ -439,7 +418,7 @@ $ ./make-instance.py -A us-east-2a -N ec2-testinstance01 -O rmarable -E rodney.m
 
 Performing parameter validation...
 
-Selected EC2 instance type: t2.micro
+Selected EC2 instance type: t2.micro (x86_64)
 ** WARNING **
 t2.micro does not support EBS optimization!
 Disabling ebs_optimization for: ec2-testinstance01
@@ -525,7 +504,7 @@ ECDSA key fingerprint is SHA256:K0pbmmEPLcAhltTT5kqYcEUNJiamr+3J+gzjpvZsdoI.
 Are you sure you want to continue connecting (yes/no)? yes
 Warning: Permanently added '3.80.159.180' (ECDSA) to the list of known hosts.
 Last login: Thu Jun 13 13:44:17 2019 from 72-21-196-66.amazon.com
-[centos@ip-172-31-5-254 ~]$ exit
+[ec2-user@ip-172-31-5-254 ~]$ exit
 logout
 Connection to 3.80.159.180 closed.
 
@@ -534,14 +513,14 @@ Reconnect to fam01-3 by running this command:
 $ ./access_instance.py -N fam01
 ```
 
-The "-m" switch can be used to access a specific instance as it is listed 
+The "-m" switch can be used to access a specific instance as it is listed
 in the table.  This enables access_instance.py to be used for other automated
 tasks.
 
 `$ ./access_instance.py -N fam01 -m 3`
 
 When working with multiple Windows instances, a menu displaying the decrypted
-Administrator password and IP address of each instance is dumped to the 
+Administrator password and IP address of each instance is dumped to the
 console.  This data can be pasted into an RDC client to access the instance
 of choice:
 
@@ -563,10 +542,10 @@ $ ./access_instance -N dev01
 
 ### Destroying Instances
 
-**kill-instance.$INSTANCE_NAME.sh** is a personalized script designed to 
+**kill-instance.$INSTANCE_NAME.sh** is a personalized script designed to
 terminate specific EC2 instances, EC2 security groups, IAM entities, and any
 associated storage resources that were tagged with the `instance_serial_nunber.`
-It is generated by make-instance.py and will delete itself when all tagged 
+It is generated by make-instance.py and will delete itself when all tagged
 instances and resources are terminated.
 
 To invoke:
@@ -614,7 +593,7 @@ The basic post-installation shell script performs a systems package update and
 inserts a 45-second keep-alive interval to prevent SSH logouts from affecting
 any ongoing interactive instance activity.
 
-The instance userdata template disables Intel HyperThreading if `--enable_hyperthreading=false` and modifies the root volume on CentOS 6 instances so it can be expanded up to 16 TB without user intervention.
+The instance userdata template disables Intel HyperThreading if `--hyperthreading=false`.
 
 Ec2InstanceMaker also permits additional user customization by simply pasting the desired commands into `templates/custom_user_script.j2` beneath the obvious comment:
 
@@ -628,84 +607,7 @@ This provides operators and DevOps professionals with a powerful mechanism for q
 
 Please note that additional customization of Windows instances can only be performed through the userdata template (templates/instance_userdata.j2).
 
-Support for joining a Windows Active Directory domain and mounting FSx for Windows storage will be provided in a future release.  Support for PowerShell scripts may also be provided in subsequent releases.
-
-## Using EFS
-
-EFS support can be enabled by setting `--enable_efs=true` when the instance is
-first constructed: 
-
-```
-$ ./make-instance.py -A us-east-1a -O rmarable -E rmarable@amazon.com -N dev01 --request_type=spot --count=3 --enable_efs=true
-```
-
-This will create a new EFS file system that shares tags and its lifecycle with
-instance family "dev01."
-
-Support for "general purpose" and "maximum IO" modes can be selected through
-the efs_performance_mode switch:
-
-```
-  --efs_performance_mode {generalPurpose,maxIO}
-                        select the EFS performance mode (default =
-                        generalPurpose)
-```
-
-To encrypt EFS traffic at rest and in flight, set `efs_encryption=true`.  Note
-that encryption in transit is not supported under centos6 or ubuntu1404.
-
-Building an EFS file system will add an extra three minutes to the creation
-process time.
-
-## Using FSx for Lustre
-
-To add an FSx for Lustre file system that shares both the instance tag collection and lifecycle, set `enable_fsx=true` when the instance is first created.  The example below will attach a 1,200 GB Lustre file system mounted at /fsx to a new Amazon Linux 2 instance:
-
-```
-$ ./make-instance.py -A us-east-1a -O rmarable -E rmarable@amazon.com -N dev01 --count=3 --request_type=spot --enable_fsx=true
-```
-
-The size of the file system is controlled with the `fsx_size` flag.  Lustre file
-systems must use multiples of 1,200 GB or an error will be returned.  Please refer to the product announcement: https://amzn.to/2m25H5j
-
-Hydration of an FSX file system from an S3 bucket is supported by setting 
-`enable_fsx_hydration=true`, designating an existing S3 bucket (`fsx_s3_bucket`)
-and path (`fsx_s3_path`), and optionally choosing a "chunk" size (`fsx_chunk_size`).  The bucket and path, if provided, must exist or an error will be returned.
-
-This example will create a 1.2 TB Lustre file system that will hydrate to and
-from s3://rmarable-hydration-test/import mounted at /fsx on an Amazon Linux 2
-spot instance family called "dev01."  
-
-```
-./make-instance.py -A us-east-1a -O rmarable -E rmarable@amazon.com -N dev01 --count=3 --request_type=spot --enable_fsx=true --fsx_s3_bucket=rmarable-hydration-test --fsx_s3_path=import --enable_fsx_hydration=true
-```
-
-Please note that the size of all Lustre file systems must be provisioned in
-multples of 1,200 TB.  The make-instance.py script will return an error if
-this step is ignored.
-
-To faciliate pushing data in an out of the bucket from Lustre, please use the
-following shell scripts which will be automatically created and stored in 
-/usr/local/bin on all instance family members:
-
-Import S3 from Lustre: this script will push data from S3 into the FSx layer
-with a transfer rate that is 1/2 that of the Luster file system:
-`$ /usr/local/bin/import-s3-to-lustre.sh`
-
-Export Lustre to S3: this script will push data from the FSx layer into S3:
-`$ /usr/local/bin/export-lustre-to-s3.sh`
-
-Check export status: this script will permit you to track the progress of an
-export Lustre-to-S3 tasks:
-`$ /usr/local/bin/check-lustre-export-progress.sh`
-
-For more information on Lustre hydration to and from S3, please refer to the
-AWS public documentation on using FSx with durable data repositories:
-
-https://docs.aws.amazon.com/fsx/latest/LustreGuide/fsx-data-repositories.html
-
-Support for attaching FSx for Windows file systems to EC2 instances running
-Windows Server 2019 may be provided in a future release.
+Support for joining a Windows Active Directory domain will be provided in a future release.  Support for PowerShell scripts may also be provided in subsequent releases.
 
 ## EC2 Placement Groups
 
@@ -724,12 +626,6 @@ a placement group.
 ## Working with Custom AMIs ##
 
 Ec2InstanceMaker supports building new instances from custom AMIs by using the `--custom_ami` switch.  If the custom_ami is not found, the script will return an error.
-
-## Launching Instances Using Docker
-
-Ec2InstanceMaker supports launching new EC2 instances from a Docker container.
-
-Please refer to "Launching Instances Using Docker" in the INSTALL document.
 
 ## Building New AMIs Using the build-ami Script ##
 
@@ -751,7 +647,7 @@ This is *not* a recommended best practice and should only be enabled when testin
 
 ## Troubleshooting
 
-* Python version 3.6 or greater is required by this software.  Additionally,
+* Python version 3.12 or greater is required by this software.  Additionally,
 you must install the required libraries in requirements.txt.  If any of these
 components are missing, you will observe missing Python module errors:
 
@@ -759,13 +655,12 @@ components are missing, you will observe missing Python module errors:
 ModuleNotFoundError: No module named boto3'
 ```
 
-* Ansible and Terraform must also be present in order for the scripts in this
-toolkit to operate as expected.  If either of these applications are missing
-from the installing user's path, make-instance.py will return an "application
-is missing" error:
+* Terraform must also be present in order for the scripts in this toolkit to
+operate as expected.  If it is missing from the installing user's path,
+make-instance.py will return an "application is missing" error:
 
 ```
-$ ./make-instance.py -N dev01 -O rmarable -E rmarable@amazon.com -A us-east-1b -I t3.micro -C 3 --request_type=spot
+$ ./make-instance.py -N dev01 -O rmarable -E rmarable@amazon.com -A us-east-1b -T t3.micro -C 3 --request_type=spot
 
 ** ERROR **
 Terraform is missing! Please visit: https://www.terraform.io/downloads
@@ -774,15 +669,17 @@ Please resolve this error and retry the instance build.
 Aborting...
 ```
 
-* CentOS and Ubuntu require subscribing to the appropriate operating system
-channel in the AWS Marketplace:
+* Rocky Linux requires subscribing to the appropriate operating system
+channel in the AWS Marketplace.  (Amazon Linux, Amazon Linux 2023,
+AlmaLinux, RHEL, and Ubuntu do **not** -- their AMIs carry no AWS
+Marketplace product code and launch immediately.)
 
 ```
 Error: Error launching source instance: OptInRequired: In order to use this AWS Marketplace product you need to accept terms and subscribe. To do so please visit https://aws.amazon.com/marketplace/pp?sku=a1rz1wghrw6x9gn14lyded00r
 ```
 
 If you observe this error while attempting to build an EC2 instance, please
-follow the guidelines provided in the message output to subscribe to the OS 
+follow the guidelines provided in the message output to subscribe to the OS
 channel through the AWS Marketplace.
 
 * Ec2InstanceMaker supports EBS encryption but does not yet provide a mechanism
@@ -806,19 +703,6 @@ link on the AWS public documentation summarizes the instances that can be
 launched within the region in question for that account:
 
 https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/EBSEncryption.html#EBSEncryption_supported_instances
-
-* Please be advised that EFS encryption in transit is **not** supported for
-CentOS 6 or Ubuntu 14.04 LTS.
-
-  * centos6 ships with openssl-1.0.1e-57, which is too old to support to support
-TLS with EFS.  There are no officially supported openssl packages beyond this
-version.
-
-  * ubuntu1404 does not seem to support building the native Debian package of
-amazon-efs-utils.
-
-  * EFS encryption in transit for these operating systems may be provided in a 
-subsequent feature release.
 
 * If the instance(s) cannot be built due to a lack of spot capacity, Terraform
 will return a "capacity-not-available" error.  To resolve this, try increasing

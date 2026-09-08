@@ -20,4 +20,8 @@ instance_data/
 snippets/
 tools/
 vars_files/
+.venv/
 kill-instance.*.sh
+CLAUDE-STATE.md
+.pytest_cache/
+.terraform-plugin-cache/

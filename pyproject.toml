@@ -1,0 +1,23 @@
+[tool.ruff]
+target-version = "py312"
+line-length = 200
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort (import ordering)
+    "UP",  # pyupgrade (modernize for target-version)
+    "B",   # flake8-bugbear (likely-bug patterns)
+    "C4",  # flake8-comprehensions
+]
+ignore = [
+    "E501",  # line length is handled by the formatter, not worth failing the build over
+]
+
+[tool.bandit]
+exclude_dirs = [".venv"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,112 @@
+#!/bin/bash
+#
+################################################################################
+# Name:		ssm_provision.{{ instance_name }}.sh
+# Author:	Rodney Marable <rodney.marable@gmail.com>
+# Purpose:	Run build_instance.sh and any selected custom_user_postboot
+#		scripts on {{ instance_name }} via SSM Session Manager
+#		(send-command), invoked by DEFAULT_EC2_TEMPLATE.j2's
+#		local-exec provisioner during `terraform apply` -- replaces
+#		the old SSH-based provisioner "file"/"remote-exec" pair, so
+#		`terraform apply` itself no longer needs SSH reachability to
+#		the instance (matches access_instance.py's SSM-only access).
+################################################################################
+#
+# Known constraint: AWS Systems Manager's send-command has a size limit on
+# the combined `commands` payload (documented as up to 64 KiB for the
+# Parameters value on the *inline* command path used here) -- a very large
+# custom_user_postboot_script could exceed it. Not hit by anything shipped
+# in this toolkit today; worth knowing if a future postboot script grows.
+
+set -euo pipefail
+
+INSTANCE_ID="$1"
+REGION="{{ region }}"
+
+# Wait for the SSM Agent to register -- unlike Terraform's built-in SSH
+# provisioner (which retries the connection itself), send-command fails
+# outright against an instance that hasn't registered yet.
+
+echo "Waiting for the SSM Agent to register on $INSTANCE_ID..."
+ssm_status="Unknown"
+for _attempt in $(seq 1 30); do
+    ssm_status=$(aws ssm describe-instance-information \
+        --region "$REGION" \
+        --filters "Key=InstanceIds,Values=$INSTANCE_ID" \
+        --query 'InstanceInformationList[0].PingStatus' \
+        --output text 2>/dev/null || echo "Unknown")
+    if [ "$ssm_status" = "Online" ]; then
+        echo "SSM Agent is online."
+        break
+    fi
+    sleep 10
+done
+if [ "$ssm_status" != "Online" ]; then
+    echo ""
+    echo "*** ERROR ***"
+    echo "The SSM Agent on $INSTANCE_ID never came online after 5 minutes."
+    echo "Aborting..."
+    exit 1
+fi
+
+# Function: run_via_ssm()
+# Purpose: push one script's content to the instance and run it via
+# send-command, then poll get-command-invocation until it finishes.
+# Each call is its own send-command invocation (its own shell session on
+# the instance), matching the isolation the old per-script SSH
+# provisioner blocks had -- one script's variables/state don't leak into
+# the next script's.
+
+run_via_ssm() {
+    local script_path="$1"
+    local commands_json
+    commands_json=$(jq -Rs 'split("\n")' < "$script_path")
+    local command_id
+    command_id=$(aws ssm send-command \
+        --region "$REGION" \
+        --instance-ids "$INSTANCE_ID" \
+        --document-name "AWS-RunShellScript" \
+        --parameters "{\"commands\": $commands_json}" \
+        --query 'Command.CommandId' \
+        --output text)
+    echo "Running $script_path via SSM (command $command_id)..."
+    local invocation_status="Pending"
+    while true; do
+        sleep 5
+        invocation_status=$(aws ssm get-command-invocation \
+            --region "$REGION" \
+            --command-id "$command_id" \
+            --instance-id "$INSTANCE_ID" \
+            --query 'Status' \
+            --output text 2>/dev/null || echo "Pending")
+        case "$invocation_status" in
+            Success)
+                echo "$script_path completed successfully."
+                return 0
+                ;;
+            Failed | Cancelled | TimedOut)
+                echo ""
+                echo "*** ERROR ***"
+                echo "$script_path failed via SSM (status: $invocation_status)."
+                aws ssm get-command-invocation \
+                    --region "$REGION" \
+                    --command-id "$command_id" \
+                    --instance-id "$INSTANCE_ID" \
+                    --query 'StandardErrorContent' \
+                    --output text
+                return 1
+                ;;
+            *)
+                # Pending/InProgress/Delayed -- keep polling.
+                ;;
+        esac
+    done
+}
+
+run_via_ssm "{{ build_instance_script }}"
+{% for postboot_script in postboot_script_filenames %}
+run_via_ssm "{{ postboot_script }}"
+{% endfor %}
+
+echo "All provisioning scripts completed successfully via SSM."
+exit 0

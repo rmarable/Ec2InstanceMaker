@@ -242,44 +242,11 @@
                 "iam:GetInstanceProfile"
             ],
             "Effect": "Allow",
-            "Resource": [ 
+            "Resource": [
 		"arn:aws:iam::*:policy/<EC2_POLICY>",
 		"arn:aws:iam::*:role/<EC2_ROLE>",
 		"arn:aws:iam::*:instance-profile/<EC2_INSTANCE_PROFILE>"
 	    ]
-        },
-        {
-            "Sid": "EFS",
-            "Action": [
-                "elasticfilesystem:CreateFileSystem",
-                "elasticfilesystem:CreateMountTarget",
-                "elasticfilesystem:CreateTags",
-                "elasticfilesystem:DeleteFileSystem",
-                "elasticfilesystem:DeleteMountTarget",
-                "elasticfilesystem:DeleteTags",
-                "elasticfilesystem:DescribeFileSystems",
-                "elasticfilesystem:DescribeMountTargets",
-                "elasticfilesystem:DescribeTags",
-                "elasticfilesystem:DescribeMountTargetSecurityGroups",
-                "elasticfilesystem:ModifyMountTargetSecurityGroups",
-                "elasticfilesystem:UpdateFileSystem"
-            ],
-            "Effect": "Allow",
-            "Resource": "*"
-        },
-        {
-            "Sid": "FSx",
-            "Action": [
-                "fsx:CreateFileSystem",
-                "fsx:DeleteFileSystem",
-                "fsx:DescribeFileSystems",
-                "fsx:ListTagsForResource",
-                "fsx:TagResource",
-                "fsx:UntagResource",
-                "fsx:UpdateFileSystem"
-            ],
-            "Effect": "Allow",
-            "Resource": "*"
         },
         {
             "Sid": "AllowAccessToSSM",
@@ -290,6 +257,10 @@
                 "ssm:ListInstanceAssociations",
                 "ssm:UpdateAssociationStatus",
                 "ssm:UpdateInstanceInformation",
+                "ssmmessages:CreateControlChannel",
+                "ssmmessages:CreateDataChannel",
+                "ssmmessages:OpenControlChannel",
+                "ssmmessages:OpenDataChannel",
                 "ec2messages:AcknowledgeMessage",
                 "ec2messages:DeleteMessage",
                 "ec2messages:FailMessage",

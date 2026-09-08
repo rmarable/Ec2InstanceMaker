@@ -1,23 +1,40 @@
 #cloud-config
 {% if hyperthreading == "false" %}
 bootcmd:
- - for cpunum in $(cat /sys/devices/system/cpu/cpu*/topology/thread_siblings_list | cut -s -d, -f2- | tr ',' '\n' | sort -un); do echo 0 > /sys/devices/system/cpu/cpu$cpunum/online; done 
+ - for cpunum in $(cat /sys/devices/system/cpu/cpu*/topology/thread_siblings_list | cut -s -d, -f2- | tr ',' '\n' | sort -un); do echo 0 > /sys/devices/system/cpu/cpu$cpunum/online; done
 {% endif %}
-{% if base_os == "centos6" %}
+{% set runcmd_items = [] %}
+{% if not awscli_preinstalled and package_manager in ('yum', 'apt') %}
+{% if package_manager == 'apt' %}
+{% set _ = runcmd_items.append('apt-get update') %}
+{% set _ = runcmd_items.append('apt-get install -y unzip') %}
+{% else %}
+{% set _ = runcmd_items.append('yum install -y unzip') %}
+{% endif %}
+{% set _ = runcmd_items.append('curl "https://awscli.amazonaws.com/awscli-exe-linux-' + ('aarch64' if architecture == 'arm64' else 'x86_64') + '.zip" -o "/tmp/awscliv2.zip"') %}
+{% set _ = runcmd_items.append('unzip -q /tmp/awscliv2.zip -d /tmp') %}
+{% set _ = runcmd_items.append('/tmp/aws/install') %}
+{% set _ = runcmd_items.append('rm -rf /tmp/awscliv2.zip /tmp/aws') %}
+{% endif %}
+{% if base_os in ('rhel9', 'rhel10', 'rocky9', 'rocky10') %}
+{% set _ = runcmd_items.append('dnf install -y https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/linux_' + ('arm64' if architecture == 'arm64' else 'amd64') + '/amazon-ssm-agent.rpm') %}
+{% set _ = runcmd_items.append('systemctl enable --now amazon-ssm-agent') %}
+{% endif %}
+{% for script in prelogin_custom_scripts %}
+{% set _ = runcmd_items.append('/opt/ec2instancemaker/custom_user_prelogin_script.' + script.name + '.sh') %}
+{% endfor %}
+{% if prelogin_custom_scripts %}
+write_files:
+{% for script in prelogin_custom_scripts %}
+  - path: /opt/ec2instancemaker/custom_user_prelogin_script.{{ script.name }}.sh
+    permissions: '0755'
+    content: |
+      {{ script.content | indent(6) }}
+{% endfor %}
+{% endif %}
+{% if runcmd_items %}
 runcmd:
-  - yum install -y epel-release
-  - yum install -y cloud-utils-growpart parted dracut-modules-growroot perl
-  - mkinitrd -f -v /boot/initrd-$(uname -r).img $(uname -r)
-growpart:
-    mode: auto
-    devices: ["/"]
-    ignore_rootfs_disabled: false
+{% for item in runcmd_items %}
+ - {{ item }}
+{% endfor %}
 {% endif %}
-
-###############################################################
-## Starting point for user-added EC2 instance customizations ##
-###############################################################
-
-#############################################################
-## Ending point for user-added EC2 instance customizations ##
-#############################################################

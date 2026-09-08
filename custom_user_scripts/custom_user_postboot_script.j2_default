@@ -1,0 +1,57 @@
+#!/bin/bash
+#
+################################################################################
+# Name:		custom_user_postboot_script.{{ instance_name }}.sh
+# Author:	{{ instance_owner_email }}
+# Purpose:	POST-BOOT custom user script (runs via SSH after cloud-init
+#		finishes) provided by {{ instance_owner }}
+################################################################################
+#
+# WHEN THIS RUNS: via Terraform's SSH remote-exec provisioner, automatically
+# as part of the build -- but *after* cloud-init reports "boot-finished" and
+# after build_instance.sh (the toolkit's own postboot script) has already
+# run: package manager updated/upgraded, git/gcc/zip/unzip installed, the
+# AWS CLI confirmed present and its default region set, SSH keepalive
+# configured. By the time this script runs, SSH is already up -- this is
+# NOT before-first-login; see custom_user_prelogin_script.j2_<name> for that.
+#
+# WHO RUNS THIS: {{ ec2_user }} (this instance's connecting SSH user), with
+# passwordless sudo available -- not root directly. $EC2_HOME/$EC2_USER/$SRC
+# are set up the same way build_instance.j2 sets them up, so $SRC
+# ({{ ec2_user_src }}) already exists and is owned by {{ ec2_user }}.
+#
+# GOOD FITS: anything heavier or longer-running than a prelogin script
+# should be -- real software installs, cloning a repo into $SRC, per-user
+# dotfiles/config, anything that benefits from the AWS CLI/git/gcc already
+# being guaranteed present.
+#
+# AVAILABLE VARIABLES: same as custom_user_prelogin_script.j2_<name> --
+# instance_name, instance_owner, instance_owner_email, region, base_os,
+# architecture, package_manager ("yum"/"apt"/None), is_windows, ec2_user,
+# ec2_user_src, and everything else in instance_parameters.
+#
+################################################################################
+
+source /etc/profile
+
+# Example: clone a repo into this instance's source directory.
+# Replace this with whatever your use case actually needs, or delete it.
+
+# git clone <repo-url> {{ ec2_user_src }}/<repo-name>
+
+# Example: a package-manager-conditional install, the same pattern used
+# throughout this toolkit's own templates (see build_instance.j2). The
+# if/elif below is REAL Jinja, evaluated at render time -- only one of the
+# two lines actually ends up in the rendered script, chosen by this
+# instance's package_manager. It's commented out (# <package>) so it's
+# inert either way until you fill in a real package name.
+{% if package_manager == 'yum' %}
+# sudo yum install -y <package>
+{% elif package_manager == 'apt' %}
+# sudo DEBIAN_FRONTEND=noninteractive apt-get install -y <package>
+{% endif %}
+
+# Cleanup and exit.
+
+echo "Exiting..."
+exit 0

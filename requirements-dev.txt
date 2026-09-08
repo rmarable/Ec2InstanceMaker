@@ -1,0 +1,6 @@
+pre-commit
+ruff
+bandit[toml]
+pip-audit
+detect-secrets
+pytest

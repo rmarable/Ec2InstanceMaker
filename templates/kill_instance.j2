@@ -1,3 +1,4 @@
+#!/bin/bash
 ###############################################################################
 # Name:		kill_instance.{{ instance_name }}.sh
 # Author:	Rodney Marable <rodney.marable@gmail.com>
@@ -6,8 +7,6 @@
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:	Destroy EC2 instance {{ instance_name }}
 ###############################################################################
-
-#!/bin/bash
 
 # Set the path to the source tree.
 
@@ -48,24 +47,6 @@ echo "Destroying instance: {{ instance_name }}"
 {% endif %}
 echo ""
 
-{% if enable_fsx == "true" %}
-{% if count > 1 %}
-# Parse the Lustre file system DNS name and fs_id of this instance family.
-{% else %}
-# Parse the Lustre file system DNS name and fs_id of this instance.
-{% endif %}
-
-FSX_DNS_NAME=`aws --region {{ region }} fsx describe-file-systems | jq '.FileSystems[] | [.DNSName, (.Tags|from_entries|.InstanceSerialNumber)] | @csv' | grep {{ instance_serial_number }} | awk -F, '{print $1}' | tr -d \" | tr -d '\\'`
-FSX_FS_ID=`aws --region {{ region }} fsx describe-file-systems | jq '.FileSystems[] | [.FileSystemId, (.Tags|from_entries|.InstanceSerialNumber)] | @csv' | grep {{ instance_serial_number }} | awk -F, '{print $1}' | tr -d \" | tr -d '\\'`
-
-# Delete the Lustre file system.
-
-aws --region {{ region }} fsx delete-file-system --file-system-id $FSX_FS_ID
-echo ""
-echo "Deleted Lustre file system: $FSX_DNS_NAME"
-echo ""
-{% endif %}
-
 {% if count > 1 %}
 # Destroy the instance family and associated resources created by Terraform.
 {% else %}
@@ -74,9 +55,9 @@ echo ""
 
 cd $INSTANCE_DATA_DIR
 {% if request_type == 'ondemand' %}
-{% if debug_mode == 'true' %}TF_LOG=DEBUG {% endif %}terraform destroy -auto-approve{% if preserve_efs == 'false' %} -target=aws_efs_file_system.efs-${INSTANCE_NAME} -target=aws_efs_mount_target.efs-mountTarget-${INSTANCE_NAME}{% endif %} -target=aws_instance.${INSTANCE_NAME}
+{% if debug_mode == 'true' %}TF_LOG=DEBUG {% endif %}terraform destroy -auto-approve -target=aws_instance.${INSTANCE_NAME}
 {% else %}
-{% if debug_mode == 'true' %}TF_LOG=DEBUG {% endif %}terraform destroy -auto-approve{% if preserve_efs == 'false' %} -target=aws_efs_file_system.efs-${INSTANCE_NAME} -target=aws_efs_mount_target.efs-mountTarget-${INSTANCE_NAME}{% endif %} -target=aws_spot_instance_request.${INSTANCE_NAME}
+{% if debug_mode == 'true' %}TF_LOG=DEBUG {% endif %}terraform destroy -auto-approve -target=aws_spot_instance_request.${INSTANCE_NAME}
 {% endif %}
 cd $SRC_TREE_DIR
 
@@ -99,13 +80,7 @@ done
 
 # Delete the EC2 security group.
 
-{% if enable_fsx == 'true' %}
-(sleep 300 ; aws --region {{ region }} ec2 delete-security-group --group-id {{ vpc_security_group_ids }}) 2>/dev/null &
-SG_GROUPNAME=`aws --region {{ region }} ec2 describe-security-groups --filters Name=group-id,Values={{ vpc_security_group_ids }} | jq '.SecurityGroups[].GroupName' | tr -d \"`
-echo "Marked EC2 security group for deletion: $SG_GROUPNAME"
-{% else %}
 aws --region {{ region }} ec2 delete-security-group --group-id {{ vpc_security_group_ids }}
-{% endif %}
 
 # Delete the EC2 instance data directory.
 
@@ -179,7 +154,7 @@ echo ""
 # 	- Remove the IAM role from the EC2 instance profile.
 # 	- Delete the IAM EC2 instance profile and role.
 
-if [[ $PRESERVE_IAM_ROLE="false" ]]
+if [[ "$PRESERVE_IAM_ROLE" == "false" ]]
 then
 	aws iam delete-role-policy --role-name {{ ec2_iam_instance_role }} --policy-name {{ ec2_iam_instance_policy }}
 	aws iam remove-role-from-instance-profile --instance-profile-name {{ ec2_iam_instance_profile }} --role-name {{ ec2_iam_instance_role }}
@@ -194,12 +169,9 @@ fi
 # Since PRESERVE_IAM_ROLE is true, don't delete any IAM entities associated
 # with the instance(s).
 
-if [[ $PRESERVE_IAM_ROLE="false" ]]
-then
-	echo "Preserved EC2 IAM instance policy: {{ ec2_iam_instance_policy }}"
-	echo "Preserved EC2 IAM instance profile: {{ ec2_iam_instance_profile }}"
-	echo "Preserved EC2 IAM instance role: {{ ec2_iam_instance_role }}"
-fi
+echo "Preserved EC2 IAM instance policy: {{ ec2_iam_instance_policy }}"
+echo "Preserved EC2 IAM instance profile: {{ ec2_iam_instance_profile }}"
+echo "Preserved EC2 IAM instance role: {{ ec2_iam_instance_role }}"
 {% endif %}
 
 # Remove all state data associated with {{ instance_name }}.

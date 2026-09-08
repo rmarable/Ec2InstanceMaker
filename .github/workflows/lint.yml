@@ -1,0 +1,32 @@
+---
+name: Lint
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
+
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      # scripts/lint_templates.py is a `language: system` local hook, so it
+      # runs with whatever python3/shellcheck/terraform are already on PATH
+      # (installed above) rather than a pre-commit-managed isolated env.
+      - uses: pre-commit/action@v3.0.1

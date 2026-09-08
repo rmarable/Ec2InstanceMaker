@@ -1,3 +1,4 @@
+#!/bin/bash
 ################################################################################
 # Name:         build_ami.{{ instance_name }}.sh
 # Author:       Rodney Marable <rodney.marable@gmail.com>
@@ -6,8 +7,6 @@
 # Deployed On:	{{ lookup('pipe','date \"+%B %-d, %Y\"') }}
 # Purpose:      Create a new AMI from an instance spawned by Ec2InstanceMaker
 ################################################################################
-
-#!/bin/bash
 
 # Define the name of the AMI to create.
 

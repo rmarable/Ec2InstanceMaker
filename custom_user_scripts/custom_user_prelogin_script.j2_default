@@ -1,0 +1,58 @@
+#!/bin/bash
+#
+################################################################################
+# Name:		custom_user_prelogin_script.{{ instance_name }}.sh
+# Author:	{{ instance_owner_email }}
+# Purpose:	PRE-LOGIN custom user script (cloud-init, runs before first
+#		login) provided by {{ instance_owner }}
+################################################################################
+#
+# WHEN THIS RUNS: as part of cloud-init, during boot -- before an operator
+# can log in at all, and before build_instance.sh (the toolkit's own
+# postboot script) has done ANY of its own setup (package manager
+# update/upgrade, AWS CLI install, SSH keepalive config). Don't assume
+# anything beyond what the base AMI ships unless you install it yourself,
+# right here.
+#
+# WHO RUNS THIS: root, via cloud-init's runcmd. $HOME is /root, not this
+# instance's ec2_user's home directory -- use an explicit path if you need
+# one, don't rely on $HOME meaning what it means in the postboot script.
+#
+# TIMING: build_instance.sh (postboot) explicitly waits for cloud-init to
+# report "boot-finished" before it does anything -- so whatever runs here
+# delays the entire postboot flow by however long it takes. Keep this
+# fast (seconds, not minutes). A multi-minute software install belongs in
+# custom_user_postboot_script.j2_<name> instead, not here.
+#
+# GOOD FITS: lightweight system config that should be in place before
+# anyone logs in -- a sysctl tweak, an /etc/hosts entry, a MOTD banner, a
+# ulimit, disabling a service you never want running. Anything you'd
+# otherwise have to remember to do by hand right after the instance comes up.
+#
+# AVAILABLE VARIABLES: this file is rendered the same way every other
+# template in this toolkit is -- instance_name, instance_owner,
+# instance_owner_email, region, base_os, architecture, package_manager
+# ("yum"/"apt"/None), is_windows, ec2_user, and everything else in
+# instance_parameters (see make-instance.py) is available as a Jinja
+# variable here, same as in custom_user_postboot_script.j2_<name>.
+#
+################################################################################
+
+# Example: write a message-of-the-day banner before anyone's first login.
+# Replace this with whatever your use case actually needs, or delete it.
+
+cat <<'EOF' > /etc/motd
+Provisioned by Ec2InstanceMaker for {{ instance_owner }}.
+EOF
+
+# Example: a package-manager-conditional step, the same pattern used
+# throughout this toolkit's own templates (see build_instance.j2). The
+# if/elif below is REAL Jinja, evaluated at render time -- only one of the
+# two lines actually ends up in the rendered script, chosen by this
+# instance's package_manager. It's commented out (# <package>) so it's
+# inert either way until you fill in a real package name.
+{% if package_manager == 'yum' %}
+# yum install -y <package>
+{% elif package_manager == 'apt' %}
+# apt-get install -y <package>
+{% endif %}
