@@ -14,11 +14,11 @@ SRC_TREE_DIR="`git rev-parse --show-toplevel`"
 
 # Set some critical paths and variables.
 
-INSTANCE_DATA_DIR={{ instance_data_dir }}
-INSTANCE_NAME={{ instance_name }}
-EC2_KEYPAIR={{ ec2_keypair }}
+INSTANCE_DATA_DIR="{{ instance_data_dir }}"
+INSTANCE_NAME="{{ instance_name }}"
+EC2_KEYPAIR="{{ ec2_keypair }}"
 PRESERVE_IAM_ROLE="{{ preserve_iam_role }}"
-SSH_KEYPAIR_FILE={{ ssh_keypair_file }}
+SSH_KEYPAIR_FILE="{{ ssh_keypair_file }}"
 SNS_TOPIC_ARN="{{ sns_arn }}"
 CLOUDWATCH_LOG_GROUP="{{ cloudwatch_log_group }}"
 
@@ -54,13 +54,13 @@ echo ""
 # Destroy the instance and associated resources created by Terraform.
 {% endif %}
 
-cd $INSTANCE_DATA_DIR
+cd "$INSTANCE_DATA_DIR"
 {% if request_type == 'ondemand' %}
-{% if debug_mode == 'true' %}TF_LOG=DEBUG {% endif %}terraform destroy -auto-approve -target=aws_instance.${INSTANCE_NAME}
+{% if debug_mode == 'true' %}TF_LOG=DEBUG {% endif %}terraform destroy -auto-approve -target="aws_instance.${INSTANCE_NAME}"
 {% else %}
-{% if debug_mode == 'true' %}TF_LOG=DEBUG {% endif %}terraform destroy -auto-approve -target=aws_spot_instance_request.${INSTANCE_NAME}
+{% if debug_mode == 'true' %}TF_LOG=DEBUG {% endif %}terraform destroy -auto-approve -target="aws_spot_instance_request.${INSTANCE_NAME}"
 {% endif %}
-cd $SRC_TREE_DIR
+cd "$SRC_TREE_DIR"
 
 {% if count > 1 %}
 # Delete the ec2_keypair and PEM files associated with this instance family.
@@ -68,13 +68,13 @@ cd $SRC_TREE_DIR
 # Delete the ec2_keypair and PEM files associated with this instance.
 {% endif %}
 
-aws --region {{ region }} ec2 delete-key-pair --key-name $EC2_KEYPAIR
+aws --region {{ region }} ec2 delete-key-pair --key-name "$EC2_KEYPAIR"
 echo "Deleted EC2 keypair: $EC2_KEYPAIR"
-for file in $INSTANCE_DATA_DIR/$SSH_KEYPAIR_FILE $SRC_TREE_DIR/$SSH_KEYPAIR_FILE
+for file in "$INSTANCE_DATA_DIR/$SSH_KEYPAIR_FILE" "$SRC_TREE_DIR/$SSH_KEYPAIR_FILE"
 do
-	if [ -f $file ]
+	if [ -f "$file" ]
 	then
-		rm $file
+		rm "$file"
 		echo "Deleted SSH keypair file: $file"
 	fi
 done
@@ -85,9 +85,9 @@ aws --region {{ region }} ec2 delete-security-group --group-id {{ vpc_security_g
 
 # Delete the EC2 instance data directory.
 
-if [ -d $INSTANCE_DATA_DIR ]
+if [ -d "$INSTANCE_DATA_DIR" ]
 then
-	rm -rf $INSTANCE_DATA_DIR
+	rm -rf "$INSTANCE_DATA_DIR"
 	echo "Deleted directory: $INSTANCE_DATA_DIR"
 fi
 
@@ -101,10 +101,10 @@ aws --region {{ region }} ec2 delete-placement-group --group-name ec2pg-{{ insta
 
 # Delete the AMI ImageId and EBS SnapshotId tagged with instance_serial_number.
 
-if [ ! -z $AMI_ID ]
+if [ ! -z "$AMI_ID" ]
 then
-	aws --region {{ region }} ec2 deregister-image --image-id $AMI_ID
-	aws --region {{ region }} ec2 delete-snapshot --snapshot-id $AMI_SNAPSHOT_ID
+	aws --region {{ region }} ec2 deregister-image --image-id "$AMI_ID"
+	aws --region {{ region }} ec2 delete-snapshot --snapshot-id "$AMI_SNAPSHOT_ID"
 	echo ""
 	echo "Deleted AMI: $AMI_ID"
 	echo "Deleted EBS snapshot: $AMI_SNAPSHOT_ID"
@@ -119,7 +119,7 @@ fi
 # Print a message to the console confirming preservation of the AMI ImageId and
 # EBS SnapshotId tagged with instance_serial_number.
 
-if [ ! -z $AMI_ID ]
+if [ ! -z "$AMI_ID" ]
 then
 	echo ""
 	echo "Preserved AMI: $AMI_ID"
@@ -137,15 +137,15 @@ fi
 
 {% if count > 1 %}
 echo "Published instance family termination message:"
-aws sns publish --topic-arn $SNS_TOPIC_ARN --subject "[Ec2InstanceMaker] Instance Family Termination Notice" --message "EC2 instance family {{ instance_name }} was terminated on `date +%Y-%m-%d` at `date +%H:%M.`"
+aws sns publish --topic-arn "$SNS_TOPIC_ARN" --subject "[Ec2InstanceMaker] Instance Family Termination Notice" --message "EC2 instance family {{ instance_name }} was terminated on `date +%Y-%m-%d` at `date +%H:%M.`"
 {% else %}
 echo "Published instance termination message:"
-aws --region {{ region }} sns publish --topic-arn $SNS_TOPIC_ARN --subject "[Ec2InstanceMaker] Instance Termination Notice" --message "EC2 instance {{ instance_name }} was terminated on `date +%Y-%m-%d` at `date +%H:%M.`  There were {{ count }} instances terminated in this family."
+aws --region {{ region }} sns publish --topic-arn "$SNS_TOPIC_ARN" --subject "[Ec2InstanceMaker] Instance Termination Notice" --message "EC2 instance {{ instance_name }} was terminated on `date +%Y-%m-%d` at `date +%H:%M.`  There were {{ count }} instances terminated in this family."
 {% endif %}
 
 # Delete the SNS topic.
 
-aws --region {{ region }} sns delete-topic --topic-arn $SNS_TOPIC_ARN
+aws --region {{ region }} sns delete-topic --topic-arn "$SNS_TOPIC_ARN"
 echo "Deleted SNS topic: $SNS_TOPIC_ARN"
 echo ""
 {% if enable_cloudwatch_logs == 'true' %}
@@ -153,7 +153,7 @@ echo ""
 
 # Delete the CloudWatch Logs group.
 
-aws --region {{ region }} logs delete-log-group --log-group-name $CLOUDWATCH_LOG_GROUP
+aws --region {{ region }} logs delete-log-group --log-group-name "$CLOUDWATCH_LOG_GROUP"
 echo "Deleted CloudWatch Logs group: $CLOUDWATCH_LOG_GROUP"
 echo ""
 {% else %}
@@ -197,23 +197,23 @@ echo ""
 echo "Deleted state files:"
 for file in {{ vars_file_path }} {{ instance_serial_number_file }}
 do
-	if [ -f $file ]
+	if [ -f "$file" ]
 	then
-		rm $file
+		rm "$file"
 		echo "	$file"
 	fi
 done
 
 # Delete symlinks to the top-level shell scripts.
 
-cd $SRC_TREE_DIR
+cd "$SRC_TREE_DIR"
 echo ""
 echo "Removed symlinks:"
 for link in kill-instance.{{ instance_name }}.sh build-ami.{{ instance_name }}.sh
 do
-	if [ -L $link ]
+	if [ -L "$link" ]
 	then
-		unlink $link
+		unlink "$link"
 		echo "	$link"
 	fi
 done

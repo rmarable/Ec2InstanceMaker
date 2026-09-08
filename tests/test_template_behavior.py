@@ -579,7 +579,7 @@ class TestCloudWatchLogsTeardown:
 
     def test_deletes_log_group_by_default(self):
         rendered = render({})["kill_instance.j2"]
-        assert "aws --region us-east-1 logs delete-log-group --log-group-name $CLOUDWATCH_LOG_GROUP" in rendered
+        assert 'aws --region us-east-1 logs delete-log-group --log-group-name "$CLOUDWATCH_LOG_GROUP"' in rendered
         assert "Preserved CloudWatch Logs group" not in rendered
 
     def test_preserves_log_group_when_requested(self):

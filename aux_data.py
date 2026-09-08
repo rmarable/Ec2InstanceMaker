@@ -98,11 +98,9 @@ def base_os_instance_check(base_os, instance_type, architecture, debug_mode):
 # rather than a hand-maintained allowlist.
 
 
-def get_instance_type_info(instance_type, region):
-    import boto3
+def get_instance_type_info(ec2client, instance_type):
     from botocore.exceptions import ClientError
 
-    ec2client = boto3.client("ec2", region_name=region)
     try:
         response = ec2client.describe_instance_types(InstanceTypes=[instance_type])
     except ClientError as e:
@@ -137,10 +135,7 @@ def get_instance_type_info(instance_type, region):
 # Purpose: verify the existence of a user-provided custom AMI
 
 
-def check_custom_ami(custom_ami, aws_account_id, region, architecture):
-    import boto3
-
-    ec2client = boto3.client("ec2", region_name=region)
+def check_custom_ami(ec2client, custom_ami, aws_account_id, architecture):
     ami_information = ec2client.describe_images(
         Owners=[aws_account_id],
         Filters=[
@@ -172,25 +167,22 @@ def ctrlC_Abort(
     vars_file_path,
     instance_data_dir,
     instance_serial_number_file,
-    instance_serial_number,
-    region,
+    ec2client,
+    iam,
     security_group_name,
     vpc_security_group_ids,
     iam_instance_role,
     iam_instance_policy,
     iam_instance_profile,
     preserve_iam_role,
+    ec2_keypair,
 ):
     import os
     import sys
     import time
 
-    import boto3
     from botocore.exceptions import ClientError
 
-    ec2client = boto3.client("ec2", region_name=region)
-    iam = boto3.client("iam")
-    ec2_keypair = instance_serial_number + "_" + region
     secret_key_file = instance_data_dir + ec2_keypair + ".pem"
     print("")
     print("".center(line_length, "#"))
@@ -213,30 +205,31 @@ def ctrlC_Abort(
             print("Preserved EC2 IAM instance role: " + iam_instance_role)
             print("")
         else:
-            try:
-                iam.remove_role_from_instance_profile(InstanceProfileName=iam_instance_profile, RoleName=iam_instance_role)
-                print("Removed: " + iam_instance_profile + " from " + iam_instance_role)
-            except ClientError as e:
-                if e.response["Error"]["Code"] == "NoSuchEntity":
-                    print("No IAM EC2 instance profile exists to remove from the instance role!")
-            try:
-                iam.delete_instance_profile(InstanceProfileName=iam_instance_profile)
-                print("Deleted: " + iam_instance_profile)
-            except ClientError as e:
-                if e.response["Error"]["Code"] == "NoSuchEntity":
-                    print("No IAM EC2 instance profile exists for this instance!")
-            try:
-                iam.delete_role_policy(RoleName=iam_instance_role, PolicyName=iam_instance_policy)
-                print("Deleted: " + iam_instance_policy)
-            except ClientError as e:
-                if e.response["Error"]["Code"] == "NoSuchEntity":
-                    print("No IAM role policy exists for this instance!")
-            try:
-                iam.delete_role(RoleName=iam_instance_role)
-                print("Deleted: " + iam_instance_role)
-            except ClientError as e:
-                if e.response["Error"]["Code"] == "NoSuchEntity":
-                    print("No IAM role exists for this instance!")
+            iam_cleanup_steps = [
+                (
+                    lambda: iam.remove_role_from_instance_profile(InstanceProfileName=iam_instance_profile, RoleName=iam_instance_role),
+                    "Removed: " + iam_instance_profile + " from " + iam_instance_role,
+                    "No IAM EC2 instance profile exists to remove from the instance role!",
+                ),
+                (
+                    lambda: iam.delete_instance_profile(InstanceProfileName=iam_instance_profile),
+                    "Deleted: " + iam_instance_profile,
+                    "No IAM EC2 instance profile exists for this instance!",
+                ),
+                (
+                    lambda: iam.delete_role_policy(RoleName=iam_instance_role, PolicyName=iam_instance_policy),
+                    "Deleted: " + iam_instance_policy,
+                    "No IAM role policy exists for this instance!",
+                ),
+                (lambda: iam.delete_role(RoleName=iam_instance_role), "Deleted: " + iam_instance_role, "No IAM role exists for this instance!"),
+            ]
+            for action, success_msg, not_found_msg in iam_cleanup_steps:
+                try:
+                    action()
+                    print(success_msg)
+                except ClientError as e:
+                    if e.response["Error"]["Code"] == "NoSuchEntity":
+                        print(not_found_msg)
             print("")
         try:
             ec2client.delete_security_group(GroupId=vpc_security_group_ids)
@@ -348,14 +341,11 @@ _AMI_CATALOG = {
 }
 
 
-def get_ami_info(base_os, region, architecture):
-    import boto3
-
+def get_ami_info(ec2client, base_os, architecture):
     if base_os not in _AMI_CATALOG:
         error_msg = '"' + base_os + '" is not a recognized base_os!'
         refer_to_docs_and_quit(error_msg)
     owner, name_pattern = _AMI_CATALOG[base_os]
-    ec2client = boto3.client("ec2", region_name=region)
     ami_information = ec2client.describe_images(
         Owners=[owner],
         Filters=[
@@ -486,21 +476,6 @@ def refer_to_docs_and_quit(error_msg):
     print("Please resolve this error and retry the instance build.")
     print("Aborting...")
     sys.exit(1)
-
-
-# Function: time_waiter(duration, interval):
-# Purpose: given a duration, print '.'  to the console every interval seconds.
-
-
-def time_waiter(duration, interval):
-    import sys
-    import time
-
-    step = 1
-    for _ in range(0, duration, step):
-        (print(".", end=""),)
-        time.sleep(interval)
-        sys.stdout.flush()
 
 
 # Unsupported instance types by operating system

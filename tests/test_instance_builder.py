@@ -426,16 +426,16 @@ class TestResolveAmi:
     def test_no_custom_ami_uses_catalog(self):
         get_ami_info = MagicMock(return_value="ami-fromcatalog")
         check_custom_ami = MagicMock()
-        result = instance_builder.resolve_ami("UNDEFINED", "al2023", "us-east-1", "x86_64", "123456789012", get_ami_info, check_custom_ami, MagicMock())
+        result = instance_builder.resolve_ami("UNDEFINED", "al2023", "x86_64", "123456789012", get_ami_info, check_custom_ami, MagicMock())
         assert result == "ami-fromcatalog"
-        get_ami_info.assert_called_once_with("al2023", "us-east-1", "x86_64")
+        get_ami_info.assert_called_once_with("al2023", "x86_64")
         check_custom_ami.assert_not_called()
 
     def test_custom_ami_found_returns_it(self):
         get_ami_info = MagicMock()
         check_custom_ami = MagicMock(return_value="ami-mycustom")
         quit_fn = MagicMock(side_effect=SystemExit(1))
-        result = instance_builder.resolve_ami("ami-mycustom", "al2023", "us-east-1", "x86_64", "123456789012", get_ami_info, check_custom_ami, quit_fn)
+        result = instance_builder.resolve_ami("ami-mycustom", "al2023", "x86_64", "123456789012", get_ami_info, check_custom_ami, quit_fn)
         assert result == "ami-mycustom"
         get_ami_info.assert_not_called()
         quit_fn.assert_not_called()
@@ -445,7 +445,7 @@ class TestResolveAmi:
         check_custom_ami = MagicMock(return_value="false")
         quit_fn = MagicMock(side_effect=SystemExit(1))
         with pytest.raises(SystemExit):
-            instance_builder.resolve_ami("ami-doesnotexist", "al2023", "us-east-1", "x86_64", "123456789012", get_ami_info, check_custom_ami, quit_fn)
+            instance_builder.resolve_ami("ami-doesnotexist", "al2023", "x86_64", "123456789012", get_ami_info, check_custom_ami, quit_fn)
         quit_fn.assert_called_once_with('AMI image "ami-doesnotexist" is unavailable in this AWS account!')
 
 
@@ -516,7 +516,8 @@ class TestBuildSnsMessage:
 class TestApplyTerraform:
     def test_runs_init_plan_apply_in_order(self):
         with patch("subprocess.run") as mock_run:
-            instance_builder.apply_terraform("/fake/instance_data/dev01/", "false")
+            mock_run.return_value = MagicMock(returncode=0)
+            instance_builder.apply_terraform("/fake/instance_data/dev01/", "false", MagicMock())
         commands = [call.args[0][1] for call in mock_run.call_args_list]
         assert commands == ["init", "plan", "apply"]
         for call in mock_run.call_args_list:
@@ -524,15 +525,26 @@ class TestApplyTerraform:
 
     def test_debug_mode_sets_tf_log_env(self):
         with patch("subprocess.run") as mock_run:
-            instance_builder.apply_terraform("/fake/instance_data/dev01/", "true")
+            mock_run.return_value = MagicMock(returncode=0)
+            instance_builder.apply_terraform("/fake/instance_data/dev01/", "true", MagicMock())
         for call in mock_run.call_args_list:
             assert call.kwargs["env"]["TF_LOG"] == "DEBUG"
 
     def test_non_debug_mode_passes_no_env_override(self):
         with patch("subprocess.run") as mock_run:
-            instance_builder.apply_terraform("/fake/instance_data/dev01/", "false")
+            mock_run.return_value = MagicMock(returncode=0)
+            instance_builder.apply_terraform("/fake/instance_data/dev01/", "false", MagicMock())
         for call in mock_run.call_args_list:
             assert call.kwargs["env"] is None
+
+    def test_quits_and_stops_on_first_failed_step(self):
+        quit_fn = _quitting_mock()
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [MagicMock(returncode=0), MagicMock(returncode=1)]
+            with pytest.raises(SystemExit):
+                instance_builder.apply_terraform("/fake/instance_data/dev01/", "false", quit_fn)
+        assert mock_run.call_count == 2
+        quit_fn.assert_called_once()
 
 
 class TestBuildSecurityGroupTags:
@@ -549,9 +561,10 @@ class TestBuildSecurityGroupTags:
         assert tag_dict["ProjectID"] == "myproj123"
 
 
-def _tf_output(text):
+def _tf_output(text, returncode=0):
     result = MagicMock()
     result.stdout = text.encode("utf-8")
+    result.returncode = returncode
     return result
 
 
@@ -572,7 +585,7 @@ class TestFetchWindowsInstanceDetails:
     def test_parses_id_name_and_ip_from_terraform_output_json(self):
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = _tf_output_json("i-0123456789abcdef0", "dev01", "1.2.3.4")
-            instance_id, instance_name, ip_address = instance_builder.fetch_windows_instance_details("/fake/instance_data/dev01/")
+            instance_id, instance_name, ip_address = instance_builder.fetch_windows_instance_details("/fake/instance_data/dev01/", MagicMock())
         assert instance_id == "i-0123456789abcdef0"
         assert instance_name == "dev01"
         assert ip_address == "1.2.3.4"
@@ -580,12 +593,20 @@ class TestFetchWindowsInstanceDetails:
     def test_runs_terraform_output_json_in_instance_data_dir_without_shell(self):
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = _tf_output_json("i-0123456789abcdef0", "dev01", "1.2.3.4")
-            instance_builder.fetch_windows_instance_details("/fake/instance_data/dev01/")
+            instance_builder.fetch_windows_instance_details("/fake/instance_data/dev01/", MagicMock())
         mock_run.assert_called_once()
         call = mock_run.call_args
         assert call.args[0] == ["terraform", "output", "-json"]
         assert call.kwargs["cwd"] == "/fake/instance_data/dev01/"
         assert call.kwargs.get("shell", False) is False
+
+    def test_nonzero_returncode_quits_before_parsing_json(self):
+        quit_fn = _quitting_mock()
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = _tf_output("", returncode=1)
+            with pytest.raises(SystemExit):
+                instance_builder.fetch_windows_instance_details("/fake/instance_data/dev01/", quit_fn)
+        quit_fn.assert_called_once()
 
 
 class TestDecryptWindowsAdminPasswords:
@@ -614,6 +635,18 @@ class TestDecryptWindowsAdminPasswords:
         assert args[0:3] == ["aws", "ec2", "get-password-data"]
         assert "--priv-launch-key" in args
         assert args[args.index("--priv-launch-key") + 1] == "dev01-key.pem"
+
+    def test_empty_password_data_reports_not_yet_available(self):
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = _tf_output('{"PasswordData": ""}')
+            result = instance_builder.decrypt_windows_admin_passwords("/fake/instance_data/dev01/", "dev01-key", "i-123")
+        assert result == instance_builder._WINDOWS_PASSWORD_NOT_YET_AVAILABLE
+
+    def test_null_password_data_reports_not_yet_available(self):
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = _tf_output("{}")
+            result = instance_builder.decrypt_windows_admin_passwords("/fake/instance_data/dev01/", "dev01-key", "i-123")
+        assert result == instance_builder._WINDOWS_PASSWORD_NOT_YET_AVAILABLE
 
 
 class TestDeriveIamNames:
@@ -915,22 +948,69 @@ class TestSetupCloudwatchLogging:
             instance_builder.setup_cloudwatch_logging(logs_client, "/ec2instancemaker/dev01", 30, quit_fn)
 
 
-class TestValidateInstanceNameAndOwnerCasing:
-    def test_all_lowercase_is_fine(self):
+class TestValidateInstanceNameAndOwnerFormat:
+    def test_all_lowercase_alphanumeric_with_hyphens_is_fine(self):
         quit_fn = _quitting_mock()
-        instance_builder.validate_instance_name_and_owner_casing("dev01", "alice", quit_fn)
+        instance_builder.validate_instance_name_and_owner_format("dev01-fam", "alice", quit_fn)
+        quit_fn.assert_not_called()
+
+    def test_owner_allows_dots_and_underscores(self):
+        # instance_owner is documented as an ActiveDirectory username --
+        # real AD usernames commonly use first.last/first_last.
+        quit_fn = _quitting_mock()
+        instance_builder.validate_instance_name_and_owner_format("dev01", "first.last_name", quit_fn)
         quit_fn.assert_not_called()
 
     def test_uppercase_instance_name_quits(self):
         quit_fn = _quitting_mock()
         with pytest.raises(SystemExit):
-            instance_builder.validate_instance_name_and_owner_casing("Dev01", "alice", quit_fn)
+            instance_builder.validate_instance_name_and_owner_format("Dev01", "alice", quit_fn)
         quit_fn.assert_called_once()
 
     def test_uppercase_instance_owner_quits(self):
         quit_fn = _quitting_mock()
         with pytest.raises(SystemExit):
-            instance_builder.validate_instance_name_and_owner_casing("dev01", "Alice", quit_fn)
+            instance_builder.validate_instance_name_and_owner_format("dev01", "Alice", quit_fn)
+        quit_fn.assert_called_once()
+
+    def test_instance_name_must_start_with_a_letter(self):
+        quit_fn = _quitting_mock()
+        with pytest.raises(SystemExit):
+            instance_builder.validate_instance_name_and_owner_format("01dev", "alice", quit_fn)
+        quit_fn.assert_called_once()
+
+    @pytest.mark.parametrize(
+        "malicious_name",
+        [
+            "../../../etc/passwd",  # path traversal
+            "dev01/../../etc",  # path traversal
+            'dev01"; touch /tmp/pwned; echo "',  # shell/HCL injection
+            "dev01'; touch /tmp/pwned; echo '",  # shell injection
+            "dev 01",  # whitespace (word-splitting risk)
+            "dev01$(whoami)",  # command substitution
+            "dev01`whoami`",  # command substitution (backtick form)
+        ],
+    )
+    def test_instance_name_rejects_injection_and_traversal_attempts(self, malicious_name):
+        # Regression tests for a real adversarial-review finding:
+        # instance_name used to only reject uppercase letters, while
+        # flowing unquoted into shell commands (DEFAULT_EC2_TEMPLATE.j2's
+        # spot-tagging local-exec, kill_instance.j2), Terraform resource
+        # labels, and filesystem paths (vars_files/<name>.yml,
+        # instance_data/<name>/, the kill-instance./build-ami.<name>.sh
+        # symlinks) -- all now closed at the source by restricting the
+        # charset, rather than trying to escape correctly for every
+        # different downstream context.
+        quit_fn = _quitting_mock()
+        with pytest.raises(SystemExit):
+            instance_builder.validate_instance_name_and_owner_format(malicious_name, "alice", quit_fn)
+        quit_fn.assert_called_once()
+
+    @pytest.mark.parametrize("malicious_owner", ["../etc/passwd", 'alice"; touch /tmp/pwned; echo "', "alice; rm -rf /"])
+    def test_instance_owner_rejects_injection_attempts(self, malicious_owner):
+        quit_fn = _quitting_mock()
+        with pytest.raises(SystemExit):
+            instance_builder.validate_instance_name_and_owner_format("dev01", malicious_owner, quit_fn)
         quit_fn.assert_called_once()
 
 

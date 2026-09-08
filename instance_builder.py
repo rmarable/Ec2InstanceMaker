@@ -19,6 +19,7 @@
 import errno
 import ipaddress
 import os
+import re
 import sys
 import time
 from datetime import UTC
@@ -211,8 +212,7 @@ def resolve_security_group(ec2, region, security_group_name, instance_serial_num
         else:
             add_inbound_security_group_rule(region, security_group, "tcp", ssh_allowed_ips, 22, 22)
         sg_id = list(ec2.security_groups.filter(Filters=filters))
-    v_sg_id = str(*sg_id).split("'")
-    vpc_security_group_ids = v_sg_id[1]
+    vpc_security_group_ids = sg_id[0].id
     return security_group_name, vpc_security_group_ids
 
 
@@ -272,10 +272,10 @@ def setup_keypair(ec2_client, ec2_keypair, secret_key_file, region, debug_mode, 
 # doesn't need to import aux_data.py directly.
 
 
-def resolve_ami(custom_ami, base_os, region, architecture, aws_account_id, get_ami_info, check_custom_ami, refer_to_docs_and_quit):
+def resolve_ami(custom_ami, base_os, architecture, aws_account_id, get_ami_info, check_custom_ami, refer_to_docs_and_quit):
     if custom_ami == "UNDEFINED":
-        return get_ami_info(base_os, region, architecture)
-    aws_ami = check_custom_ami(custom_ami, aws_account_id, region, architecture)
+        return get_ami_info(base_os, architecture)
+    aws_ami = check_custom_ami(custom_ami, aws_account_id, architecture)
     if aws_ami == "false":
         refer_to_docs_and_quit('AMI image "' + custom_ami + '" is unavailable in this AWS account!')
     return aws_ami
@@ -338,15 +338,25 @@ TimeStamp:    {sns_timestamp}
 # create the EC2 instance(s). Sets TF_LOG=DEBUG when debug_mode is enabled.
 # This performs real, potentially destructive infrastructure changes --
 # tests must always patch subprocess.run rather than let this run for real.
+# Each step's return code is checked before proceeding to the next -- a
+# failed "terraform init" (e.g. a stale plugin cache) must never be allowed
+# to fall through into "plan"/"apply" against a half-initialized working
+# directory.
 
 
-def apply_terraform(instance_data_dir, debug_mode):
+def apply_terraform(instance_data_dir, debug_mode, refer_to_docs_and_quit):
     import subprocess
 
     tf_env = {**os.environ, "TF_LOG": "DEBUG"} if debug_mode == "true" else None
-    subprocess.run(["terraform", "init", "-input=false"], cwd=instance_data_dir, env=tf_env)
-    subprocess.run(["terraform", "plan", "-out", "terraform_environment"], cwd=instance_data_dir, env=tf_env)
-    subprocess.run(["terraform", "apply", "terraform_environment"], cwd=instance_data_dir, env=tf_env)
+    steps = [
+        ["terraform", "init", "-input=false"],
+        ["terraform", "plan", "-out", "terraform_environment"],
+        ["terraform", "apply", "terraform_environment"],
+    ]
+    for step in steps:
+        result = subprocess.run(step, cwd=instance_data_dir, env=tf_env)
+        if result.returncode != 0:
+            refer_to_docs_and_quit('"' + " ".join(step) + '" failed with exit code ' + str(result.returncode) + "!")
 
 
 # Function: build_security_group_tags()
@@ -382,11 +392,13 @@ def build_security_group_tags(security_group_name, instance_name, instance_seria
 # actually guaranteed to preserve across versions the way `-json` is.
 
 
-def fetch_windows_instance_details(instance_data_dir):
+def fetch_windows_instance_details(instance_data_dir, refer_to_docs_and_quit):
     import json
     import subprocess
 
     result = subprocess.run(["terraform", "output", "-json"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, cwd=instance_data_dir)
+    if result.returncode != 0:
+        refer_to_docs_and_quit('"terraform output -json" failed with exit code ' + str(result.returncode) + "!")
     outputs = json.loads(result.stdout.decode("utf-8"))
     instance_id = outputs["instance_id_list"]["value"]
     instance_name = outputs["instance_name_index"]["value"]
@@ -400,6 +412,14 @@ def fetch_windows_instance_details(instance_data_dir):
 # multi-instance output format), using the EC2 keypair's private key.
 # Returns a comma-joined string in the same order as instance_ids_csv, so
 # it zips positionally against instance names/IPs parsed separately.
+# AWS doesn't populate PasswordData until Windows has finished generating
+# it, which can take several minutes after launch -- until then,
+# get-password-data returns an empty PasswordData field, which jq renders
+# as the literal string "null" rather than raising an error. Detecting
+# that case explicitly (instead of silently printing "null" as if it were
+# a real password) tells the operator to wait and retry.
+
+_WINDOWS_PASSWORD_NOT_YET_AVAILABLE = "(not yet available -- Windows password generation can take several minutes after launch; try again shortly)"
 
 
 def decrypt_windows_admin_passwords(instance_data_dir, ec2_keypair, instance_ids_csv):
@@ -417,6 +437,8 @@ def decrypt_windows_admin_passwords(instance_data_dir, ec2_keypair, instance_ids
         )
         password = jq("..|.PasswordData?").transform(text=password_tf.stdout.decode("utf-8"), text_output=True)
         password = password.replace('"', "").strip()
+        if not password or password == "null":
+            password = _WINDOWS_PASSWORD_NOT_YET_AVAILABLE
         passwords.append(password)
     return ",".join(passwords)
 
@@ -607,17 +629,39 @@ def setup_cloudwatch_logging(logs_client, log_group_name, log_retention_days, re
 # make_instance.py -- see CLAUDE-STATE.md for the phased plan this completes.
 ################################################################################
 
-# Function: validate_instance_name_and_owner_casing()
-# Purpose: reject instance_name/instance_owner values containing uppercase
-# letters -- both feed into AWS resource names and tags where mixed case
-# has caused real problems before (S3/DNS-style naming rules elsewhere in
-# AWS), so this is caught here rather than surfacing as a confusing
-# downstream API error.
+# Function: validate_instance_name_and_owner_format()
+# Purpose: restrict instance_name/instance_owner to a safe charset -- both
+# feed into far more than just AWS resource names/tags (where mixed case
+# alone has caused real problems before, S3/DNS-style naming rules
+# elsewhere in AWS): instance_name specifically also becomes a Terraform
+# resource label (DEFAULT_EC2_TEMPLATE.j2's `resource "aws_instance"
+# "{{ instance_name }}"`), a filesystem path component
+# (vars_files/<name>.yml, instance_data/<name>/, the kill-instance./
+# build-ami.<name>.sh symlinks template_engine.py creates), and an
+# unquoted bash variable assignment (kill_instance.j2). Before this
+# existed, only uppercase letters were rejected -- a value containing a
+# quote, `../`, or a shell metacharacter could break out of any of those
+# contexts (HCL string injection, path traversal, or, formerly, unquoted
+# shell-command injection now separately closed by quoting those
+# contexts too). Restricting the charset at the source closes all of
+# them at once, rather than trying to escape correctly for every
+# different context downstream.
+#
+# instance_owner gets a slightly wider allowance (dots/underscores, not
+# just hyphens) since it's documented as an ActiveDirectory username
+# (--instance_owner's own --help text), and real AD usernames commonly
+# use `first.last`/`first_last` conventions.
 
 
-def validate_instance_name_and_owner_casing(instance_name, instance_owner, refer_to_docs_and_quit):
-    if any(char.isupper() for char in instance_name) or any(char.isupper() for char in instance_owner):
-        refer_to_docs_and_quit("instance_name and instance_owner may not contain uppercase letters!")
+def validate_instance_name_format(instance_name, refer_to_docs_and_quit):
+    if not re.fullmatch(r"[a-z][a-z0-9-]*", instance_name):
+        refer_to_docs_and_quit("instance_name must start with a lowercase letter and contain only lowercase letters, numbers, and hyphens!")
+
+
+def validate_instance_name_and_owner_format(instance_name, instance_owner, refer_to_docs_and_quit):
+    validate_instance_name_format(instance_name, refer_to_docs_and_quit)
+    if not re.fullmatch(r"[a-z][a-z0-9._-]*", instance_owner):
+        refer_to_docs_and_quit("instance_owner must start with a lowercase letter and contain only lowercase letters, numbers, periods, underscores, and hyphens!")
 
 
 # Function: get_terraform_version()

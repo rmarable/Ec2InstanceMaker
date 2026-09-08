@@ -17,6 +17,7 @@
 ################################################################################
 
 import os
+import shlex
 import subprocess
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
@@ -93,6 +94,38 @@ def _bool_filter(value):
     return str(value).strip().lower() in ("yes", "true", "t", "1", "on")
 
 
+def _shquote_filter(value):
+    # For interpolating free-text operator input (instance_owner_email/
+    # instance_owner_department/project_id -- none of these are restricted
+    # to a safe charset the way instance_name/instance_owner are,
+    # deliberately, per instance_owner_department being explicit free text)
+    # directly into a *generated shell script* (build_ami.j2, kill_instance.j2),
+    # where the rendered text IS the shell source -- plain shlex.quote() is
+    # correct here, no second escaping layer needed. For the Terraform
+    # local-exec case, see tf_shquote below instead.
+    return shlex.quote(str(value))
+
+
+def _tf_shquote_filter(value):
+    # Same purpose as shquote above, but for interpolating into
+    # DEFAULT_EC2_TEMPLATE.j2's local-exec `command` string specifically --
+    # that string is itself an HCL double-quoted string literal, not raw
+    # shell source, so the shell-quoted result needs a second escaping pass
+    # so Terraform's own HCL parser doesn't mangle it before it ever reaches
+    # /bin/sh -c:
+    #   1. shlex.quote() makes the value safe for the shell to parse as a
+    #      single token -- but its own escaping mechanism for an embedded
+    #      single quote (') produces a literal double-quote character
+    #      ('"'"'), which would otherwise break out of the *outer* HCL
+    #      string.
+    #   2. Escaping \ and " for HCL means Terraform's own parser un-escapes
+    #      them back to the literal shlex.quote() output before ever
+    #      constructing the string it passes to the shell -- so the shell
+    #      still sees exactly what shlex.quote() intended.
+    shell_quoted = shlex.quote(str(value))
+    return shell_quoted.replace("\\", "\\\\").replace('"', '\\"')
+
+
 def _make_environment(local_workingdir):
     # autoescape is intentionally off: output is Terraform/shell/Python/JSON,
     # not HTML, and HTML-escaping quotes/angle-brackets would corrupt it.
@@ -108,6 +141,8 @@ def _make_environment(local_workingdir):
     )  # nosec B701
     env.globals["lookup"] = _lookup
     env.filters["bool"] = _bool_filter
+    env.filters["shquote"] = _shquote_filter
+    env.filters["tf_shquote"] = _tf_shquote_filter
     return env
 
 

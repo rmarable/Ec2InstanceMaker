@@ -71,11 +71,11 @@ def find_managed_instances(ec2_client, instance_name, region, refer_to_docs_and_
         {"Name": "instance-state-name", "Values": ["pending", "running", "shutting-down", "stopping", "stopped"]},
     ]
     try:
-        response = ec2_client.describe_instances(Filters=filters)
+        pages = ec2_client.get_paginator("describe_instances").paginate(Filters=filters)
+        instances = [instance for page in pages for reservation in page["Reservations"] for instance in reservation["Instances"]]
     except (ClientError, EndpointConnectionError) as e:
         refer_to_docs_and_quit("AWS API error while looking up " + instance_name + " in " + region + ": " + str(e))
 
-    instances = [instance for reservation in response["Reservations"] for instance in reservation["Instances"]]
     if not instances:
         refer_to_docs_and_quit('No Ec2InstanceMaker-managed instance(s) named "' + instance_name + '" were found in ' + region + "!")
     return instances
@@ -96,10 +96,10 @@ def list_all_managed_instances(ec2_client, region, refer_to_docs_and_quit):
         {"Name": "instance-state-name", "Values": ["pending", "running", "shutting-down", "stopping", "stopped"]},
     ]
     try:
-        response = ec2_client.describe_instances(Filters=filters)
+        pages = ec2_client.get_paginator("describe_instances").paginate(Filters=filters)
+        return [instance for page in pages for reservation in page["Reservations"] for instance in reservation["Instances"]]
     except (ClientError, EndpointConnectionError) as e:
         refer_to_docs_and_quit("AWS API error while listing Ec2InstanceMaker-managed instances in " + region + ": " + str(e))
-    return [instance for reservation in response["Reservations"] for instance in reservation["Instances"]]
 
 
 # Function: check_spot_lifecycle_conflict()

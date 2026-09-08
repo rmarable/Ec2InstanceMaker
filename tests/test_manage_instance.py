@@ -52,10 +52,13 @@ class TestResolveRegion:
 
 
 class TestFindManagedInstances:
-    def _ec2_client(self, instances):
+    def _ec2_client(self, instances, pages=None):
         client = MagicMock()
-        client.describe_instances.return_value = {"Reservations": [{"Instances": instances}]}
+        client.get_paginator.return_value.paginate.return_value = pages if pages is not None else [{"Reservations": [{"Instances": instances}]}]
         return client
+
+    def _paginate_call(self, client):
+        return client.get_paginator.return_value.paginate
 
     def test_returns_matched_instances(self):
         instances = [{"InstanceId": "i-abc123", "State": {"Name": "running"}, "Tags": [{"Key": "Name", "Value": "dev01"}]}]
@@ -65,11 +68,23 @@ class TestFindManagedInstances:
         result = manage_instance.find_managed_instances(client, "dev01", "us-east-1", quit_fn)
 
         assert result == instances
-        called_filters = client.describe_instances.call_args.kwargs["Filters"]
+        client.get_paginator.assert_called_once_with("describe_instances")
+        called_filters = self._paginate_call(client).call_args.kwargs["Filters"]
         name_filter = next(f for f in called_filters if f["Name"] == "tag:Name")
         assert name_filter["Values"] == ["dev01", "dev01-*"]
         managed_by_filter = next(f for f in called_filters if f["Name"] == "tag:ManagedBy")
         assert managed_by_filter["Values"] == ["Ec2InstanceMaker"]
+        quit_fn.assert_not_called()
+
+    def test_paginates_across_multiple_pages(self):
+        page_one = [{"InstanceId": "i-abc123"}]
+        page_two = [{"InstanceId": "i-def456"}]
+        client = self._ec2_client(None, pages=[{"Reservations": [{"Instances": page_one}]}, {"Reservations": [{"Instances": page_two}]}])
+        quit_fn = _quitting_mock()
+
+        result = manage_instance.find_managed_instances(client, "dev01", "us-east-1", quit_fn)
+
+        assert result == page_one + page_two
         quit_fn.assert_not_called()
 
     def test_no_matches_quits(self):
@@ -83,7 +98,7 @@ class TestFindManagedInstances:
 
     def test_api_error_quits(self):
         client = MagicMock()
-        client.describe_instances.side_effect = _client_error("AccessDeniedException")
+        client.get_paginator.return_value.paginate.side_effect = _client_error("AccessDeniedException")
         quit_fn = _quitting_mock()
 
         with pytest.raises(SystemExit):
@@ -92,10 +107,13 @@ class TestFindManagedInstances:
 
 
 class TestListAllManagedInstances:
-    def _ec2_client(self, instances):
+    def _ec2_client(self, instances, pages=None):
         client = MagicMock()
-        client.describe_instances.return_value = {"Reservations": [{"Instances": instances}]}
+        client.get_paginator.return_value.paginate.return_value = pages if pages is not None else [{"Reservations": [{"Instances": instances}]}]
         return client
+
+    def _paginate_call(self, client):
+        return client.get_paginator.return_value.paginate
 
     def test_returns_all_managed_instances_with_no_name_filter(self):
         instances = [{"InstanceId": "i-abc123"}, {"InstanceId": "i-def456"}]
@@ -105,10 +123,22 @@ class TestListAllManagedInstances:
         result = manage_instance.list_all_managed_instances(client, "us-east-1", quit_fn)
 
         assert result == instances
-        called_filters = client.describe_instances.call_args.kwargs["Filters"]
+        client.get_paginator.assert_called_once_with("describe_instances")
+        called_filters = self._paginate_call(client).call_args.kwargs["Filters"]
         assert all(f["Name"] != "tag:Name" for f in called_filters)
         managed_by_filter = next(f for f in called_filters if f["Name"] == "tag:ManagedBy")
         assert managed_by_filter["Values"] == ["Ec2InstanceMaker"]
+        quit_fn.assert_not_called()
+
+    def test_paginates_across_multiple_pages(self):
+        page_one = [{"InstanceId": "i-abc123"}]
+        page_two = [{"InstanceId": "i-def456"}]
+        client = self._ec2_client(None, pages=[{"Reservations": [{"Instances": page_one}]}, {"Reservations": [{"Instances": page_two}]}])
+        quit_fn = _quitting_mock()
+
+        result = manage_instance.list_all_managed_instances(client, "us-east-1", quit_fn)
+
+        assert result == page_one + page_two
         quit_fn.assert_not_called()
 
     def test_empty_result_is_not_a_failure(self):
@@ -122,7 +152,7 @@ class TestListAllManagedInstances:
 
     def test_api_error_quits(self):
         client = MagicMock()
-        client.describe_instances.side_effect = _client_error("AccessDeniedException")
+        client.get_paginator.return_value.paginate.side_effect = _client_error("AccessDeniedException")
         quit_fn = _quitting_mock()
 
         with pytest.raises(SystemExit):

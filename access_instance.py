@@ -18,6 +18,7 @@ import sys
 # Import some external lists and functions.
 # Source: aux_data.py
 from aux_data import refer_to_docs_and_quit
+from instance_builder import validate_instance_name_format
 
 # Parse input from the command line.
 
@@ -34,6 +35,8 @@ menu_index = args.menu_index
 
 # Perform error checking for the command line arguments.
 # If successful, execute the custom SSH access script for this instance family.
+
+validate_instance_name_format(instance_name, refer_to_docs_and_quit)
 
 if os.path.exists("instance_data/" + instance_name + "/access_instance." + instance_name + ".py"):
     cmd = ["python3", "access_instance." + instance_name + ".py"]

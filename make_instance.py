@@ -11,6 +11,7 @@
 # Load the required Python libraries.
 
 import argparse
+import functools
 import os
 import sys
 from math import pi
@@ -67,7 +68,7 @@ from instance_builder import (
     setup_keypair,
     validate_and_resize_ebs_volumes,
     validate_az_and_region,
-    validate_instance_name_and_owner_casing,
+    validate_instance_name_and_owner_format,
     write_serial_number_file,
     write_vars_file,
 )
@@ -124,6 +125,7 @@ def parse_args(argv=None):
     parser.add_argument(
         "--iam_json_policy",
         "-J",
+        choices=["MinimalEc2InstancePolicy.json", "GenericEc2InstancePolicy.json", "ExtendedEc2InstancePolicy.json"],
         help="Use a pre-existing JSON policy document in the /templates subdirectory to set permissions for iam_role (default = GenericEc2InstancePolicy.json",
         required=False,
         default="GenericEc2InstancePolicy.json",
@@ -255,7 +257,7 @@ def main(argv=None):
     # Raise an error if instance_name or instance_owner contain uppercase
     # letters.
 
-    validate_instance_name_and_owner_casing(instance_name, instance_owner, refer_to_docs_and_quit)
+    validate_instance_name_and_owner_format(instance_name, instance_owner, refer_to_docs_and_quit)
 
     # Get the version of Terraform being used to build the instance(s), and
     # abort if Terraform is not installed.
@@ -338,7 +340,7 @@ def main(argv=None):
     # Graviton/ARM64 -- no separate --architecture flag is needed, since
     # instance_type already fully implies it.
 
-    instance_type_info = get_instance_type_info(instance_type, region)
+    instance_type_info = get_instance_type_info(ec2_client, instance_type)
     if instance_type_info is None:
         p_fail(instance_type, "instance_type", "missing_element")
     architecture = instance_type_info["architecture"]
@@ -461,7 +463,15 @@ def main(argv=None):
     # Parse aws_ami from base_os and region if custom_ami was not provided.
     # If custom_ami was supplied, verify its existence.
 
-    aws_ami = resolve_ami(custom_ami, base_os, region, architecture, aws_account_id, get_ami_info, check_custom_ami, refer_to_docs_and_quit)
+    aws_ami = resolve_ami(
+        custom_ami,
+        base_os,
+        architecture,
+        aws_account_id,
+        functools.partial(get_ami_info, ec2_client),
+        functools.partial(check_custom_ami, ec2_client),
+        refer_to_docs_and_quit,
+    )
     p_val("aws_ami", debug_mode)
 
     # Create a new EC2 key pair and secret key file for the instance(s)
@@ -599,7 +609,7 @@ def main(argv=None):
         print("az = " + az)
         print("base_os = " + base_os)
         if count > 1:
-            print("count = " + count)
+            print("count = " + str(count))
         print("base_os = " + base_os)
         print("ebs_encryption = " + str(ebs_encryption))
         print("ebs_optimized = " + str(ebs_optimized))
@@ -638,7 +648,7 @@ def main(argv=None):
         print("public_ip = " + public_ip)
         print("region = " + region)
         print("security_group_name = " + str(security_group_name))
-        print("spot_price = " + spot_price)
+        print("spot_price = " + str(spot_price))
         print("subnet_id = " + subnet_id)
         print("vars_file_path = " + vars_file_path)
         print("vpc_id = " + vpc_id)
@@ -783,20 +793,21 @@ kill_instance_script: kill_instance.{instance_name}.sh
         vars_file_path,
         instance_data_dir,
         instance_serial_number_file,
-        instance_serial_number,
-        region,
+        ec2_client,
+        iam,
         security_group_name,
         vpc_security_group_ids,
         ec2_iam_instance_role,
         ec2_iam_instance_policy,
         ec2_iam_instance_profile,
         preserve_iam_role,
+        ec2_keypair,
     )
 
     # Create the new EC2 instance(s) with Terraform.
 
     print("Invoking Terraform to build " + instance_name + "...")
-    apply_terraform(instance_data_dir, debug_mode)
+    apply_terraform(instance_data_dir, debug_mode, refer_to_docs_and_quit)
 
     # Apply the common tag set to the EC2 security group.
 
@@ -831,7 +842,9 @@ kill_instance_script: kill_instance.{instance_name}.sh
     # the Terraform state file without having to use Vault.
 
     if is_windows:
-        windows_instance_table = build_windows_password_table(instance_data_dir, ec2_keypair, fetch_windows_instance_details, decrypt_windows_admin_passwords)
+        windows_instance_table = build_windows_password_table(
+            instance_data_dir, ec2_keypair, functools.partial(fetch_windows_instance_details, refer_to_docs_and_quit=refer_to_docs_and_quit), decrypt_windows_admin_passwords
+        )
         if count == 1:
             print("Access the new instance via Windows Remote Desktop with this information:")
         else:
