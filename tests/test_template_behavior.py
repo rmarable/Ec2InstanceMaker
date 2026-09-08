@@ -295,8 +295,38 @@ class TestAccessInstanceHardening:
         # operator runs this script.
         rendered = render({"base_os": "al2023"})
         access_script = rendered["access_instance.j2"]
-        assert "subprocess.run(['aws', 'ssm', 'start-session'," in access_script
+        assert "'aws', 'ssm', 'start-session'," in access_script
         assert "subprocess.run(['ssh'," not in access_script
+
+    def test_lands_as_ec2_user_not_ssm_user(self):
+        # aws ssm start-session with no document override lands as SSM's
+        # own "ssm-user" (a real gap found live) -- AWS-StartInteractiveCommand
+        # running `sudo su - <ec2_user>` is a per-invocation, per-region,
+        # OS-aware fix that needs no account-wide Session Manager
+        # preference change (see CLAUDE-STATE.md for why that account-wide
+        # alternative was rejected). ec2_user here is the *generated
+        # script's own* Python variable (concatenated at runtime, not at
+        # Jinja render time) -- see test_runs_as_the_correct_user_per_base_os
+        # for where the actual per-OS value gets substituted.
+        rendered = render({"base_os": "al2023"})
+        access_script = rendered["access_instance.j2"]
+        assert "'--document-name', 'AWS-StartInteractiveCommand'," in access_script
+        assert "'--parameters', '{\"command\":[\"sudo su - ' + ec2_user + '\"]}'," in access_script
+
+    def test_runs_as_the_correct_user_per_base_os(self):
+        # ec2_user varies by base_os (BASE_OS_FAMILIES in aux_data.py) --
+        # the generated script's `ec2_user = '{{ ec2_user }}'` assignment is
+        # the actual Jinja substitution point (the SSM command itself just
+        # references that Python variable at runtime, so it never contains
+        # a literal username -- see test_lands_as_ec2_user_not_ssm_user).
+        # render() doesn't cascade base_os -> ec2_user itself (it's a raw
+        # template render, not a full make_instance.py simulation), so both
+        # are passed explicitly, same as TestAccessInstanceWindowsRdpTunnel
+        # does for its own overrides above.
+        for base_os, expected_user in (("al2023", "ec2-user"), ("ubuntu2404", "ubuntu"), ("rocky9", "rocky")):
+            rendered = render({"base_os": base_os, "ec2_user": expected_user})
+            access_script = rendered["access_instance.j2"]
+            assert "ec2_user = '" + expected_user + "'" in access_script
 
     def test_csv_temp_file_always_removed(self):
         for count in (1, 2):
@@ -322,18 +352,18 @@ class TestAccessInstanceHardening:
         # tunnel's) and an `except KeyboardInterrupt:` follows it shortly
         # after, regardless of exact indentation depth.
         call_index = next(i for i, line in enumerate(script_lines) if needle in line)
-        assert any(script_lines[i].strip() == "try:" for i in range(max(call_index - 3, 0), call_index))
+        assert any(script_lines[i].strip() == "try:" for i in range(max(call_index - 8, 0), call_index))
         assert any(script_lines[i].strip() == "except KeyboardInterrupt:" for i in range(call_index + 1, min(call_index + 10, len(script_lines))))
 
     def test_single_instance_ssm_session_survives_ctrl_c(self):
         rendered = render({"base_os": "al2023", "count": 1})
         access_script = rendered["access_instance.j2"]
-        self._assert_wrapped_in_try_except_keyboard_interrupt(access_script.splitlines(), "subprocess.run(['aws', 'ssm', 'start-session', '--target', ec2_InstanceId")
+        self._assert_wrapped_in_try_except_keyboard_interrupt(access_script.splitlines(), "'--target', ec2_InstanceId,")
 
     def test_family_ssm_session_survives_ctrl_c(self):
         rendered = render({"base_os": "al2023", "count": 3})
         access_script = rendered["access_instance.j2"]
-        self._assert_wrapped_in_try_except_keyboard_interrupt(access_script.splitlines(), "subprocess.run(['aws', 'ssm', 'start-session', '--target', ssh_instance_id")
+        self._assert_wrapped_in_try_except_keyboard_interrupt(access_script.splitlines(), "'--target', ssh_instance_id,")
 
 
 class TestAccessInstanceWindowsRdpTunnel:

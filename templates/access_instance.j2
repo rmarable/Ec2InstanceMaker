@@ -45,6 +45,7 @@ def menuCount(low, high):
 
 base_os = '{{ base_os }}'
 ec2_keypair = '{{ ec2_keypair }}'
+ec2_user = '{{ ec2_user }}'
 instance_name = '{{ instance_name }}'
 instance_data_dir = '{{ instance_data_dir }}'
 instance_serial_number = '{{ instance_serial_number }}'
@@ -261,7 +262,16 @@ with open(csvTempFile, newline='') as infh:
                     sys.exit(1)
             else:
                 try:
-                    subprocess.run(['aws', 'ssm', 'start-session', '--target', ssh_instance_id, '--region', region], cwd=instance_data_dir)
+                    subprocess.run(
+                        [
+                            'aws', 'ssm', 'start-session',
+                            '--target', ssh_instance_id,
+                            '--region', region,
+                            '--document-name', 'AWS-StartInteractiveCommand',
+                            '--parameters', '{"command":["sudo su - ' + ec2_user + '"]}',
+                        ],
+                        cwd=instance_data_dir,
+                    )
                 except KeyboardInterrupt:
                     pass
 
@@ -279,7 +289,16 @@ if ec2_IpAddress == '':
     sys.exit(1)
 else:
     try:
-        subprocess.run(['aws', 'ssm', 'start-session', '--target', ec2_InstanceId, '--region', region], cwd=instance_data_dir)
+        subprocess.run(
+            [
+                'aws', 'ssm', 'start-session',
+                '--target', ec2_InstanceId,
+                '--region', region,
+                '--document-name', 'AWS-StartInteractiveCommand',
+                '--parameters', '{"command":["sudo su - ' + ec2_user + '"]}',
+            ],
+            cwd=instance_data_dir,
+        )
     except KeyboardInterrupt:
         pass
 {% endif %}
