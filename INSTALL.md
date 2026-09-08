@@ -181,7 +181,7 @@ Opening an SSM Session Manager connection to: dev01
 
 Starting session with SessionId: rmarable-0123456789abcdef0
 
-sh-5.2$ exit
+[ec2-user@ip-172-31-45-18 ~]$ exit
 exit
 
 
@@ -213,7 +213,7 @@ Opening an SSM Session Manager connection to: fam01-2
 
 Starting session with SessionId: rmarable-0a1b2c3d4e5f60789
 
-sh-5.2$ exit
+[ec2-user@ip-172-31-45-20 ~]$ exit
 exit
 
 

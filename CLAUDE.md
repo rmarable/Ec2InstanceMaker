@@ -306,10 +306,19 @@ per-instance `instance_data/<name>/access_instance.<name>.py` that
 instance-access behavior lives in that template, not in the top-level
 script. Access goes through **AWS Systems Manager Session Manager**
 (`aws ssm start-session`), not direct SSH/RDP: Linux connects with a
-menu for families; Windows decrypts the Administrator password as before
-but tunnels RDP through an SSM port-forwarding session
-(`AWS-StartPortForwardingSession`, local port `13389`) instead of
-requiring 3389 reachable from anywhere. This requires the Session Manager
+menu for families, landing as the instance's own OS user (`ec2_user` --
+`ec2-user`/`rocky`/`ubuntu` depending on `base_os`) rather than SSM's
+own default `ssm-user`, via `--document-name AWS-StartInteractiveCommand
+--parameters command="sudo su - <ec2_user>"` -- a per-invocation,
+per-region, OS-aware fix (not an account-wide Session Manager "Run As"
+preference, which was tried and rejected: see CLAUDE-STATE.md for why
+automating that into the build flow would have meant silently mutating
+account-wide behavior unrelated to any specific instance). Windows
+decrypts the Administrator password as before but tunnels RDP through an
+SSM port-forwarding session (`AWS-StartPortForwardingSession`, local port
+`13389`) instead of requiring 3389 reachable from anywhere -- RunAs
+doesn't apply there, since a port forward has no shell/OS-user concept.
+This requires the Session Manager
 plugin for the AWS CLI installed locally (separate from the CLI itself) and
 the SSM Agent running on the instance — the instance's IAM role needs the
 `AllowAccessToSSM` statement's `ssmmessages:*`/`ec2messages:*`/

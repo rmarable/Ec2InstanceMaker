@@ -490,6 +490,10 @@ Ec2InstanceMaker-built instances via **AWS Systems Manager Session
 Manager** (`aws ssm start-session`) — not direct SSH/RDP. No inbound
 SSH/RDP port needs to be reachable from wherever you run this; the
 instance just needs its SSM Agent registered (see "Prerequisites" below).
+Linux sessions land as the instance's own OS user (`ec2-user`/`rocky`/
+`ubuntu`, depending on `base_os`) rather than SSM's own default
+`ssm-user`, via a `sudo su -` document override — no account-wide AWS
+configuration needed, this works automatically in every region.
 
 For a single Linux instance:
 
@@ -499,7 +503,7 @@ Opening an SSM Session Manager connection to: dev01
 
 Starting session with SessionId: rmarable-0123456789abcdef0
 
-sh-5.2$ exit
+[ec2-user@ip-172-31-45-18 ~]$ exit
 exit
 
 
@@ -555,7 +559,7 @@ Opening an SSM Session Manager connection to: fam01-1
 
 Starting session with SessionId: rmarable-0fedcba9876543210
 
-sh-5.2$ exit
+[ec2-user@ip-172-31-45-19 ~]$ exit
 exit
 
 

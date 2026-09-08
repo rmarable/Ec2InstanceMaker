@@ -72,8 +72,8 @@ Opening an SSM Session Manager connection to: dev01
 
 Starting session with SessionId: rmarable-0123456789abcdef0
 
-sh-5.2$ cd src
-sh-5.2$ git clone https://github.com/rmarable/Ec2InstanceMaker
+[ec2-user@ip-172-31-45-18 ~]$ cd src
+[ec2-user@ip-172-31-45-18 ~]$ git clone https://github.com/rmarable/Ec2InstanceMaker
 Cloning into 'Ec2InstanceMaker'...
 remote: Enumerating objects: 231, done.
 remote: Counting objects: 100% (231/231), done.
@@ -81,12 +81,12 @@ remote: Compressing objects: 100% (77/77), done.
 remote: Total 231 (delta 156), reused 228 (delta 153), pack-reused 0
 Receiving objects: 100% (231/231), 130.89 KiB | 14.54 MiB/s, done.
 Resolving deltas: 100% (156/156), done.
-sh-5.2$ cd Ec2InstanceMaker/
-sh-5.2$ ./linux-ec2-setup.sh
+[ec2-user@ip-172-31-45-18 ~]$ cd Ec2InstanceMaker/
+[ec2-user@ip-172-31-45-18 ~]$ ./linux-ec2-setup.sh
 ...
 <output snipped>
 ...
-sh-5.2$ ./make_instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=alinux2
+[ec2-user@ip-172-31-45-18 ~]$ ./make_instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=alinux2
 ...
 <output snipped>
 ...
@@ -102,12 +102,12 @@ Build an AMI from the new instance:
 ./build-ami.dev01.sh
 
 Exiting...
-sh-5.2$ ./access_instance.py -N dev01
+[ec2-user@ip-172-31-45-18 ~]$ ./access_instance.py -N dev01
 Opening an SSM Session Manager connection to: dev01
 
 Starting session with SessionId: rmarable-0fedcba9876543210
 
-sh-5.2$ exit
+[ec2-user@ip-172-31-45-18 ~]$ exit
 exit
 
 
