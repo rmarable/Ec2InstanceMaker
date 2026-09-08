@@ -24,7 +24,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y shellcheck
 
       - name: Install Python dependencies
-        run: pip install -r requirements.txt -r requirements-dev.txt
+        run: pip install -r requirements.txt -r requirements-test.txt
 
       # scripts/lint_templates.py is a `language: system` local hook, so it
       # runs with whatever python3/shellcheck/terraform are already on PATH

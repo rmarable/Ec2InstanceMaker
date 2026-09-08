@@ -75,8 +75,8 @@ $ pip install -r requirements.txt
 ```
 
 Also required, on `PATH`: `terraform` (0.12.x — pinned/checked via
-`TERRAFORM_VERSION` in `make-instance.py` and `linux-ec2-setup.sh`), `jq`,
-and configured AWS credentials. `make-instance.py` and `template_engine.py`
+`TERRAFORM_VERSION` in `make_instance.py` and `linux-ec2-setup.sh`), `jq`,
+and configured AWS credentials. `make_instance.py` and `template_engine.py`
 both resolve paths (e.g. `templates/`) relative to the current working
 directory, so commands must be run from the repo root. See `INSTALL.md`.
 

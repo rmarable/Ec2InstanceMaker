@@ -22,6 +22,7 @@ set -euo pipefail
 
 INSTANCE_ID="$1"
 REGION="{{ region }}"
+LOG_FILE="ssm_provision.{{ instance_name }}.log"
 
 # Wait for the SSM Agent to register -- unlike Terraform's built-in SSH
 # provisioner (which retries the connection itself), send-command fails
@@ -48,6 +49,26 @@ if [ "$ssm_status" != "Online" ]; then
     echo "Aborting..."
     exit 1
 fi
+
+# Function: save_command_output()
+# Purpose: append one command's full stdout/stderr to LOG_FILE -- on
+# success too, not just on failure. Terraform's old SSH-based remote-exec
+# provisioner never persisted output anywhere either, but silently
+# discarding a *successful* run's output (only ever surfacing stderr, and
+# only on failure) is a real gap this closes.
+
+save_command_output() {
+    local script_path="$1"
+    local command_id="$2"
+    {
+        echo "=== $script_path (command $command_id) ==="
+        echo "--- stdout ---"
+        aws ssm get-command-invocation --region "$REGION" --command-id "$command_id" --instance-id "$INSTANCE_ID" --query 'StandardOutputContent' --output text
+        echo "--- stderr ---"
+        aws ssm get-command-invocation --region "$REGION" --command-id "$command_id" --instance-id "$INSTANCE_ID" --query 'StandardErrorContent' --output text
+        echo ""
+    } >> "$LOG_FILE"
+}
 
 # Function: run_via_ssm()
 # Purpose: push one script's content to the instance and run it via
@@ -82,12 +103,15 @@ run_via_ssm() {
         case "$invocation_status" in
             Success)
                 echo "$script_path completed successfully."
+                save_command_output "$script_path" "$command_id"
                 return 0
                 ;;
             Failed | Cancelled | TimedOut)
                 echo ""
                 echo "*** ERROR ***"
                 echo "$script_path failed via SSM (status: $invocation_status)."
+                save_command_output "$script_path" "$command_id"
+                echo "Full output saved to: $LOG_FILE"
                 aws ssm get-command-invocation \
                     --region "$REGION" \
                     --command-id "$command_id" \
@@ -109,4 +133,5 @@ run_via_ssm "{{ postboot_script }}"
 {% endfor %}
 
 echo "All provisioning scripts completed successfully via SSM."
+echo "Full output saved to: $LOG_FILE"
 exit 0

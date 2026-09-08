@@ -61,8 +61,8 @@ Select which modules run with `--custom_user_scripts`, a comma-separated
 list of names (default: `default`):
 
 ```
-./make-instance.py ... --custom_user_scripts default
-./make-instance.py ... --custom_user_scripts monitoring,R
+./make_instance.py ... --custom_user_scripts default
+./make_instance.py ... --custom_user_scripts monitoring,R
 ```
 
 Each selected name must match at least one of the two files, or the build
@@ -76,7 +76,7 @@ Both files are rendered as real Jinja2 templates, with the same variables
 every other template in this toolkit gets: `instance_name`, `instance_owner`,
 `instance_owner_email`, `region`, `base_os`, `architecture`, `package_manager`
 (`"yum"`/`"apt"`/`None`), `is_windows`, `ec2_user`, `ec2_user_src`, and
-everything else in `instance_parameters` (see `make-instance.py`). See
+everything else in `instance_parameters` (see `make_instance.py`). See
 `custom_user_prelogin_script.j2_default`/`custom_user_postboot_script.j2_default`
 in this directory for a real example of the same
 `{% if package_manager == 'yum' %}` pattern used throughout this toolkit's

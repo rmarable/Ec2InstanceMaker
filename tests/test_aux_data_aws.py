@@ -63,7 +63,7 @@ class TestGetInstanceTypeInfo:
 
     def test_throttling_does_not_masquerade_as_invalid_instance_type(self):
         # Regression test: this used to catch *any* ClientError and return
-        # None, which make-instance.py then reported as '"m5.large" seems to
+        # None, which make_instance.py then reported as '"m5.large" seems to
         # be missing as a valid instance_type' -- a wrong diagnosis for what
         # is actually an AWS API problem (throttling, bad credentials, etc).
         with patch("boto3.client") as mock_client:

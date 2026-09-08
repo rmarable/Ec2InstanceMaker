@@ -76,7 +76,7 @@ repos:
         description: >
           templates/*.j2 aren't real .py/.sh/.tf files, so shellcheck/ruff/terraform
           never see them directly. This renders each template with synthetic
-          contexts (via template_engine.py, the same code make-instance.py uses)
+          contexts (via template_engine.py, the same code make_instance.py uses)
           and lints the rendered output instead.
         entry: python3 scripts/lint_templates.py
         language: system

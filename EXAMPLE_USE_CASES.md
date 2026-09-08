@@ -9,46 +9,46 @@ environment by pasting the appropriate command line into a shell and substitutin
 t2.micro instances with 8 GB unencrypted gp2 EBS root volumes.
 
 ### Amazon Linux 2023
-`$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=al2023`
+`$ ./make_instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=al2023`
 
 ### Amazon Linux 2:
-`$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=alinux2`
+`$ ./make_instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=alinux2`
 
 ### AlmaLinux 9
-`$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev11 --base_os=alma9`
+`$ ./make_instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev11 --base_os=alma9`
 
 ### AlmaLinux 10
-`$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev12 --base_os=alma10`
+`$ ./make_instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev12 --base_os=alma10`
 
 ### Red Hat Enterprise Linux 9
-`$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev04 --base_os=rhel9`
+`$ ./make_instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev04 --base_os=rhel9`
 
 ### Red Hat Enterprise Linux 10
-`$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev05 --base_os=rhel10`
+`$ ./make_instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev05 --base_os=rhel10`
 
 ### Rocky Linux 9
 Requires subscribing to the "Rocky Linux 9 (Official)" AWS Marketplace listing first -- see "Troubleshooting" below.
-`$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev06 --base_os=rocky9`
+`$ ./make_instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev06 --base_os=rocky9`
 
 ### Rocky Linux 10
 Requires subscribing to the "Rocky Linux 10 (Official)" AWS Marketplace listing first -- see "Troubleshooting" below.
-`$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev07 --base_os=rocky10`
+`$ ./make_instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev07 --base_os=rocky10`
 
 ### Ubuntu 24.04 LTS
-`$ ./make-instance.py -N dev02 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=ubuntu2404`
+`$ ./make_instance.py -N dev02 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=ubuntu2404`
 
 ### Ubuntu 26.04 LTS
-`$ ./make-instance.py -N dev03 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=ubuntu2604`
+`$ ./make_instance.py -N dev03 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=ubuntu2604`
 
 ### Windows Server 2022
-`$ ./make-instance.py -N dev09 -O rmarable -E rodney.marable@gmail.com -A us-east-1b -T t3a.micro --base_os=windows2022`
+`$ ./make_instance.py -N dev09 -O rmarable -E rodney.marable@gmail.com -A us-east-1b -T t3a.micro --base_os=windows2022`
 
 ### Windows Server 2025
-`$ ./make-instance.py -N dev10 -O rmarable -E rodney.marable@gmail.com -A us-east-1b -T t3a.micro --base_os=windows2025`
+`$ ./make_instance.py -N dev10 -O rmarable -E rodney.marable@gmail.com -A us-east-1b -T t3a.micro --base_os=windows2025`
 
 ### AlmaLinux 9 on AWS Graviton (ARM64)
 No separate architecture flag is needed -- picking a Graviton instance type (any `*g*`-family type, e.g. `m7g.large`, `c8g.xlarge`) automatically selects the matching ARM64 AMI.
-`$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev13 --base_os=alma9 -T m7g.large`
+`$ ./make_instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev13 --base_os=alma9 -T m7g.large`
 
 ## Single Ondemand Instance With Larger EBS Root Volume
 
@@ -63,7 +63,7 @@ Ec2InstanceMaker creates generic IAM roles, policies, and instance templates tha
 ### Amazon Linux 2
 Create the parent instance which will have permission to spawn children through the ExtendedEc2InstancePolicy JSON policy document that lives in the `templates` subdirectory:the `:
 
-`$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=alinux2 --iam_json_policy=ExtendedEc2InstancePolicy.json`
+`$ ./make_instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=alinux2 --iam_json_policy=ExtendedEc2InstancePolicy.json`
 
 Access the parent, clone the parent repository, setup the Ec2InstanceMaker environment, and launch a child instance:
 ```
@@ -93,13 +93,13 @@ Resolving deltas: 100% (156/156), done.
 ...
 <output snipped>
 ...
-[ec2-user@ip-172-31-45-18 Ec2InstanceMaker]$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=alinux2
+[ec2-user@ip-172-31-45-18 Ec2InstanceMaker]$ ./make_instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=alinux2
 ...
 <output snipped>
 ...
 ================================================================================
 
-Access the new alinux2 instance via SSH:
+Access the new alinux2 instance via SSM Session Manager:
 $ ./access_instance.py -N dev01
 
 Delete the instance:
@@ -132,10 +132,10 @@ DevOps teams may want to further control what AWS API calls that can be made by 
 If you are encountering issues with "doing" things using these instances, please work with your DevOps team to create appropriate IAM role.
 
 ### Amazon Linux 2
-`$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=alinux2 --iam_role=CustomDevOpsIamRole`
+`$ ./make_instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=alinux2 --iam_role=CustomDevOpsIamRole`
 
 ```
-$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev03 --base_os=alinux2 --ebs_root_volume_size=1000 --custom_ami=ami-00c8f252620d3a56e
+$ ./make_instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev03 --base_os=alinux2 --ebs_root_volume_size=1000 --custom_ami=ami-00c8f252620d3a56e
 
 [ec2-user@ip-172-31-44-153 ~]$ df -h
 Filesystem      Size  Used Avail Use% Mounted on
@@ -149,7 +149,7 @@ tmpfs            99M     0   99M   0% /run/user/1000
 
 ### Amazon Linux 2:
 ```
-$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev03 --base_os=alinux2 --ebs_root_volume_size=785
+$ ./make_instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev03 --base_os=alinux2 --ebs_root_volume_size=785
 
 [ec2-user@ip-172-31-45-192 ~]$ df -h
 Filesystem      Size  Used Avail Use% Mounted on
@@ -167,13 +167,13 @@ Note: support for user-owned KMS keys will be provided in a future release.
 
 ### Amazon Linux 2:
 ```
-$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --ebs_encryption=true --preserve_ami=false
+$ ./make_instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --ebs_encryption=true --preserve_ami=false
 ```
 
 * Because `preserve_ami=false`, this AMI will **NOT** be preserved after the parent instance is terminated and will remain unavailable for launching new instances.  This is counterproductive for real-world use cases and thus is not a recommended best practice.  A more practical command line invocation for building new AMIs looks like this:
 
 ```
-$ ./make-instance.py -A us-east-1a -N rmarable-foo-01 -O rmarable -E rodney.marable@gmail.com --vpc_name=vpc-prod --ebs_encryption=true --preserve_ami=true
+$ ./make_instance.py -A us-east-1a -N rmarable-foo-01 -O rmarable -E rodney.marable@gmail.com --vpc_name=vpc-prod --ebs_encryption=true --preserve_ami=true
 
 ```
 
@@ -241,7 +241,7 @@ Finished building: ami-01e6876676987e00e
 
 To relaunch rmarable-foo-01 with this new AMI:
 $ ./kill-instance.rmarable-foo-01.sh
-$ ./make-instance.py -A us-east-1a -N rmarable-foo-01 -O rmarabro1 -E rodney.marable@sana.com --vpc_name=vpc-prod --ebs_encryption=true --preserve_ami=true --custom_ami=ami-01e6876676987e00e
+$ ./make_instance.py -A us-east-1a -N rmarable-foo-01 -O rmarabro1 -E rodney.marable@sana.com --vpc_name=vpc-prod --ebs_encryption=true --preserve_ami=true --custom_ami=ami-01e6876676987e00e
 
 Exiting...
 ```
@@ -251,7 +251,7 @@ Exiting...
 Building an EC2 instance using a custom prefix to name all IAM entities will only allow the user invoking the build to create, delete, or modify roles, policies, and instance profiles that include the aforementioned prefix.  This parameter defaults to "Ec2InstanceMaker":
 
 ```
-$ ./make-instance.py -N dev01 -O rmarable -E rodney.marable@gmail.com -A us-west-2b --iam_name_prefix=MyEc2IamPrefix
+$ ./make_instance.py -N dev01 -O rmarable -E rodney.marable@gmail.com -A us-west-2b --iam_name_prefix=MyEc2IamPrefix
 
 Performing parameter validation...
 
@@ -297,6 +297,7 @@ Destroy complete! Resources: 1 destroyed.
 Deleted EC2 keypair: dev01-48051518072019_us-west-2
 Deleted SSH keypair file: /Users/rmarable/src/public/Ec2InstanceMaker/instance_data/dev01/dev01-48051518072019_us-west-2.pem
 Deleted directory: /Users/rmarable/src/public/Ec2InstanceMaker/instance_data/dev01
+Deleted CloudWatch Logs group: /ec2instancemaker/dev01
 
 No AMI image tagged with dev01-48051518072019 was found.
 
@@ -333,10 +334,12 @@ A standard AMI build script is provided with each new build.  To register a new 
 
 `$ ./build-ami.dev01.sh`
 
-To build a new "golden" AMI or custom image, paste your desired changes into
-the obvious location within `templates/custom_user_script.j2` and they will
-be execuated as part of the instance deployment process.  Then, simply run
-the build-ami script as noted above.
+To build a new "golden" AMI or custom image, add your desired changes as a
+`custom_user_scripts/custom_user_postboot_script.j2_<name>` (select it at
+build time with `--custom_user_scripts <name>`) and they will be executed
+as part of the instance deployment process.  See "Instance Customization"
+in `README.md` and `custom_user_scripts/README.md` for the full
+explanation.  Then, simply run the build-ami script as noted above.
 
 Currently, Ec2InstanceMaker only supports one active AMI and EBS snapshot per
 instance invocation.  If an existing image is detected, you **must** delete it
@@ -349,14 +352,14 @@ build may be added in a future release.
 
 For environments that require enhanced security, Ec2InstanceMaker supports launching instances with only the private IP address.
 
-$ ./make-instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N fn2187 --base_os=al2023 --public_ip=false
+$ ./make_instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N fn2187 --base_os=al2023 --public_ip=false
 
 ## Launching Instances In Another VPC
 
 To launch instances in non-default VPCs, provide the name of the desired destination VPC using the `vpc_name` flag:
 
 ```
-$ ./make-instance.py -A us-east-1a -N rmarable-foo-01 -O rmarable -E rodney.marable@gmail.com --vpc_name=vpc-dev
+$ ./make_instance.py -A us-east-1a -N rmarable-foo-01 -O rmarable -E rodney.marable@gmail.com --vpc_name=vpc-dev
 ```
 
 If a subnet does not exist for the Availability Zone that was selected, the script will return an error.  The default VPC will be used if an explicit value is nnot provided.
@@ -387,6 +390,7 @@ Destroy complete! Resources: 1 destroyed.
 Deleted EC2 keypair: dev01-17011225062019_us-east-1
 Deleted SSH keypair file: /Users/rmarable/src/public/Ec2InstanceMaker/instance_data/dev01/dev01-17011225062019_us-east-1.pem
 Deleted directory: /Users/rmarable/src/public/Ec2InstanceMaker/instance_data/dev01
+Deleted CloudWatch Logs group: /ec2instancemaker/dev01
 Published instance termination message:
 {
     "MessageId": "2110aa6a-d5b5-5b37-8d7f-ffe69d93ff5d"

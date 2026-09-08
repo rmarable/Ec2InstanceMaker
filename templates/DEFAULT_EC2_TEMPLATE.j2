@@ -80,6 +80,7 @@ resource "aws_spot_instance_request" "{{ instance_name }}" {
     EBSEncryption           = "{{ ebs_encryption | bool | lower }}"
     EC2InstanceBuilderTool  = "Terraform"
     ManagedBy               = "Ec2InstanceMaker"
+    OperatingSystem         = "{{ base_os }}"
     InstanceSerialNumber    = "{{ instance_serial_number }}"
     InstanceOwner           = "{{ instance_owner }}"
     InstanceOwnerEmail      = "{{ instance_owner_email }}"

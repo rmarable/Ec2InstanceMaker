@@ -30,6 +30,9 @@ BASE_CONTEXT = {
     "count": 1,
     "custom_user_prelogin_scripts": ["default"],
     "custom_user_postboot_scripts": ["default"],
+    "enable_cloudwatch_logs": "true",
+    "cloudwatch_log_group": "/ec2instancemaker/dev01",
+    "preserve_cloudwatch_logs": "false",
     "debug_mode": "false",
     "ebs_encryption": "false",
     "ebs_optimized": "true",
@@ -182,6 +185,32 @@ class TestSsmProvisionInstanceIdReference:
     def test_spot_passes_self_spot_instance_id(self):
         rendered = render({"request_type": "spot", "spot_price": "0.05"})["DEFAULT_EC2_TEMPLATE.j2"]
         assert "bash ssm_provision.dev01.sh ${self.spot_instance_id}" in rendered
+
+
+class TestSsmProvisionOutputPersistence:
+    """A successful SSM command's output used to be discarded entirely --
+    only a failure's StandardErrorContent was ever surfaced, and only to
+    the console, never saved anywhere. Both are fixed: every run (success
+    or failure) appends its full stdout/stderr to a local log file.
+    """
+
+    def test_success_path_saves_output_to_log_file(self):
+        rendered = render({})["ssm_provision.j2"]
+        assert 'LOG_FILE="ssm_provision.dev01.log"' in rendered
+        success_block = rendered.split("Success)")[1].split("Failed")[0]
+        assert 'save_command_output "$script_path" "$command_id"' in success_block
+
+    def test_failure_path_also_saves_output_and_says_where(self):
+        rendered = render({})["ssm_provision.j2"]
+        failure_block = rendered.split("Failed | Cancelled | TimedOut)")[1]
+        assert 'save_command_output "$script_path" "$command_id"' in failure_block
+        assert "Full output saved to: $LOG_FILE" in failure_block
+
+    def test_save_command_output_captures_both_streams(self):
+        rendered = render({})["ssm_provision.j2"]
+        save_fn = rendered.split("save_command_output() {")[1].split("\n}\n")[0]
+        assert "StandardOutputContent" in save_fn
+        assert "StandardErrorContent" in save_fn
 
 
 class TestManagedByTag:
@@ -408,7 +437,93 @@ class TestCustomUserScriptsRendering:
         # build_instance.sh's own run_via_ssm call must still be there regardless.
         assert 'run_via_ssm "build_instance.dev01.sh"' in rendered
 
-    def test_no_prelogin_scripts_selected_means_no_write_files(self):
+    def test_no_prelogin_scripts_selected_means_no_prelogin_write_files_entry(self):
+        # write_files: itself may still appear (e.g. the CloudWatch Agent
+        # config, unrelated to custom_user_scripts) -- this only asserts
+        # the prelogin-script-specific entry is gone.
         rendered = render({"custom_user_prelogin_scripts": []})["instance_userdata.j2"]
-        assert "write_files:" not in rendered
         assert "custom_user_prelogin_script" not in rendered
+
+    def test_no_prelogin_scripts_and_no_cloudwatch_means_no_write_files_at_all(self):
+        rendered = render({"custom_user_prelogin_scripts": [], "enable_cloudwatch_logs": "false"})["instance_userdata.j2"]
+        assert "write_files:" not in rendered
+
+
+class TestCloudWatchAgentInstall:
+    """The CloudWatch Agent's install method genuinely differs by OS family
+    (verified against AWS's live docs, not recalled) -- AL2023/AmazonLinux2
+    have it in their own yum repo, RHEL/Rocky/AlmaLinux need the "redhat"
+    S3-hosted rpm, Ubuntu needs the "ubuntu" S3-hosted deb. Getting the
+    wrong one silently means no logs ship on 8 of the 13 supported base_os
+    values.
+    """
+
+    def test_al2023_installs_via_yum_repo(self):
+        rendered = render({"base_os": "al2023"})["instance_userdata.j2"]
+        assert "yum install -y amazon-cloudwatch-agent" in rendered
+        assert "amazoncloudwatch-agent.s3.amazonaws.com" not in rendered
+
+    def test_alinux2_installs_via_yum_repo(self):
+        rendered = render({"base_os": "alinux2"})["instance_userdata.j2"]
+        assert "yum install -y amazon-cloudwatch-agent" in rendered
+        assert "amazoncloudwatch-agent.s3.amazonaws.com" not in rendered
+
+    def test_rhel_installs_via_redhat_rpm(self):
+        rendered = render({"base_os": "rhel9", "package_manager": "yum", "architecture": "x86_64"})["instance_userdata.j2"]
+        assert "amazoncloudwatch-agent.s3.amazonaws.com/redhat/amd64/latest/amazon-cloudwatch-agent.rpm" in rendered
+        assert "rpm -U /tmp/amazon-cloudwatch-agent.rpm" in rendered
+        assert "yum install -y amazon-cloudwatch-agent" not in rendered
+
+    def test_rhel_arm64_uses_arm64_rpm(self):
+        rendered = render({"base_os": "rocky9", "package_manager": "yum", "architecture": "arm64"})["instance_userdata.j2"]
+        assert "amazoncloudwatch-agent.s3.amazonaws.com/redhat/arm64/latest/amazon-cloudwatch-agent.rpm" in rendered
+
+    def test_ubuntu_installs_via_ubuntu_deb(self):
+        rendered = render({"base_os": "ubuntu2404", "package_manager": "apt", "architecture": "x86_64"})["instance_userdata.j2"]
+        assert "amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb" in rendered
+        assert "dpkg -i -E -G /tmp/amazon-cloudwatch-agent.deb" in rendered
+
+    def test_agent_config_applied_after_install(self):
+        rendered = render({"base_os": "al2023"})["instance_userdata.j2"]
+        install_idx = rendered.index("yum install -y amazon-cloudwatch-agent")
+        apply_idx = rendered.index("amazon-cloudwatch-agent-ctl -a fetch-config")
+        assert install_idx < apply_idx
+
+    def test_disabled_means_no_cloudwatch_content_at_all(self):
+        rendered = render({"enable_cloudwatch_logs": "false"})["instance_userdata.j2"]
+        assert "amazon-cloudwatch-agent" not in rendered
+        assert "cloudwatch-agent-ctl" not in rendered
+
+    def test_config_uses_the_right_log_group(self):
+        rendered = render({"cloudwatch_log_group": "/ec2instancemaker/dev01"})["instance_userdata.j2"]
+        assert '"log_group_name": "/ec2instancemaker/dev01"' in rendered
+
+    def test_config_uses_messages_on_yum_and_syslog_on_apt(self):
+        yum_rendered = render({"package_manager": "yum"})["instance_userdata.j2"]
+        assert "/var/log/messages" in yum_rendered
+        assert "/var/log/syslog" not in yum_rendered
+
+        apt_rendered = render({"package_manager": "apt", "base_os": "ubuntu2404", "ec2_user": "ubuntu", "ec2_user_home": "/home/ubuntu"})["instance_userdata.j2"]
+        assert "/var/log/syslog" in apt_rendered
+        assert "/var/log/messages" not in apt_rendered
+
+
+class TestCloudWatchLogsTeardown:
+    """kill-instance.<name>.sh's CloudWatch Logs group handling: delete by
+    default, preserve only when --preserve_cloudwatch_logs=true, and don't
+    even mention it if logging was never enabled for this instance.
+    """
+
+    def test_deletes_log_group_by_default(self):
+        rendered = render({})["kill_instance.j2"]
+        assert "aws --region us-east-1 logs delete-log-group --log-group-name $CLOUDWATCH_LOG_GROUP" in rendered
+        assert "Preserved CloudWatch Logs group" not in rendered
+
+    def test_preserves_log_group_when_requested(self):
+        rendered = render({"preserve_cloudwatch_logs": "true"})["kill_instance.j2"]
+        assert "Preserved CloudWatch Logs group" in rendered
+        assert "delete-log-group" not in rendered
+
+    def test_disabled_logging_means_no_teardown_logic_at_all(self):
+        rendered = render({"enable_cloudwatch_logs": "false"})["kill_instance.j2"]
+        assert "CloudWatch Logs group" not in rendered

@@ -14,13 +14,13 @@ null_list = [""]
 # Windows," "which package manager does it use," "what's the default SSH/
 # RDP user," and "does it ship awscli preinstalled." Before this table
 # existed, each of these questions was answered independently -- via
-# ad-hoc substring matching on base_os -- in make-instance.py (multiple
+# ad-hoc substring matching on base_os -- in make_instance.py (multiple
 # `"windows" in base_os` checks, a 6-branch ec2_user if-chain) AND in
 # several Jinja templates (`{% if 'windows' in base_os %}`,
 # `{% if 'ubuntu' not in base_os %}`, an OR-chain of family substrings in
 # custom_user_script.j2_R), with no shared source of truth keeping them in
 # sync. get_base_os_family() below is the one place a new base_os value
-# needs to be taught these facts; make-instance.py computes them once and
+# needs to be taught these facts; make_instance.py computes them once and
 # threads the results into instance_parameters so templates read them
 # too, instead of re-deriving the same substring logic a third time.
 BASE_OS_FAMILIES = {
@@ -161,7 +161,7 @@ def check_custom_ami(custom_ami, aws_account_id, region, architecture):
 
 # Function: ctrlC_Abort()
 # Purpose: Print an abort header, capture CTRL-C when pressed, and remove all
-# of entities created by make-instance.py prior to capturing KeyboardInterrupt:
+# of entities created by make_instance.py prior to capturing KeyboardInterrupt:
 # orphaned state directories and files; EC2 security groups and keypairs; IAM
 # roles, policies, and instance profiles
 
@@ -258,6 +258,21 @@ def ctrlC_Abort(
                 print("No EC2 keypair exists for this instance.")
         print("Aborting...")
         sys.exit(1)
+
+
+# Function: log_retention_days_check()
+# Purpose: verify --log_retention_days is a value CloudWatch Logs'
+# PutRetentionPolicy actually accepts -- it rejects anything outside this
+# fixed set with an API error, so validate client-side for a clearer
+# operator-facing message.
+
+CLOUDWATCH_LOGS_RETENTION_DAYS = (1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653)
+
+
+def log_retention_days_check(log_retention_days, debug_mode):
+    if log_retention_days not in CLOUDWATCH_LOGS_RETENTION_DAYS:
+        p_fail(str(log_retention_days), "log_retention_days", [str(d) for d in CLOUDWATCH_LOGS_RETENTION_DAYS])
+    p_val("log_retention_days", debug_mode)
 
 
 # Function: ebs_encryption_check()

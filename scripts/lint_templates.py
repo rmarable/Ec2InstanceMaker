@@ -6,7 +6,7 @@ output.
 templates/*.j2 aren't real .py/.sh/.tf files, so shellcheck/ruff/terraform
 never see them directly, and pointing shellcheck at a raw .j2 file would
 just choke on the {% %}/{{ }} syntax. This uses template_engine.py -- the
-same code make-instance.py calls at build time -- to render each template
+same code make_instance.py calls at build time -- to render each template
 with a set of contexts that exercise the major conditional branches
 (base_os, count, request_type), then runs the real linters against
 the rendered .py/.sh/.tf files.
@@ -16,6 +16,7 @@ Exits non-zero if any rendered file fails its linter, or if `shellcheck` or
 `terraform` aren't on PATH.
 """
 
+import json
 import os
 import shutil
 import subprocess
@@ -41,6 +42,9 @@ CONTEXTS = {
         "count": 1,
         "custom_user_prelogin_scripts": ["default"],
         "custom_user_postboot_scripts": ["default"],
+        "enable_cloudwatch_logs": "true",
+        "preserve_cloudwatch_logs": "false",
+        "cloudwatch_log_group": "/ec2instancemaker/dev01",
         "debug_mode": "false",
         "ebs_encryption": "false",
         "ebs_optimized": "true",
@@ -91,6 +95,9 @@ CONTEXTS = {
         "count": 1,
         "custom_user_prelogin_scripts": ["default"],
         "custom_user_postboot_scripts": ["default"],
+        "enable_cloudwatch_logs": "true",
+        "preserve_cloudwatch_logs": "false",
+        "cloudwatch_log_group": "/ec2instancemaker/dev02",
         "debug_mode": "false",
         "ebs_encryption": "false",
         "ebs_optimized": "true",
@@ -141,6 +148,9 @@ CONTEXTS = {
         "count": 1,
         "custom_user_prelogin_scripts": ["default"],
         "custom_user_postboot_scripts": ["default"],
+        "enable_cloudwatch_logs": "true",
+        "preserve_cloudwatch_logs": "false",
+        "cloudwatch_log_group": "/ec2instancemaker/dev11",
         "debug_mode": "false",
         "ebs_encryption": "false",
         "ebs_optimized": "true",
@@ -191,6 +201,9 @@ CONTEXTS = {
         "count": 1,
         "custom_user_prelogin_scripts": ["default"],
         "custom_user_postboot_scripts": ["default"],
+        "enable_cloudwatch_logs": "true",
+        "preserve_cloudwatch_logs": "false",
+        "cloudwatch_log_group": "/ec2instancemaker/dev03",
         "debug_mode": "false",
         "ebs_encryption": "false",
         "ebs_optimized": "true",
@@ -241,6 +254,9 @@ CONTEXTS = {
         "count": 2,
         "custom_user_prelogin_scripts": ["default"],
         "custom_user_postboot_scripts": ["default"],
+        "enable_cloudwatch_logs": "true",
+        "preserve_cloudwatch_logs": "false",
+        "cloudwatch_log_group": "/ec2instancemaker/fam03",
         "debug_mode": "false",
         "ebs_encryption": "false",
         "ebs_optimized": "true",
@@ -291,6 +307,9 @@ CONTEXTS = {
         "count": 3,
         "custom_user_prelogin_scripts": ["default"],
         "custom_user_postboot_scripts": ["default"],
+        "enable_cloudwatch_logs": "true",
+        "preserve_cloudwatch_logs": "false",
+        "cloudwatch_log_group": "/ec2instancemaker/fam02",
         "debug_mode": "false",
         "ebs_encryption": "false",
         "ebs_optimized": "true",
@@ -341,6 +360,9 @@ CONTEXTS = {
         "count": 3,
         "custom_user_prelogin_scripts": ["default"],
         "custom_user_postboot_scripts": ["default"],
+        "enable_cloudwatch_logs": "true",
+        "preserve_cloudwatch_logs": "false",
+        "cloudwatch_log_group": "/ec2instancemaker/fam01",
         "debug_mode": "true",
         "ebs_encryption": "true",
         "ebs_optimized": "true",
@@ -391,6 +413,9 @@ CONTEXTS = {
         "count": 1,
         "custom_user_prelogin_scripts": ["default"],
         "custom_user_postboot_scripts": ["default"],
+        "enable_cloudwatch_logs": "true",
+        "preserve_cloudwatch_logs": "false",
+        "cloudwatch_log_group": "/ec2instancemaker/dev08",
         "debug_mode": "false",
         "ebs_encryption": "false",
         "ebs_optimized": "true",
@@ -450,6 +475,9 @@ CONTEXTS = {
         "count": 1,
         "custom_user_prelogin_scripts": ["default"],
         "custom_user_postboot_scripts": ["default"],
+        "enable_cloudwatch_logs": "true",
+        "preserve_cloudwatch_logs": "false",
+        "cloudwatch_log_group": "/ec2instancemaker/dev12",
         "debug_mode": "false",
         "ebs_encryption": "true",
         "ebs_optimized": "true",
@@ -500,6 +528,9 @@ CONTEXTS = {
         "count": 1,
         "custom_user_prelogin_scripts": ["default"],
         "custom_user_postboot_scripts": ["default"],
+        "enable_cloudwatch_logs": "true",
+        "preserve_cloudwatch_logs": "false",
+        "cloudwatch_log_group": "/ec2instancemaker/dev13",
         "debug_mode": "false",
         "ebs_encryption": "false",
         "ebs_optimized": "true",
@@ -550,6 +581,9 @@ CONTEXTS = {
         "count": 2,
         "custom_user_prelogin_scripts": ["default"],
         "custom_user_postboot_scripts": ["default"],
+        "enable_cloudwatch_logs": "true",
+        "preserve_cloudwatch_logs": "false",
+        "cloudwatch_log_group": "/ec2instancemaker/fam04",
         "debug_mode": "false",
         "ebs_encryption": "false",
         "ebs_optimized": "true",
@@ -600,6 +634,9 @@ CONTEXTS = {
         "count": 2,
         "custom_user_prelogin_scripts": ["default"],
         "custom_user_postboot_scripts": ["default"],
+        "enable_cloudwatch_logs": "true",
+        "preserve_cloudwatch_logs": "false",
+        "cloudwatch_log_group": "/ec2instancemaker/fam05",
         "debug_mode": "false",
         "ebs_encryption": "false",
         "ebs_optimized": "true",
@@ -650,6 +687,9 @@ CONTEXTS = {
         "count": 1,
         "custom_user_prelogin_scripts": ["default"],
         "custom_user_postboot_scripts": ["default"],
+        "enable_cloudwatch_logs": "true",
+        "preserve_cloudwatch_logs": "false",
+        "cloudwatch_log_group": "/ec2instancemaker/dev14",
         "debug_mode": "false",
         "ebs_encryption": "false",
         "ebs_optimized": "true",
@@ -700,6 +740,9 @@ CONTEXTS = {
         "count": 1,
         "custom_user_prelogin_scripts": ["default"],
         "custom_user_postboot_scripts": ["default"],
+        "enable_cloudwatch_logs": "true",
+        "preserve_cloudwatch_logs": "false",
+        "cloudwatch_log_group": "/ec2instancemaker/dev15",
         "debug_mode": "false",
         "ebs_encryption": "false",
         "ebs_optimized": "true",
@@ -861,15 +904,27 @@ def main():
             # inline in instance_userdata.j2's cloud-config write_files --
             # extract it and shellcheck it directly, same as any other
             # generated .sh, rather than letting it go unchecked just
-            # because it's not a standalone file on disk.
+            # because it's not a standalone file on disk. Not every
+            # write_files entry is a shell script -- the CloudWatch Agent
+            # config is JSON -- so dispatch by extension instead of
+            # assuming everything in write_files is bash.
             userdata_path = os.path.join(instance_data_dir, context["instance_userdata_script"])
             with open(userdata_path) as fh:
                 userdata_doc = yaml.safe_load(fh.read().split("\n", 1)[1])
             for entry in (userdata_doc or {}).get("write_files", []):
-                prelogin_path = os.path.join(instance_data_dir, os.path.basename(entry["path"]))
-                with open(prelogin_path, "w") as fh:
+                extracted_path = os.path.join(instance_data_dir, os.path.basename(entry["path"]))
+                with open(extracted_path, "w") as fh:
                     fh.write(entry["content"])
-                ok, output = lint_shell(prelogin_path)
+                if extracted_path.endswith(".sh"):
+                    ok, output = lint_shell(extracted_path)
+                elif extracted_path.endswith(".json"):
+                    try:
+                        json.loads(entry["content"])
+                        ok, output = True, ""
+                    except json.JSONDecodeError as e:
+                        ok, output = False, str(e)
+                else:
+                    continue
                 if not ok:
                     all_failures.append((scenario_name, entry["path"], output))
 

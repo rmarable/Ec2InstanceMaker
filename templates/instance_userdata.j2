@@ -20,11 +20,55 @@ bootcmd:
 {% set _ = runcmd_items.append('dnf install -y https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/linux_' + ('arm64' if architecture == 'arm64' else 'amd64') + '/amazon-ssm-agent.rpm') %}
 {% set _ = runcmd_items.append('systemctl enable --now amazon-ssm-agent') %}
 {% endif %}
+{% if enable_cloudwatch_logs == 'true' %}
+{% if base_os in ('al2023', 'alinux2') %}
+{% set _ = runcmd_items.append('yum install -y amazon-cloudwatch-agent') %}
+{% elif package_manager == 'yum' %}
+{% set _ = runcmd_items.append('curl "https://amazoncloudwatch-agent.s3.amazonaws.com/redhat/' + ('arm64' if architecture == 'arm64' else 'amd64') + '/latest/amazon-cloudwatch-agent.rpm" -o "/tmp/amazon-cloudwatch-agent.rpm"') %}
+{% set _ = runcmd_items.append('rpm -U /tmp/amazon-cloudwatch-agent.rpm') %}
+{% set _ = runcmd_items.append('rm -f /tmp/amazon-cloudwatch-agent.rpm') %}
+{% elif package_manager == 'apt' %}
+{% set _ = runcmd_items.append('curl "https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/' + ('arm64' if architecture == 'arm64' else 'amd64') + '/latest/amazon-cloudwatch-agent.deb" -o "/tmp/amazon-cloudwatch-agent.deb"') %}
+{% set _ = runcmd_items.append('dpkg -i -E -G /tmp/amazon-cloudwatch-agent.deb') %}
+{% set _ = runcmd_items.append('rm -f /tmp/amazon-cloudwatch-agent.deb') %}
+{% endif %}
+{% set _ = runcmd_items.append('/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/ec2instancemaker/amazon-cloudwatch-agent.json') %}
+{% endif %}
 {% for script in prelogin_custom_scripts %}
 {% set _ = runcmd_items.append('/opt/ec2instancemaker/custom_user_prelogin_script.' + script.name + '.sh') %}
 {% endfor %}
-{% if prelogin_custom_scripts %}
+{% if prelogin_custom_scripts or enable_cloudwatch_logs == 'true' %}
 write_files:
+{% if enable_cloudwatch_logs == 'true' %}
+  - path: /opt/ec2instancemaker/amazon-cloudwatch-agent.json
+    permissions: '0644'
+    content: |
+      {
+        "logs": {
+          "logs_collected": {
+            "files": {
+              "collect_list": [
+                {
+                  "file_path": "/var/log/cloud-init.log",
+                  "log_group_name": "{{ cloudwatch_log_group }}",
+                  "log_stream_name": "{instance_id}/cloud-init.log"
+                },
+                {
+                  "file_path": "/var/log/cloud-init-output.log",
+                  "log_group_name": "{{ cloudwatch_log_group }}",
+                  "log_stream_name": "{instance_id}/cloud-init-output.log"
+                },
+                {
+                  "file_path": "{% if package_manager == 'apt' %}/var/log/syslog{% else %}/var/log/messages{% endif %}",
+                  "log_group_name": "{{ cloudwatch_log_group }}",
+                  "log_stream_name": "{instance_id}/{% if package_manager == 'apt' %}syslog{% else %}messages{% endif %}"
+                }
+              ]
+            }
+          }
+        }
+      }
+{% endif %}
 {% for script in prelogin_custom_scripts %}
   - path: /opt/ec2instancemaker/custom_user_prelogin_script.{{ script.name }}.sh
     permissions: '0755'

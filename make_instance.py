@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 #
 ################################################################################
-# Name:         make-instance.py
+# Name:         make_instance.py
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   June 3, 2019
 # Last Changed: September 28, 2019
@@ -34,6 +34,7 @@ from aux_data import (
     get_base_os_family,
     get_instance_type_info,
     illegal_az_msg,
+    log_retention_days_check,
     modify_iam_policy_document,
     p_fail,
     p_val,
@@ -55,6 +56,7 @@ from instance_builder import (
     resolve_security_group,
     resolve_ssh_allowed_ips,
     resolve_vpc_and_subnet,
+    setup_cloudwatch_logging,
     setup_iam,
     setup_keypair,
     validate_and_resize_ebs_volumes,
@@ -65,7 +67,7 @@ from template_engine import render_instance_templates
 
 # Parse input from the command line.
 
-parser = argparse.ArgumentParser(description="make-instance.py: Command-line interface to build EC2 instances")
+parser = argparse.ArgumentParser(description="make_instance.py: Command-line interface to build EC2 instances")
 
 # Configure parser arguments for the required variables.
 
@@ -122,27 +124,6 @@ parser.add_argument("--iam_name_prefix", help="Provide a prefix for the IAM enti
 parser.add_argument("--iam_role", help="Apply a pre-existing IAM role to the instance(s)", required=False, default="UNDEFINED")
 parser.add_argument(
     "--instance_owner_department",
-    choices=[
-        "analytics",
-        "clinical",
-        "commercial",
-        "compbio",
-        "compchem",
-        "datasci",
-        "design",
-        "development",
-        "hpc",
-        "imaging",
-        "manufacturing",
-        "medical",
-        "modeling",
-        "operations",
-        "proteomics",
-        "robotics",
-        "qa",
-        "research",
-        "scicomp",
-    ],
     help="Department of the instance_owner (default = compbio)",
     required=False,
     default="compbio",
@@ -157,9 +138,30 @@ parser.add_argument(
 )
 parser.add_argument("--prod_level", choices=["dev", "test", "stage", "prod"], help="Operating stage of the jumphost  (default = dev)", required=False, default="dev")
 parser.add_argument(
+    "--enable_cloudwatch_logs",
+    choices=["true", "false"],
+    help="Install and configure the CloudWatch Agent on the instance(s) to ship logs to CloudWatch Logs (default = true)",
+    required=False,
+    default="true",
+)
+parser.add_argument(
+    "--log_retention_days",
+    type=int,
+    help="Number of days to retain CloudWatch Logs for the instance(s) (default = 30)",
+    required=False,
+    default=30,
+)
+parser.add_argument(
     "--placement_group_strategy", "--pg_strategy", choices=["cluster", "spread"], help="Designate an EC2 placement group strategy (default = cluster)", required=False, default="cluster"
 )
 parser.add_argument("--preserve_ami", choices=["true", "false"], help="Preserve any AMI image built from the instance(s) post-termination (default = true)", required=False, default="true")
+parser.add_argument(
+    "--preserve_cloudwatch_logs",
+    choices=["true", "false"],
+    help="Preserve the CloudWatch Logs group when the instance(s) are terminated (default = false)",
+    required=False,
+    default="false",
+)
 parser.add_argument("--project_id", "-P", help="Project name or ID number (default = UNDEFINED)", required=False, default="UNDEFINED")
 parser.add_argument("--public_ip", "-p", help="Attach a public IP address to the instance(s) (default = true)", required=False, default="true")
 parser.add_argument("--security_group", "-S", help="Primary security group name for the EC2 instance (default = ec2instancemaker_sg)", required=False, default="ec2instancemaker_sg")
@@ -206,8 +208,11 @@ instance_owner_department = args.instance_owner_department
 instance_owner_email = args.instance_owner_email
 request_type = args.request_type
 instance_type = args.instance_type
+enable_cloudwatch_logs = args.enable_cloudwatch_logs
+log_retention_days = args.log_retention_days
 placement_group_strategy = args.placement_group_strategy
 prod_level = args.prod_level
+preserve_cloudwatch_logs = args.preserve_cloudwatch_logs
 project_id = args.project_id
 public_ip = args.public_ip
 region = az[:-1]
@@ -226,6 +231,7 @@ p_val("ebs_root_volume_type", debug_mode)
 p_val("ebs_device_volume_type", debug_mode)
 p_val("request_type", debug_mode)
 p_val("prod_level", prod_level)
+log_retention_days_check(log_retention_days, debug_mode)
 
 # Raise an error if instance_name or instance_owner contain uppercase letters.
 
@@ -378,6 +384,18 @@ iam = boto3.client("iam")
 # Create a boto3 client to interact with SNS.
 
 sns_client = boto3.client("sns", region_name=region)
+
+# Create (or reuse) the CloudWatch Logs group the CloudWatch Agent on the
+# instance(s) will ship logs to, and set its retention policy -- done here,
+# before Terraform ever runs, so the group has the right retention policy
+# before the agent starts writing to it. Skipped entirely if
+# --enable_cloudwatch_logs=false -- no point creating a log group nothing
+# will ever ship to.
+
+cloudwatch_log_group = "/ec2instancemaker/" + instance_name
+if enable_cloudwatch_logs == "true":
+    logs_client = boto3.client("logs", region_name=region)
+    setup_cloudwatch_logging(logs_client, cloudwatch_log_group, log_retention_days, refer_to_docs_and_quit)
 
 # Provide a mechanism to ensure ebs_optimized is appropriately set for the EC2
 # instance(s) being deployed.
@@ -594,8 +612,12 @@ instance_parameters = {
     "request_type": request_type,
     "instance_serial_number": instance_serial_number,
     "instance_serial_number_file": instance_serial_number_file,
+    "cloudwatch_log_group": cloudwatch_log_group,
+    "enable_cloudwatch_logs": enable_cloudwatch_logs,
+    "log_retention_days": log_retention_days,
     "placement_group_strategy": placement_group_strategy,
     "preserve_ami": preserve_ami,
+    "preserve_cloudwatch_logs": preserve_cloudwatch_logs,
     "prod_level": prod_level,
     "project_id": project_id,
     "preserve_iam_role": preserve_iam_role,
@@ -713,6 +735,10 @@ preserve_iam_role: {preserve_iam_role}
 
 aws_ami: {aws_ami}
 preserve_ami: {preserve_ami}
+cloudwatch_log_group: {cloudwatch_log_group}
+enable_cloudwatch_logs: {enable_cloudwatch_logs}
+log_retention_days: {log_retention_days}
+preserve_cloudwatch_logs: {preserve_cloudwatch_logs}
 base_os: {base_os}
 count: {count}
 instance_type: {instance_type}
@@ -854,14 +880,14 @@ print("")
 print("".center(80, "="))
 print("")
 
-# Print the instance SSH access command to the console if base_os is Linux.
+# Print the instance access command to the console if base_os is Linux.
 
 if not is_windows:
     if count == 1:
-        print("Access the new " + base_os + " instance via SSH:")
+        print("Access the new " + base_os + " instance via SSM Session Manager:")
         print("$ ./access_instance.py -N " + instance_name)
     else:
-        print("Access the " + str(count) + " members of the instance" + base_os + " instance family via SSH:")
+        print("Access the " + str(count) + " members of the " + base_os + " instance family via SSM Session Manager:")
         print("$ ./access_instance.py -N " + instance_name)
 
 # If base_os is Windows:

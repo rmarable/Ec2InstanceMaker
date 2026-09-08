@@ -1,5 +1,5 @@
 """Unit tests for instance_builder.py -- the first increment of extracting
-make-instance.py's logic into independently-testable functions (see
+make_instance.py's logic into independently-testable functions (see
 CLAUDE-STATE.md for the phased plan). Each function here is pure or takes
 its AWS client as an explicit argument, so none of these need to run
 against real AWS.
@@ -451,7 +451,7 @@ class TestSpotPrice:
         assert kwargs["ProductDescriptions"] == ["Linux/UNIX"]
 
     def test_compute_buffered_spot_price_default_buffer(self):
-        # Default spot_buffer is 1/pi in make-instance.py.
+        # Default spot_buffer is 1/pi in make_instance.py.
         from math import pi
 
         result = instance_builder.compute_buffered_spot_price(0.05, 1 / pi)
@@ -845,3 +845,45 @@ class TestResolveCustomUserScripts:
 
         assert prelogin == ["first"]
         assert postboot == ["first", "second"]
+
+
+class TestSetupCloudwatchLogging:
+    def test_creates_group_and_sets_retention(self):
+        logs_client = MagicMock()
+        quit_fn = _quitting_mock()
+
+        instance_builder.setup_cloudwatch_logging(logs_client, "/ec2instancemaker/dev01", 30, quit_fn)
+
+        logs_client.create_log_group.assert_called_once_with(logGroupName="/ec2instancemaker/dev01", tags={"ManagedBy": "Ec2InstanceMaker"})
+        logs_client.put_retention_policy.assert_called_once_with(logGroupName="/ec2instancemaker/dev01", retentionInDays=30)
+        quit_fn.assert_not_called()
+
+    def test_reuses_existing_group_without_failing(self):
+        # A rerun against the same instance_name (or a family member that
+        # already created the group) must not treat "already exists" as
+        # an error -- the retention policy still gets (re-)applied.
+        logs_client = MagicMock()
+        logs_client.create_log_group.side_effect = _client_error("ResourceAlreadyExistsException")
+        quit_fn = _quitting_mock()
+
+        instance_builder.setup_cloudwatch_logging(logs_client, "/ec2instancemaker/dev01", 30, quit_fn)
+
+        logs_client.put_retention_policy.assert_called_once_with(logGroupName="/ec2instancemaker/dev01", retentionInDays=30)
+        quit_fn.assert_not_called()
+
+    def test_unexpected_create_error_quits(self):
+        logs_client = MagicMock()
+        logs_client.create_log_group.side_effect = _client_error("AccessDeniedException")
+        quit_fn = _quitting_mock()
+
+        with pytest.raises(SystemExit):
+            instance_builder.setup_cloudwatch_logging(logs_client, "/ec2instancemaker/dev01", 30, quit_fn)
+        logs_client.put_retention_policy.assert_not_called()
+
+    def test_retention_policy_error_quits(self):
+        logs_client = MagicMock()
+        logs_client.put_retention_policy.side_effect = _client_error("AccessDeniedException")
+        quit_fn = _quitting_mock()
+
+        with pytest.raises(SystemExit):
+            instance_builder.setup_cloudwatch_logging(logs_client, "/ec2instancemaker/dev01", 30, quit_fn)

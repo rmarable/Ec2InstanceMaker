@@ -273,6 +273,18 @@
             ],
             "Effect": "Allow",
             "Resource": "*"
+        },
+        {
+            "Sid": "AllowAccessToCloudWatchLogs",
+            "Action": [
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+                "logs:DescribeLogStreams",
+                "logs:DescribeLogGroups"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
         }
     ]
 }

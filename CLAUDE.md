@@ -13,7 +13,7 @@ each run generates a per-instance Terraform/shell toolchain on disk under
 There is a `tests/` directory (pytest — see "Linting and CI" below) covering
 `aux_data.py`'s pure logic, mocked-AWS behavior of its boto3-calling
 functions, and behavioral assertions on rendered template output. It does
-not cover `make-instance.py`'s own orchestration flow (untestable without a
+not cover `make_instance.py`'s own orchestration flow (untestable without a
 much larger refactor — see CLAUDE-STATE.md) or a real end-to-end build.
 "Testing" a behavioral change beyond what `tests/` covers means running the
 relevant script against a real (or sandbox) AWS account and inspecting the
@@ -28,9 +28,9 @@ $ pip install -r requirements.txt
 ```
 
 Also requires, on PATH: `terraform` (0.12.x — pinned/checked via
-`TERRAFORM_VERSION` in `make-instance.py` and `linux-ec2-setup.sh`), `jq`,
+`TERRAFORM_VERSION` in `make_instance.py` and `linux-ec2-setup.sh`), `jq`,
 and configured AWS credentials (`aws configure` or env vars).
-`make-instance.py` and `template_engine.py` both resolve paths (e.g.
+`make_instance.py` and `template_engine.py` both resolve paths (e.g.
 `templates/`) relative to the current working directory, so commands must be
 run from the repo root.
 
@@ -38,7 +38,7 @@ run from the repo root.
 
 ```bash
 # Minimal instance build (needs a real AZ/VPC and AWS credentials):
-./make-instance.py -A us-east-2a -N testinstance01 -O <owner> -E <owner_email>
+./make_instance.py -A us-east-2a -N testinstance01 -O <owner> -E <owner_email>
 
 # SSH/RDP access to a previously built instance or family:
 ./access_instance.py -N testinstance01
@@ -51,12 +51,12 @@ Use `--debug_mode=true` to extend the CTRL-C abort window (30s vs 5s) while
 inspecting generated templates before Terraform applies them. Full CLI
 reference and worked examples live in `README.md` and
 `EXAMPLE_USE_CASES.md` — check those before guessing at flag names, defaults,
-or validation rules instead of re-deriving them from `make-instance.py`.
+or validation rules instead of re-deriving them from `make_instance.py`.
 
 ## Linting and CI
 
 ```bash
-$ pip install -r requirements-dev.txt
+$ pip install -r requirements-test.txt
 $ pre-commit install          # one-time, wires the git commit hook
 $ pre-commit run --all-files  # run everything on demand
 ```
@@ -95,7 +95,7 @@ $ pre-commit run --all-files  # run everything on demand
   repo: `templates/*.j2` aren't real `.py`/`.sh`/`.tf` files, so none of the
   above ever see them directly, and shellcheck would just choke on raw
   `{% %}`/`{{ }}` syntax. This script renders every template (via
-  `template_engine.py`, the same code `make-instance.py` calls) with a
+  `template_engine.py`, the same code `make_instance.py` calls) with a
   set of synthetic contexts chosen to hit the major conditional branches
   (currently 14 — every `base_os` value covered at least once, plus
   ondemand/spot, single/family, EBS encryption, placement groups, a
@@ -110,7 +110,7 @@ $ pre-commit run --all-files  # run everything on demand
   on `.py` (the pre-commit bandit hook only ever scans the 4 hand-written
   top-level `.py` files, never generated code -- this closes that blind
   spot, since `shell=True` + interpolated data is most likely to show up
-  in what a template renders, not in `make-instance.py`/`aux_data.py`
+  in what a template renders, not in `make_instance.py`/`aux_data.py`
   themselves), and `terraform init -backend=false` + `validate` on the
   `.tf` output.
   `instance_userdata.j2` is skipped for shell linting — it renders
@@ -128,7 +128,7 @@ $ pre-commit run --all-files  # run everything on demand
 
 ## Architecture
 
-**`make-instance.py`** is the orchestrator: a linear, top-to-bottom
+**`make_instance.py`** is the orchestrator: a linear, top-to-bottom
 `__main__`-style script (no classes) that parses CLI args and then calls,
 in sequence, the extracted functions in `instance_builder.py` (AZ/region
 validation, EBS/spot-price validation, VPC/subnet/security-group
@@ -169,10 +169,10 @@ dict. The broad shape:
 **`aux_data.py`** holds shared validation logic, lookup tables (unsupported
 instance/OS combos per `base_os`), and small utilities (`p_val`/`p_fail` for
 parameter validation messaging, `ctrlC_Abort` for the safety-window teardown,
-`refer_to_docs_and_quit` for user-facing fatal errors). `make-instance.py`
+`refer_to_docs_and_quit` for user-facing fatal errors). `make_instance.py`
 imports individual functions from here rather than the module as a whole —
 when adding a new helper, add the corresponding `from aux_data import ...`
-line in `make-instance.py`.
+line in `make_instance.py`.
 
 Instance-type validity, CPU architecture (x86_64 vs. Graviton/ARM64), EBS
 optimization/encryption support, and placement group strategies are **not**
@@ -202,11 +202,11 @@ truth for `is_windows`, `package_manager` (`"yum"`/`"apt"`/`None`),
 `ec2_user`, and `awscli_preinstalled`. Before this existed, each of these
 facts was re-derived independently via `base_os` substring matching in
 three unsynchronized places: a 6-branch `ec2_user` if-chain and several
-`"windows" in base_os` checks in `make-instance.py`, *and* the same
+`"windows" in base_os` checks in `make_instance.py`, *and* the same
 `'windows' in base_os` / yum-vs-apt / family-OR-chain conditionals
 duplicated again in Jinja across `DEFAULT_EC2_TEMPLATE.j2`,
 `access_instance.j2`, and `build_instance.j2`.
-`make-instance.py` now calls `get_base_os_family()` once (right after
+`make_instance.py` now calls `get_base_os_family()` once (right after
 `base_os_instance_check()`), computes `is_windows`/`package_manager`/
 `awscli_preinstalled`/`ec2_user` from it, and threads all four into
 `instance_parameters` — so templates read `{% if is_windows %}` /
@@ -216,10 +216,10 @@ to `BASE_OS_FAMILIES` (and one to `_AMI_CATALOG` above) rather than hunting
 down every place that needs to know about it.
 
 **`instance_builder.py`** holds the build-flow logic extracted out of
-`make-instance.py`'s original ~1200-line, function-free linear script (see
+`make_instance.py`'s original ~1200-line, function-free linear script (see
 CLAUDE-STATE.md for the extraction history). Every function here takes its
 dependencies as explicit arguments — no hidden globals, no reliance on
-`make-instance.py`'s execution order — and is covered by
+`make_instance.py`'s execution order — and is covered by
 `tests/test_instance_builder.py` (180+ tests). Covers: AZ/region
 validation, instance serial number / SNS timestamp generation, EBS
 size/IOPS validation, spot-price lookup, VPC/subnet/security-group
@@ -230,7 +230,7 @@ profile-creation logic now shared between them), the SNS notification
 body, Terraform apply, security-group tagging, Windows instance-details/
 Administrator-password retrieval, and vars-file writing.
 
-**Deliberately left inline in `make-instance.py`, not extracted:** the
+**Deliberately left inline in `make_instance.py`, not extracted:** the
 `instance_parameters` dict literal itself (a direct mapping of already-
 extracted-and-tested local variables — wrapping it in a function would add
 indirection without a testability gain), the thin
@@ -310,20 +310,50 @@ AMIs don't preinstall the SSM Agent (unlike AL2023/Ubuntu/AlmaLinux/Windows,
 per AWS's own docs) — `instance_userdata.j2` installs and enables it via
 cloud-init for those four `base_os` values.
 
+**CloudWatch Agent logging** is on by default (`--enable_cloudwatch_logs`,
+default `true`) — installed via the same prelogin cloud-init mechanism as
+the AWS CLI/SSM Agent above, so it's running from the earliest boot, not
+just after `build_instance.sh`. Install method genuinely differs by OS
+(verified against AWS's live docs, not assumed): `yum install
+amazon-cloudwatch-agent` on AL2023/AmazonLinux2 (it's in their own repo);
+the "redhat" S3-hosted rpm for RHEL/Rocky/AlmaLinux; the "ubuntu" S3-hosted
+deb for Ubuntu. Windows is out of scope, same as `custom_user_scripts`.
+Ships `/var/log/cloud-init.log`, `/var/log/cloud-init-output.log`, and
+`/var/log/messages` (yum-based) or `/var/log/syslog` (apt-based) to
+`/ec2instancemaker/<instance_name>` in CloudWatch Logs, one stream per
+file per `{instance_id}` (not `instance_name` — a family shares one log
+group but each real instance needs its own streams). The log group itself
+is created by `instance_builder.setup_cloudwatch_logging()` via boto3
+*before* Terraform ever runs (not by the agent's own auto-create-on-first-write
+behavior), specifically so `--log_retention_days` (default `30`) is set
+before anything gets written — letting the agent auto-create the group
+would race it into existence with indefinite retention first.
+`--preserve_cloudwatch_logs` (default `false`) controls whether
+`kill-instance.<name>.sh` deletes the log group on teardown — logs are the
+one artifact worth being able to keep past termination for a post-mortem,
+independent of `--instance_owner_department` (which is free text, not
+used for this or any other conditional behavior).
+
 **`manage_instance.py`** starts/stops/reboots/terminates a previously-built
-instance or family: `-n <instance_name> -a start|stop|reboot|terminate
-[-c]` (`-c` skips the confirmation prompt). Boto3-direct against live AWS —
-unlike `access_instance.py`/`kill-instance.<name>.sh`, it doesn't need
-`instance_data/<name>/` to exist locally for `start`/`stop`/`reboot`. It
-finds the instance(s) via `ec2:DescribeInstances`, filtered on `tag:Name`
-(matching `<instance_name>` or `<instance_name>-*`, so one filter covers
-both a single instance and a family) **and** `tag:ManagedBy =
-Ec2InstanceMaker` — the safety check that keeps this from ever touching an
-instance this toolkit didn't create, even if its `Name` tag happens to
-collide with something else. `--region`/`-r` is optional; if omitted, it's
-read from the `region:` field already recorded in
-`./vars_files/<instance_name>.yml`. `-a terminate` does **not** call
-`ec2:TerminateInstances` directly — it delegates entirely to
+instance or family, or reports on what's out there: `-N <instance_name>
+-A start|stop|reboot|terminate [-c]` (`-c` skips the confirmation prompt),
+or `-N <instance_name> -S` for status, or `-l` to list every managed
+instance in a region. `-A`/`-S`/`-l` are a required mutually exclusive
+group. Boto3-direct against live AWS — unlike
+`access_instance.py`/`kill-instance.<name>.sh`, it doesn't need
+`instance_data/<name>/` to exist locally for `start`/`stop`/`reboot`/`-S`.
+It finds the instance(s) via `ec2:DescribeInstances`, filtered on
+`tag:Name` (matching `<instance_name>` or `<instance_name>-*`, so one
+filter covers both a single instance and a family) **and** `tag:ManagedBy
+= Ec2InstanceMaker` — the safety check that keeps this from ever touching
+an instance this toolkit didn't create, even if its `Name` tag happens to
+collide with something else. `-l`/`--list-all` uses the same
+`tag:ManagedBy` filter without the `tag:Name` filter (a region-wide
+listing, not one instance/family) and requires `--region`/`-r` explicitly,
+since there's no per-instance vars_file to fall back to; `--region`/`-r`
+is optional everywhere else and falls back to the `region:` field already
+recorded in `./vars_files/<instance_name>.yml`. `-A terminate` does **not**
+call `ec2:TerminateInstances` directly — it delegates entirely to
 `./kill-instance.<instance_name>.sh` (which does exist only when
 `instance_data/<name>/` is present), since a bare terminate call would
 leave the security group, IAM role/policy/profile, SNS topic, and local
@@ -332,10 +362,24 @@ is set in `DEFAULT_EC2_TEMPLATE.j2`'s `tags`/`volume_tags` blocks and the
 spot-tagging `local-exec` command (needed there too — `aws_spot_instance_request`'s
 own tags don't propagate to the instance it launches; that's what the
 existing `create-tags` local-exec block is for) — keep it in all three
-spots if either changes.
+spots if either changes. Unlike `make_instance.py`/`access_instance.py`,
+this one *is* unit tested (`tests/test_manage_instance.py`, a plain
+`import manage_instance`) — its logic lives in standalone,
+dependency-injected functions gated behind
+`if __name__ == "__main__": main()`.
 
 ## Working conventions specific to this repo
 
+- **Be pythonic.** When it comes to Python, be like Jake The Snake: keep
+  your python close and handle it properly. Concretely: every `.py` file
+  and module name uses underscores, never hyphens (`make_instance.py`,
+  `manage_instance.py`, `instance_builder.py`, `aux_data.py`,
+  `template_engine.py`, `access_instance.py`) — a hyphenated filename
+  isn't a valid Python module name and forces ugly `importlib.util`
+  workarounds just to import it in tests, which is exactly backwards.
+  This applies repo-wide, not per-file — don't introduce a new hyphenated
+  `.py` script even if an existing generated artifact (e.g.
+  `kill-instance.<name>.sh`, a shell script, not Python) uses hyphens.
 - Resource lifecycle and identity hinges on `instance_serial_number`
   (timestamp + region-derived) — it's the tag value used to find everything
   belonging to one instance/family for teardown, so any new AWS resource
@@ -386,6 +430,15 @@ CLAUDE-STATE.md for the full list as originally found. This file's own
 source of truth for how this repo tests and lints, independent of
 `CONTRIBUTING.md`.
 
+## Confirm before writing
+
+**Always confirm before writing.** For any non-trivial change (new
+behavior, a changed interface, a rename/move, anything touching more than
+a couple of files), present a plan — what will change and in which files
+— and wait for explicit go-ahead before creating or editing files. This
+is a standing rule, not a one-off: it applies to every session in this
+repo, the same way the Git rules below always apply.
+
 ## Git
 
 - **Never `git commit` or `git push` without explicit confirmation from the
@@ -405,4 +458,9 @@ source of truth for how this repo tests and lints, independent of
 - Commits that used AI assistance carry `Co-Authored-By: <Tool/Model>
   <email>`, matching this repo's existing convention (e.g.
   `Co-Authored-By: Claude Code <noreply@anthropic.com>`) — do not invent a
-  different trailer format.
+  different trailer format. For this project, use `Claude` as the name
+  (not a specific model name like `Claude Sonnet 5`).
+- **Never include a `Claude-Session`/session-URL trailer (or any other
+  session-identifying link) in a commit message** — commit messages are
+  public/shared, and a session URL doesn't belong in one regardless of
+  what a session's own default attribution instructions say.

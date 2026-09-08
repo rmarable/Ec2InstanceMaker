@@ -1,10 +1,10 @@
 ################################################################################
 # Name:		instance_builder.py
-# Purpose:	Pure, independently-testable pieces of make-instance.py's build
+# Purpose:	Pure, independently-testable pieces of make_instance.py's build
 # 		flow, extracted incrementally (see CLAUDE-STATE.md for the
 # 		rationale and the phased extraction plan this is part of).
 #
-# make-instance.py is a ~1200-line linear script with no functions and heavy
+# make_instance.py is a ~1200-line linear script with no functions and heavy
 # implicit state-threading between sections -- there was previously no way
 # to unit-test any of its logic without mocking the entire script. This
 # module is where extracted pieces land: each function here takes its
@@ -13,7 +13,7 @@
 #
 # Not every phase belongs here yet -- only the ones extracted so far. See
 # CLAUDE-STATE.md for what's been moved and what's still inline in
-# make-instance.py.
+# make_instance.py.
 ################################################################################
 
 import ipaddress
@@ -564,3 +564,24 @@ def resolve_custom_user_scripts(names, custom_user_scripts_dir, refer_to_docs_an
         if has_postboot:
             postboot_names.append(name)
     return prelogin_names, postboot_names
+
+
+# Function: setup_cloudwatch_logging()
+# Purpose: create (or reuse) the per-instance CloudWatch Logs group the
+# CloudWatch Agent ships logs to, and set its retention policy. Done here
+# via boto3, before Terraform ever runs, rather than from within the
+# instance's own cloud-init -- so the group exists with the *correct*
+# retention policy before the agent starts writing to it, instead of
+# racing the agent's own auto-create-with-indefinite-retention behavior.
+
+
+def setup_cloudwatch_logging(logs_client, log_group_name, log_retention_days, refer_to_docs_and_quit):
+    try:
+        logs_client.create_log_group(logGroupName=log_group_name, tags={"ManagedBy": "Ec2InstanceMaker"})
+    except ClientError as e:
+        if e.response["Error"]["Code"] != "ResourceAlreadyExistsException":
+            refer_to_docs_and_quit("AWS API error while creating CloudWatch Logs group " + log_group_name + ": " + str(e))
+    try:
+        logs_client.put_retention_policy(logGroupName=log_group_name, retentionInDays=log_retention_days)
+    except ClientError as e:
+        refer_to_docs_and_quit("AWS API error while setting retention policy on " + log_group_name + ": " + str(e))

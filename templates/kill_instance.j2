@@ -20,6 +20,7 @@ EC2_KEYPAIR={{ ec2_keypair }}
 PRESERVE_IAM_ROLE="{{ preserve_iam_role }}"
 SSH_KEYPAIR_FILE={{ ssh_keypair_file }}
 SNS_TOPIC_ARN="{{ sns_arn }}"
+CLOUDWATCH_LOG_GROUP="{{ cloudwatch_log_group }}"
 
 # Parse the AMI ImageId and EBS SnapshotId tagged with instance_serial_number.
 
@@ -147,6 +148,22 @@ aws --region {{ region }} sns publish --topic-arn $SNS_TOPIC_ARN --subject "[Ec2
 aws --region {{ region }} sns delete-topic --topic-arn $SNS_TOPIC_ARN
 echo "Deleted SNS topic: $SNS_TOPIC_ARN"
 echo ""
+{% if enable_cloudwatch_logs == 'true' %}
+{% if preserve_cloudwatch_logs == 'false' %}
+
+# Delete the CloudWatch Logs group.
+
+aws --region {{ region }} logs delete-log-group --log-group-name $CLOUDWATCH_LOG_GROUP
+echo "Deleted CloudWatch Logs group: $CLOUDWATCH_LOG_GROUP"
+echo ""
+{% else %}
+
+# Preserve the CloudWatch Logs group.
+
+echo "Preserved CloudWatch Logs group: $CLOUDWATCH_LOG_GROUP"
+echo ""
+{% endif %}
+{% endif %}
 {% if preserve_iam_role == 'false' %}
 
 # Since PRESERVE_IAM_ROLE is false, take the following actions:

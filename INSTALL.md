@@ -52,6 +52,12 @@ documentation:
 
   https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-getting-started.html
 
+* Install the Session Manager plugin for the AWS CLI (separate from the AWS
+CLI itself) -- `access_instance.py` connects via `aws ssm start-session`,
+not direct SSH/RDP, and that command fails without this plugin installed:
+
+  https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html
+
 * Create and activate a virtual Python environment using the standard
 library `venv` module.  Python 3.12 is the default supported version.
 Please visit this link for more details on Python virtual environments:
@@ -86,12 +92,12 @@ $ ./linux-ec2-setup.sh
 
 Please note that the default IAM permissions granted to Ec2InstanceMaker-spawned instances are *NOT* sufficient to create child instances.  Please see the "Note to DevOps Teams" section in the README for additional guidance.
 
-## About make-instance.py
+## About make_instance.py
 
-To view all available options for make-instance.py:
+To view all available options for make_instance.py:
 ```
 $ cd ~/src/Ec2InstanceMaker
-$ ./make-instance.py --help
+$ ./make_instance.py --help
 ```
 
 ## Example Use Cases
@@ -107,13 +113,13 @@ IAM role which grants "general" S3 and EC2 permissions in us-east-1c.  The
 instance is owned by the computational biology team ("compbio") and used by
 project "XRV-243":
 ```
-$ ./make-instance.py -A us-east-1c -N dev01 -O rmarable -E rodney.marable@gmail.com -B alinux2 --ebs_root_volume_size=20 --instance_owner_department=compbio --project_id="XRV-243"
+$ ./make_instance.py -A us-east-1c -N dev01 -O rmarable -E rodney.marable@gmail.com -B alinux2 --ebs_root_volume_size=20 --instance_owner_department=compbio --project_id="XRV-243"
 ```
 
 Building the same instance using Spot (which can achieve up to 90% savings over
 ondemand pricing):
 ```
-$ ./make-instance.py -A us-east-1c -N dev01 -O rmarable -E rodney.marable@gmail.com -B alinux2 --ebs_root_volume_size=20 --instance_owner_department=compbio --project_id="XRV-243" --request_type=spot
+$ ./make_instance.py -A us-east-1c -N dev01 -O rmarable -E rodney.marable@gmail.com -B alinux2 --ebs_root_volume_size=20 --instance_owner_department=compbio --project_id="XRV-243" --request_type=spot
 ```
 
 ### Example: Building a Single Windows Instance
@@ -124,13 +130,13 @@ IAM role which grants "general" S3 and EC2 permissions in us-west-2b.  The
 instance is owned by the computational chemistry team ("compchem") and is not
 used by any active project:
 ```
-$ ./make-instance.py -A us-west-2b -N dev001 -O rmarable -E rodney.marable@gmail.com -B windows2019 --instance_owner_department=compchem
+$ ./make_instance.py -A us-west-2b -N dev001 -O rmarable -E rodney.marable@gmail.com -B windows2019 --instance_owner_department=compchem
 ```
 
 Again, building this same instance using Spot (which can achieve up to 90%
 savings over ondemand pricing):
 ```
-$ ./make-instance.py -A us-west-2b -N dev001 -O rmarable -E rodney.marable@gmail.com -B windows2019 --instance_owner_department=compchem --request_type=spot
+$ ./make_instance.py -A us-west-2b -N dev001 -O rmarable -E rodney.marable@gmail.com -B windows2019 --instance_owner_department=compchem --request_type=spot
 ```
 
 ### Example: Building Multiple Spot Instances
@@ -139,97 +145,79 @@ This example builds a family of five t3.micro test instances called "fam01"
 running Ubuntu 24.04 LTS, each with a 10 GB gp2 EBS root volume using the
 default IAM role in eu-central-1a.  These instances are owned by the HPC team:
 ```
-$ ./make-instance.py -A eu-central-1a -N fam01 -B ubuntu2404 -O rmarable -E rodney.marable@gmail.com --ebs_root_volume_size=10 --instance_owner_department=hpc --request_type=spot --instance_type=t3.micro -C 5
+$ ./make_instance.py -A eu-central-1a -N fam01 -B ubuntu2404 -O rmarable -E rodney.marable@gmail.com --ebs_root_volume_size=10 --instance_owner_department=hpc --request_type=spot --instance_type=t3.micro -C 5
 ```
 
 Building the same instance family using Spot:
 ```
-$ ./make-instance.py -A eu-central-1a -N fam01 -B ubuntu2404 -O rmarable -E rodney.marable@gmail.com --ebs_root_volume_size=10 --instance_owner_department=hpc --request_type=spot --instance_type=t3.micro -C 5 --request_type=spot
+$ ./make_instance.py -A eu-central-1a -N fam01 -B ubuntu2404 -O rmarable -E rodney.marable@gmail.com --ebs_root_volume_size=10 --instance_owner_department=hpc --request_type=spot --instance_type=t3.micro -C 5 --request_type=spot
 ```
 
 Building this instance family using Spot and Windows:
 ```
-$ ./make-instance.py -A eu-central-1a -N fam01 -B windows2019 -O rmarable -E rodney.marable@gmail.com --ebs_root_volume_size=10 --instance_owner_department=hpc --request_type=spot --instance_type=t3.micro -C 5
+$ ./make_instance.py -A eu-central-1a -N fam01 -B windows2019 -O rmarable -E rodney.marable@gmail.com --ebs_root_volume_size=10 --instance_owner_department=hpc --request_type=spot --instance_type=t3.micro -C 5
 ```
 
 ### Example: Accessing an Instance
 
 Ec2InstanceMaker provides an easy mechanism to access individual instances or
-specific members of a particular instance family over SSH.  Following every
+specific members of a particular instance family via AWS Systems Manager
+Session Manager (`aws ssm start-session`) -- not direct SSH.  No inbound
+SSH port needs to be reachable from wherever you run this.  Following every
 build, Ec2InstanceMaker will dump access and deletion information to the
 console for user convenience.  For mulitple instance "families," a selection
 menu for each instance will be provided.  The operator can also provide the
 index of the instance to avoid parsing the menu.  This is also useful for
 scripting actions against instance families created by this tool.
 
+This requires the Session Manager plugin for the AWS CLI installed locally
+(see "Creating an Installation Environment on OSX" above) -- `aws ssm
+start-session` fails without it.
+
 To access the single instance "dev01" created above:
 ```
 $ ./access_instance.py -N dev01
-The authenticity of host '54.211.214.242 (54.211.214.242)' can't be established.
-ECDSA key fingerprint is SHA256:UVSoegQW2atQEAtUptey2lWCiqqAj0rnZzSp8R1+t8k.
-Are you sure you want to continue connecting (yes/no)? yes
-Warning: Permanently added '54.211.214.242' (ECDSA) to the list of known hosts.
-Last login: Tue Jun 11 18:21:59 2019 from 72-21-196-64.amazon.com
+Opening an SSM Session Manager connection to: dev01
 
-       __|  __|_  )
-       _|  (     /   Amazon Linux 2 AMI
-      ___|\___|___|
+Starting session with SessionId: rmarable-0123456789abcdef0
 
-https://aws.amazon.com/amazon-linux-2/
-[ec2-user@ip-172-31-94-248 ~]$ exit
-logout
-Connection to 54.211.214.242 closed.
+sh-5.2$ exit
+exit
+
+
+Exiting session with sessionId: rmarable-0123456789abcdef0.
+
+Reconnect to dev01 by running this command:
+
+$ ./access_instance.py -N dev01
 ```
 
 To access members of the instance family "fam01" created above:
 ```
 $ ./access_instance.py -N fam01
 
-+------+---------------+----------------+
-| Item | Instance Name |   IP Address   |
-+------+---------------+----------------+
-|  1   |    fam01-0    | 35.159.20.166  |
-|  2   |    fam01-1    | 18.194.109.142 |
-|  3   |    fam01-2    | 18.196.63.105  |
-|  4   |    fam01-3    |  3.121.85.13   |
-|  5   |    fam01-4    |  52.59.85.37   |
-+------+---------------+----------------+
++------+---------------+----------------+---------------------+
+| Item | Instance Name |   IP Address   |      Instance ID    |
++------+---------------+----------------+---------------------+
+|  1   |    fam01-0    | 35.159.20.166  | i-0123456789abcdef0 |
+|  2   |    fam01-1    | 18.194.109.142 | i-0fedcba9876543210 |
+|  3   |    fam01-2    | 18.196.63.105  | i-0a1b2c3d4e5f60789 |
+|  4   |    fam01-3    |  3.121.85.13   | i-0c3d4e5f60718293a |
+|  5   |    fam01-4    |  52.59.85.37   | i-0d4e5f6071829304b |
++------+---------------+----------------+---------------------+
 
-Select an instance to access using SSH:
+Select an instance to access using SSM Session Manager:
 3
 
-Opening an SSH connection to: fam01-2
+Opening an SSM Session Manager connection to: fam01-2
 
-The authenticity of host '18.196.63.105 (18.196.63.105)' can't be established.
-ECDSA key fingerprint is SHA256:cRiWZtwLHbHRndGVHoihDaJP9Cge0xrrY1MIDe0RZhY.
-Are you sure you want to continue connecting (yes/no)? yes
-Warning: Permanently added '18.196.63.105' (ECDSA) to the list of known hosts.
-Welcome to Ubuntu 18.04.2 LTS (GNU/Linux 4.15.0-1039-aws x86_64)
+Starting session with SessionId: rmarable-0a1b2c3d4e5f60789
 
- * Documentation:  https://help.ubuntu.com
- * Management:     https://landscape.canonical.com
- * Support:        https://ubuntu.com/advantage
-
-  System information as of Thu Jun 13 14:35:06 UTC 2019
-
-  System load:  0.0               Processes:           89
-  Usage of /:   12.5% of 9.63GB   Users logged in:     0
-  Memory usage: 16%               IP address for ens5: 172.31.17.180
-  Swap usage:   0%
-
- * Ubuntu's Kubernetes 1.14 distributions can bypass Docker and use containerd
-   directly, see https://bit.ly/ubuntu-containerd or try it now with
-
-     snap install microk8s --classic
-
-66 packages can be updated.
-28 updates are security updates.
+sh-5.2$ exit
+exit
 
 
-Last login: Thu Jun 13 14:02:21 2019 from 54.239.6.177
-ubuntu@ip-172-31-17-180:~$ exit
-logout
-Connection to 18.196.63.105 closed.
+Exiting session with sessionId: rmarable-0a1b2c3d4e5f60789.
 
 Reconnect to fam01-2 by running this command:
 
@@ -269,6 +257,7 @@ Deleted EC2 keypair: dev01-25201411062019_us-east-1
 Deleted SSH keypair file: /Users/rmarable/src/public/Ec2InstanceMaker/instance_data/dev01/dev01-25201411062019_us-east-1.pem
 Deleted directory: /Users/rmarable/src/public/Ec2InstanceMaker/instance_data/dev01
 Deleted SNS topic: arn:aws:sns:us-east-1:147724377207:Ec2_Instance_SNS_Alerts_dev01-25201411062019
+Deleted CloudWatch Logs group: /ec2instancemaker/dev01
 Deleted file: ./vars_files/dev01.yml
 Deleted file: ./active_instances/dev01.serial
 Deleted file: kill-instance.dev01.sh
@@ -331,6 +320,7 @@ Deleted EC2 keypair: fam01-56011116062019_eu-central-1
 Deleted SSH keypair file: /Users/rmarable/src/public/Ec2InstanceMaker/instance_data/fam01/fam01-56011116062019_eu-central-1.pem
 Deleted directory: /Users/rmarable/src/public/Ec2InstanceMaker/instance_data/fam01
 Deleted SNS topic: arn:aws:sns:us-east-1:147724377207:Ec2_Instance_SNS_Alerts_fam01-56011116062019
+Deleted CloudWatch Logs group: /ec2instancemaker/fam01
 Deleted IAM EC2 policy: ec2-instance-policy-fam01-56011116062019
 Deleted IAM EC2 instance profile: ec2-instance-profile-fam01-56011116062019
 Deleted IAM role: ec2-instance-role-fam01-56011116062019
@@ -357,7 +347,7 @@ $ deactivate
 ```
 
 Please consult README.md for additional information on how to use the
-make-instance.py script.
+make_instance.py script.
 
 ## Reporting Bugs & Requesting New Features
 

@@ -149,13 +149,38 @@ section for more details.
 * Custom scripting to automate deletion the instance or all members of the
 instance family at once.
 
-* Single-command SSH access to Linux instances.  If multiple instances were
-created together, an easy-to-use menu is provided for the user to select the
-instance of interest.
+* Single-command access to Linux instances via AWS Systems Manager Session
+Manager (`aws ssm start-session`) — no inbound SSH port needs to be
+reachable from anywhere.  If multiple instances were created together, an
+easy-to-use menu is provided for the user to select the instance of interest.
 
 * For Windows instances, mapping of IP addresses to decrypted Administrator
-passwords in an easy-to-parse table dumped to the console.  This information
-can be pasted into RDC for easy access.
+passwords in an easy-to-parse table dumped to the console, plus an SSM
+port-forwarding tunnel for RDP (`localhost:13389`) instead of requiring
+3389 reachable from anywhere.
+
+* Never exposes SSH/RDP to `0.0.0.0/0` -- the security group's ingress
+rule is always scoped by `--ssh_allowed_ips` (defaults to the instance's
+own VPC CIDR; an explicit `0.0.0.0/0` is refused outright).
+
+* Every instance is tagged `ManagedBy: Ec2InstanceMaker`, so tooling (this
+toolkit's own `manage_instance.py` included) can safely identify and act
+on only instances this toolkit created.
+
+* `manage_instance.py` for starting, stopping, rebooting, or fully
+terminating a previously-built instance or family after the fact, without
+needing to re-run `make_instance.py` -- also reports status (`-s`) and
+lists every managed instance in a region (`-l`).
+
+* CloudWatch Agent logging on by default -- ships cloud-init and system
+logs to CloudWatch Logs with a configurable retention period
+(`--log_retention_days`), optionally preserved past termination
+(`--preserve_cloudwatch_logs`).
+
+* User-owned customization via `custom_user_scripts/`, kept separate from
+the toolkit-controlled `templates/` directory -- both a real pre-login
+(cloud-init) hook and a post-boot hook, selectable per build via
+`--custom_user_scripts`.
 
 * Operability in Turbot environnments.  Please visit https://www.turbot.com for more information.
 
@@ -214,12 +239,12 @@ As noted above, Ec2InstanceMaker is intended to reduce the administrative burden
     * EC2 Messages
   * If you run into permissions problems building instances or provisioning storage resources, it's usually because of an IAM issue.  When speaking with your DevOps professionals, the following options are suggested:
     * Set `--iam_json_policy=ExtendedEc2InstancePolicy.json` to use the included JSON policy document which permits children instances to be spawned.
-    * Work with your DevOps team to construct a custom IAM role that provides appropriate permissions for your environment, then include it by setting `--iam_role=$ROLE_NAME` when invoking `make-instance.py.`  Please refer to the EXAMPLE_USE_CASES document for additional guidance.
+    * Work with your DevOps team to construct a custom IAM role that provides appropriate permissions for your environment, then include it by setting `--iam_role=$ROLE_NAME` when invoking `make_instance.py.`  Please refer to the EXAMPLE_USE_CASES document for additional guidance.
   * DevOps teams should also be aware that additional granular control over the IAM namespace can be realized by setting `--iam_name_prefix` to a chosen value.  This makes it eaiser to incorporate Ec2InstanceMaker into environments that perfer to have users assume a set of standard roles to perform tasks in the AWS environment.
 
 For example:
 ```
-$ ./make-instance.py -N dev01 -O rmarable -E rodney.marable@gmail.com -A us-west-2b --iam_name_prefix=MyEc2IamPrefix
+$ ./make_instance.py -N dev01 -O rmarable -E rodney.marable@gmail.com -A us-west-2b --iam_name_prefix=MyEc2IamPrefix
 ```
 
 This command will create an EC2 instance role, instance profile, and policy prepended with MyEc2IamPrefix.  The user can only create, delete, or modify IAM entities that are prepended with "MyEc2IamPrefix."
@@ -229,7 +254,7 @@ This command will create an EC2 instance role, instance profile, and policy prep
 Ec2InstanceMaker is a collection of scripts and user-configurable templates.
 
 **Scripts.** Please see below for more details on how the scripts are used.
-* make-instance.py
+* make_instance.py
 * access-instance.py
 * kill-instance.$INSTANCE_NAME.py
 
@@ -240,7 +265,7 @@ that is used to create the instance profiles that are created by the toolkit.
   * **MinimalEc2InstancePolicy.json** is a bare-bones template that allows only
 EC2 and S3 API calls.
   * **GenericEc2InstancePolicy.json** provides enough permissions for an EC2
-"jumphost" spawned by make-instance.py to in turn create additional instances.
+"jumphost" spawned by make_instance.py to in turn create additional instances.
 In addition to allowing EC2 and S3, it also permits maintenance of SQS
 queues, SNS topic administration, IAM role and instance profile maintenance,
 and access to SSM.  However, please note that
@@ -259,17 +284,18 @@ userdata to perform additional configuration.  Please reference:
 
 https://docs.aws.amazon.com/AWSEC2/latest/WindowsGuide/ec2-instance-metadata.html#instancedata-add-user-data
 
-### Using make-instance.py
+### Using make_instance.py
 
-**make-instance.py** builds EC2 instances for a wide variety of use cases.
+**make_instance.py** builds EC2 instances for a wide variety of use cases.
 
 ```
-$ ./make-instance.py -h
-usage: make-instance.py [-h] --az AZ --instance_name INSTANCE_NAME
+$ ./make_instance.py -h
+usage: make_instance.py [-h] --az AZ --instance_name INSTANCE_NAME
                         --instance_owner INSTANCE_OWNER --instance_owner_email
                         INSTANCE_OWNER_EMAIL
                         [--base_os {al2023,alinux2,alma9,alma10,rhel9,rhel10,rocky9,rocky10,ubuntu2404,ubuntu2604,windows2019,windows2022,windows2025}]
                         [--count COUNT] [--custom_ami CUSTOM_AMI]
+                        [--custom_user_scripts CUSTOM_USER_SCRIPTS]
                         [--debug_mode {true,false}]
                         [--ebs_encryption {true,false}]
                         [--ebs_optimized {true,false}]
@@ -285,19 +311,23 @@ usage: make-instance.py [-h] --az AZ --instance_name INSTANCE_NAME
                         [--iam_json_policy IAM_JSON_POLICY]
                         [--iam_name_prefix IAM_NAME_PREFIX]
                         [--iam_role IAM_ROLE]
-                        [--instance_owner_department {analytics,clinical,commercial,compbio,compchem,datasci,design,development,hpc,imaging,manufacturing,medical,modeling,operations,proteomics,robotics,qa,research,scicomp}]
+                        [--instance_owner_department INSTANCE_OWNER_DEPARTMENT]
                         [--request_type {ondemand,spot}]
                         [--instance_type INSTANCE_TYPE]
                         [--prod_level {dev,test,stage,prod}]
+                        [--enable_cloudwatch_logs {true,false}]
+                        [--log_retention_days LOG_RETENTION_DAYS]
                         [--placement_group_strategy {cluster,spread}]
                         [--preserve_ami {true,false}]
+                        [--preserve_cloudwatch_logs {true,false}]
                         [--project_id PROJECT_ID] [--public_ip PUBLIC_IP]
                         [--security_group SECURITY_GROUP]
                         [--spot_buffer SPOT_BUFFER]
+                        [--ssh_allowed_ips SSH_ALLOWED_IPS]
                         [--turbot_account TURBOT_ACCOUNT]
                         [--vpc_name VPC_NAME]
 
-make-instance.py: Command-line interface to build EC2 instances
+make_instance.py: Command-line interface to build EC2 instances
 
 options:
   -h, --help            show this help message and exit
@@ -317,6 +347,11 @@ options:
   --custom_ami CUSTOM_AMI
                         ami-id of a custom Amazon Machine Image (default =
                         UNDEFINED)
+  --custom_user_scripts CUSTOM_USER_SCRIPTS
+                        comma-separated list of custom_user_scripts/ names to
+                        run (default = default); each name needs
+                        custom_user_prelogin_script.j2_<name> and/or
+                        custom_user_postboot_script.j2_<name> to exist
   --debug_mode {true,false}, -D {true,false}
                         Enable debug mode (default = false)
   --ebs_encryption {true,false}
@@ -355,7 +390,7 @@ options:
                         Provide a prefix for the IAM entities associated with
                         the instance (default = Ec2InstanceMaker)
   --iam_role IAM_ROLE   Apply a pre-existing IAM role to the instance(s)
-  --instance_owner_department {analytics,clinical,commercial,compbio,compchem,datasci,design,development,hpc,imaging,manufacturing,medical,modeling,operations,proteomics,robotics,qa,research,scicomp}
+  --instance_owner_department INSTANCE_OWNER_DEPARTMENT
                         Department of the instance_owner (default = compbio)
   --request_type {ondemand,spot}
                         choose between ondemand or spot instances (default =
@@ -366,12 +401,22 @@ options:
                         detected, no separate flag needed
   --prod_level {dev,test,stage,prod}
                         Operating stage of the jumphost (default = dev)
+  --enable_cloudwatch_logs {true,false}
+                        Install and configure the CloudWatch Agent on the
+                        instance(s) to ship logs to CloudWatch Logs (default =
+                        true)
+  --log_retention_days LOG_RETENTION_DAYS
+                        Number of days to retain CloudWatch Logs for the
+                        instance(s) (default = 30)
   --placement_group_strategy {cluster,spread}, --pg_strategy {cluster,spread}
                         Designate an EC2 placement group strategy (default =
                         cluster)
   --preserve_ami {true,false}
                         Preserve any AMI image built from the instance(s)
                         post-termination (default = true)
+  --preserve_cloudwatch_logs {true,false}
+                        Preserve the CloudWatch Logs group when the
+                        instance(s) are terminated (default = false)
   --project_id PROJECT_ID, -P PROJECT_ID
                         Project name or ID number (default = UNDEFINED)
   --public_ip PUBLIC_IP, -p PUBLIC_IP
@@ -384,10 +429,18 @@ options:
                         pricing buffer to protect from Spot market
                         fluctuations: spot_price = spot_price +
                         spot_price*spot_buffer
+  --ssh_allowed_ips SSH_ALLOWED_IPS
+                        CIDR block allowed to reach the instance's SSH/RDP
+                        port (default = the CIDR of the instance's own VPC).
+                        Never accepts 0.0.0.0/0.
   --turbot_account TURBOT_ACCOUNT
                         Turbot account ID (default = DISABLED)
   --vpc_name VPC_NAME   Name of the VPC (default = vpc_default)
 ```
+
+`--instance_owner_department` is free text — pass whatever your
+organization's own department/team taxonomy uses; this toolkit doesn't
+maintain a list of valid values.
 
 ### Building Instances
 
@@ -399,13 +452,13 @@ supplied JSON policy document to generate an IAM instance profile providing
 EC2 and S3 access:
 
 ```
-$ ./make-instance.py -A us-east-2a -N ec2-testinstance01 -O rmarable -E rodney.marable@gmail.com
+$ ./make_instance.py -A us-east-2a -N ec2-testinstance01 -O rmarable -E rodney.marable@gmail.com
 ```
 
 To build a Windows instance using (mostly) default values:
 
 ```
-./make-instance.py -N dev01 -O rmarable -E rmarable@amazon.com -A us-east-1b -T t3a.micro -B windows2019
+./make_instance.py -N dev01 -O rmarable -E rmarable@amazon.com -A us-east-1b -T t3a.micro -B windows2019
 ```
 
 If the user provides illegal parameter values or if any of the required AWS
@@ -414,7 +467,7 @@ before aborting.  In the example below, the user attempts to build an EBS root
 device that is larger than 16 TB:
 
 ```
-$ ./make-instance.py -A us-east-2a -N ec2-testinstance01 -O rmarable -E rodney.marable@gmail.com --ebs_root_volume_size=16049311
+$ ./make_instance.py -A us-east-2a -N ec2-testinstance01 -O rmarable -E rodney.marable@gmail.com --ebs_root_volume_size=16049311
 
 Performing parameter validation...
 
@@ -432,45 +485,53 @@ Aborting...
 
 ### Accessing Instances
 
-**access-instance.py** provides an easy mechanism for making SSH connections
-to multiple EC2 Linux instances.  When working with Windows EC2 instances,
-this script will provide the decrypted Administrator password and IP address
-which can then be pasted into a Remote Desktop Client within an easy-to-parse
-table.
+**access_instance.py** provides an easy mechanism for connecting to
+Ec2InstanceMaker-built instances via **AWS Systems Manager Session
+Manager** (`aws ssm start-session`) — not direct SSH/RDP. No inbound
+SSH/RDP port needs to be reachable from wherever you run this; the
+instance just needs its SSM Agent registered (see "Prerequisites" below).
 
 For a single Linux instance:
 
 ```
 $ ./access_instance.py -N dev01
-Last login: Thu Jun 13 03:55:11 2019 from 72-21-196-65.amazon.com
+Opening an SSM Session Manager connection to: dev01
 
-       __|  __|_  )
-       _|  (     /   Amazon Linux 2 AMI
-      ___|\___|___|
+Starting session with SessionId: rmarable-0123456789abcdef0
 
-https://aws.amazon.com/amazon-linux-2/
-[ec2-user@ip-172-31-6-21 ~]$ exit
-logout
-Connection to 3.215.135.101 closed.
+sh-5.2$ exit
+exit
+
+
+Exiting session with sessionId: rmarable-0123456789abcdef0.
 
 Reconnect to dev01 by running this command:
 
 $ ./access_instance.py -N dev01
 ```
 
-For a single Windows instance:
+For a single Windows instance, `access_instance.py` decrypts the
+Administrator password as before, then opens an SSM port-forwarding
+tunnel for RDP instead of requiring 3389 reachable from anywhere — point
+your Remote Desktop client at `localhost:13389` while the tunnel is open:
 
 ```
-Access the new instance via Windows Remote Desktop with this information:
+$ ./access_instance.py -N dev01
+Access the new instance via Remote Desktop with this information:
 
-+---------------+---------------+----------------------------------+
-| Instance Name |   IP Address  |      Adminstrator Password       |
-+---------------+---------------+----------------------------------+
-|     dev01     | 34.201.49.101 | K?Uf.@Roy-?D-W-?GPDW@4_BaT%=?EiD |
-+---------------+---------------+----------------------------------+
++------+---------------+---------------+----------------------------------+
+| Item | Instance Name |   IP Address  |      Adminstrator Password       |
++------+---------------+---------------+----------------------------------+
+|  1   |     dev01     | 34.201.49.101 | K?Uf.@Roy-?D-W-?GPDW@4_BaT%=?EiD |
++------+---------------+---------------+----------------------------------+
 
-Reprint this table:
-$ ./access-instance.py -N dev01
+Opening a Remote Desktop tunnel to: dev01
+Connect your Remote Desktop client to: localhost:13389
+Press Ctrl+C to close the tunnel when finished.
+
+Starting session with SessionId: rmarable-0123456789abcdef0
+Port 13389 opened for sessionId rmarable-0123456789abcdef0.
+Waiting for connections...
 ```
 
 When working with Linux instance families, `access_instance.py` provides an
@@ -479,43 +540,47 @@ interactive menu allowing the user to select the specific instance of interest:
 ```
 $ ./access_instance.py -N fam01
 
-+------+---------------+----------------+
-| Item | Instance Name |   IP Address   |
-+------+---------------+----------------+
-|  1   |    fam01-0    | 18.204.42.129  |
-|  2   |    fam01-1    |  34.237.2.35   |
-|  3   |    fam01-2    |  3.83.36.203   |
-|  4   |    fam01-3    |  3.80.159.180  |
-|  5   |    fam01-4    | 18.207.181.36  |
-|  6   |    fam01-5    |  3.214.144.61  |
-|  7   |    fam01-6    | 18.232.133.187 |
-|  8   |    fam01-7    | 18.209.237.152 |
-|  9   |    fam01-8    | 18.209.213.133 |
-|  10  |    fam01-9    |  3.80.163.177  |
-+------+---------------+----------------+
++------+---------------+----------------+---------------------+
+| Item | Instance Name |   IP Address   |      Instance ID    |
++------+---------------+----------------+---------------------+
+|  1   |    fam01-0    | 18.204.42.129  | i-0123456789abcdef0 |
+|  2   |    fam01-1    |  34.237.2.35   | i-0fedcba9876543210 |
+|  3   |    fam01-2    |  3.83.36.203   | i-0a1b2c3d4e5f60789 |
++------+---------------+----------------+---------------------+
 
-Select an instance to access using SSH:
-4
+Select an instance to access using SSM Session Manager:
+2
 
-Opening an SSH connection to: fam01-3
+Opening an SSM Session Manager connection to: fam01-1
 
-The authenticity of host '3.80.159.180 (3.80.159.180)' can't be established.
-ECDSA key fingerprint is SHA256:K0pbmmEPLcAhltTT5kqYcEUNJiamr+3J+gzjpvZsdoI.
-Are you sure you want to continue connecting (yes/no)? yes
-Warning: Permanently added '3.80.159.180' (ECDSA) to the list of known hosts.
-Last login: Thu Jun 13 13:44:17 2019 from 72-21-196-66.amazon.com
-[ec2-user@ip-172-31-5-254 ~]$ exit
-logout
-Connection to 3.80.159.180 closed.
+Starting session with SessionId: rmarable-0fedcba9876543210
 
-Reconnect to fam01-3 by running this command:
+sh-5.2$ exit
+exit
+
+
+Exiting session with sessionId: rmarable-0fedcba9876543210.
+
+Reconnect to fam01-1 by running this command:
 
 $ ./access_instance.py -N fam01
 ```
 
+Windows families work the same way — the password table for every member
+prints first, then you're prompted which one to open the RDP tunnel to.
+
 The "-m" switch can be used to access a specific instance as it is listed
 in the table.  This enables access_instance.py to be used for other automated
 tasks.
+
+**Prerequisites:** the [Session Manager plugin for the AWS
+CLI](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html)
+must be installed locally (separate from the AWS CLI itself) — `aws ssm
+start-session` fails without it. The instance's SSM Agent must also be
+registered, which normally happens automatically at boot for every
+`base_os` this toolkit supports — `rhel9`, `rhel10`, `rocky9`, and
+`rocky10`'s standard AMIs don't preinstall it, so Ec2InstanceMaker
+installs and enables it via cloud-init for those four specifically.
 
 `$ ./access_instance.py -N fam01 -m 3`
 
@@ -540,13 +605,84 @@ Reprint this table:
 $ ./access_instance -N dev01
 ```
 
+### Managing Instances
+
+**manage_instance.py** starts, stops, reboots, or fully terminates a
+previously-built instance or family:
+
+```
+./manage_instance.py -N <instance_name> -A start|stop|reboot|terminate [-c]
+```
+
+It identifies which instance(s) it's allowed to act on via the
+`ManagedBy: Ec2InstanceMaker` tag every instance gets at build time — a
+`Name` tag collision with something else this toolkit didn't create can
+never cause it to act on the wrong resource. `-c` skips the interactive
+confirmation prompt.
+
+```
+$ ./manage_instance.py -N dev01 -A stop
+
+The following instance(s) will be stopped:
+  i-0123456789abcdef0  dev01  (running)
+
+Type "yes" to continue: yes
+Stop request sent for: i-0123456789abcdef0
+```
+
+`--region`/`-r` is optional — if omitted, it's read from the `region:`
+field already recorded in `./vars_files/<instance_name>.yml`.
+
+`-A terminate` does not just stop the instance's billing meter — it
+delegates entirely to `kill-instance.<instance_name>.sh` (see "Destroying
+Instances" below), so it gets the full teardown (security group, IAM,
+SNS, CloudWatch Logs, local state), not a bare `TerminateInstances` call
+that would leave those resources behind. This only works from the repo
+checkout where the instance was built.
+
+Note: this toolkit always requests **one-time** Spot Instances, which AWS
+does not allow to be stopped and later restarted — `manage_instance.py`
+refuses `-A start`/`-A stop` against a Spot Instance with a clear error
+rather than letting AWS's own error surface unexplained. `-A reboot` and
+`-A terminate` both work fine against Spot Instances.
+
+`-S`/`--status` and `-l`/`--list-all` are alternatives to `-A`/`--action`
+(exactly one of `-A`, `-S`, or `-l` must be given):
+
+```
+$ ./manage_instance.py -N dev01 -S
+
+  i-0123456789abcdef0  dev01  (running)  Spot: No
+```
+
+`-l`/`--list-all` lists every Ec2InstanceMaker-managed instance in a
+region, identified the same way (the `ManagedBy` tag), without requiring
+`--instance_name`. `--region`/`-r` is required for `-l` since there is no
+per-instance `vars_files/<instance_name>.yml` to fall back to for a
+region-wide listing. A `Spot` column is only shown if at least one
+instance actually returned is a Spot Instance:
+
+```
+$ ./manage_instance.py -l -r us-east-1
+
++-------+---------------------+---------------+---------+----------------+------+
+|  Name |     Instance ID     | Instance Type | Base OS | Instance Owner | Spot |
++-------+---------------------+---------------+---------+----------------+------+
+| dev01 | i-0123456789abcdef0 |   t3.medium   | al2023  |     rmarable   |  No  |
+| dev02 | i-0fedcba9876543210 |   t3.large    | ubuntu2204 |    rmarable |  Yes |
++-------+---------------------+---------------+---------+----------------+------+
+```
+
 ### Destroying Instances
 
 **kill-instance.$INSTANCE_NAME.sh** is a personalized script designed to
 terminate specific EC2 instances, EC2 security groups, IAM entities, and any
 associated storage resources that were tagged with the `instance_serial_nunber.`
-It is generated by make-instance.py and will delete itself when all tagged
-instances and resources are terminated.
+It is generated by make_instance.py and will delete itself when all tagged
+instances and resources are terminated. It also deletes the instance's
+CloudWatch Logs group unless the instance was built with
+`--preserve_cloudwatch_logs=true`, in which case the log group is left in
+place for post-mortem debugging after termination.
 
 To invoke:
 
@@ -573,6 +709,7 @@ Deleted EC2 keypair: dev01-53522312062019_us-east-1
 Deleted SSH keypair file: /Users/rmarable/src/public/Ec2InstanceMaker/instance_data/dev01/dev01-53522312062019_us-east-1.pem
 Deleted directory: /Users/rmarable/src/public/Ec2InstanceMaker/instance_data/dev01
 Deleted SNS topic: arn:aws:sns:us-east-1:147724377207:Ec2_Instance_SNS_Alerts_dev01-53522312062019
+Deleted CloudWatch Logs group: /ec2instancemaker/dev01
 Deleted IAM EC2 policy: Ec2InstanceMaker-policy-dev01-53522312062019
 Deleted IAM EC2 instance profile: Ec2InstanceMaker-profile-dev01-53522312062019
 Deleted IAM role: Ec2InstanceMaker-role-dev01-53522312062019
@@ -595,17 +732,41 @@ any ongoing interactive instance activity.
 
 The instance userdata template disables Intel HyperThreading if `--hyperthreading=false`.
 
-Ec2InstanceMaker also permits additional user customization by simply pasting the desired commands into `templates/custom_user_script.j2` beneath the obvious comment:
+Ec2InstanceMaker also permits user customization via `custom_user_scripts/`
+— a directory kept separate from the toolkit-controlled `templates/`
+directory on purpose, so it's always clear what's yours to edit. There are
+two hooks, because they run at genuinely different points:
+
+- **`custom_user_prelogin_script.j2_<name>`** — runs via cloud-init,
+  before an operator can log in at all. Runs as root; keep it fast (a
+  system tweak, an `/etc/hosts` entry, a MOTD banner), since it delays
+  everything else on the instance until it finishes.
+- **`custom_user_postboot_script.j2_<name>`** — runs after cloud-init
+  finishes and the instance is fully bootstrapped (package manager
+  updated, AWS CLI/git/gcc present). This is where a real software
+  install, cloning a repo, or per-user dotfiles belong.
+
+A module only needs one of the two files — a lightweight config tweak can
+be prelogin-only, a pure software install can be postboot-only. Select
+which modules run with `--custom_user_scripts` (comma-separated, default
+`default`):
 
 ```
-########################################################
-## Paste your custom script actions below this comment #
-########################################################
+./make_instance.py ... --custom_user_scripts default
+./make_instance.py ... --custom_user_scripts monitoring,R
 ```
+
+Both files are real Jinja2 templates with the same variables every other
+template gets (`instance_name`, `ec2_user`, `region`, `base_os`,
+`package_manager`, etc.). See `custom_user_scripts/README.md` for the full
+explanation, worked examples, and exactly which variables are available.
 
 This provides operators and DevOps professionals with a powerful mechanism for quickly building and distributing "golden" AMI images that can be widely distributed throughout an enterprise, or for customized images that can be specifically tailored by individuals or teams.  Please see "Working with Custom AMIs" and "Building New AMIs with the build-ami Script" for additional details.
 
-Please note that additional customization of Windows instances can only be performed through the userdata template (templates/instance_userdata.j2).
+**Neither hook applies to Windows instances today** — this is a known,
+documented gap, not an oversight. Additional customization of Windows
+instances can only be performed through the userdata template
+(`templates/instance_userdata.j2`), which is toolkit-controlled.
 
 Support for joining a Windows Active Directory domain will be provided in a future release.  Support for PowerShell scripts may also be provided in subsequent releases.
 
@@ -640,7 +801,7 @@ By default, any AMI created by this script will be preserved after the instance 
 
 To modify this behavior, the instance(s) must be built by setting `preserve_ami=false` like this:
 ```
-./make-instance.py -O rmarable -E rodney.marable@gmail.com -N dev01 -A us-east-1a --preserve_ami=false
+./make_instance.py -O rmarable -E rodney.marable@gmail.com -N dev01 -A us-east-1a --preserve_ami=false
 ```
 
 This is *not* a recommended best practice and should only be enabled when testing.
@@ -657,10 +818,10 @@ ModuleNotFoundError: No module named boto3'
 
 * Terraform must also be present in order for the scripts in this toolkit to
 operate as expected.  If it is missing from the installing user's path,
-make-instance.py will return an "application is missing" error:
+make_instance.py will return an "application is missing" error:
 
 ```
-$ ./make-instance.py -N dev01 -O rmarable -E rmarable@amazon.com -A us-east-1b -T t3.micro -C 3 --request_type=spot
+$ ./make_instance.py -N dev01 -O rmarable -E rmarable@amazon.com -A us-east-1b -T t3.micro -C 3 --request_type=spot
 
 ** ERROR **
 Terraform is missing! Please visit: https://www.terraform.io/downloads

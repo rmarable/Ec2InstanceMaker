@@ -20,7 +20,7 @@ AMI_NAME="ami-{{ instance_serial_number }}"
 
 echo ""
 echo "*** ALERT ***"
-echo "Because make-instance.py was invoked with 'preserve_ami=false', this AMI"
+echo "Because make_instance.py was invoked with 'preserve_ami=false', this AMI"
 {% if count > 1 %}
 echo "will be *DELETED* along with instance family: {{ instance_name }}"
 {% else %}
@@ -118,7 +118,7 @@ aws --region {{ region }} ec2 wait instance-running --instance-ids $AMI_SRC_EC2_
 
 SRC_TREE_DIR="`git rev-parse --show-toplevel`"
 ACTIVE_STATE_FILE=$SRC_TREE_DIR/active_instances/{{ instance_name }}.serial
-MAKE_INSTANCE_CMD=`grep make-instance.py $ACTIVE_STATE_FILE`
+MAKE_INSTANCE_CMD=`grep make_instance.py $ACTIVE_STATE_FILE`
 echo ""
 echo "Finished building: $AMI_ID"
 echo ""

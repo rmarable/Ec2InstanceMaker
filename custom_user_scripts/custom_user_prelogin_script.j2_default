@@ -33,7 +33,7 @@
 # template in this toolkit is -- instance_name, instance_owner,
 # instance_owner_email, region, base_os, architecture, package_manager
 # ("yum"/"apt"/None), is_windows, ec2_user, and everything else in
-# instance_parameters (see make-instance.py) is available as a Jinja
+# instance_parameters (see make_instance.py) is available as a Jinja
 # variable here, same as in custom_user_postboot_script.j2_<name>.
 #
 ################################################################################

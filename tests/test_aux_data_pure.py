@@ -150,6 +150,17 @@ class TestEc2PlacementGroupCheck:
             aux_data.ec2_placement_group_check("t2.micro", "cluster", ["partition", "spread"], "false")
 
 
+class TestLogRetentionDaysCheck:
+    def test_valid_value_passes(self):
+        aux_data.log_retention_days_check(30, "false")
+
+    def test_invalid_value_exits(self):
+        # CloudWatch Logs' PutRetentionPolicy only accepts a fixed set of
+        # values -- 45 isn't one of them (30 and 60 are, 45 is not).
+        with pytest.raises(SystemExit):
+            aux_data.log_retention_days_check(45, "false")
+
+
 class TestModifyIamPolicyDocument:
     def _write_source(self, tmp_path, contents):
         src = tmp_path / "policy.json"
