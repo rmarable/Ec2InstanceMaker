@@ -189,7 +189,7 @@ Exiting session with sessionId: rmarable-0123456789abcdef0.
 
 Reconnect to dev01 by running this command:
 
-$ ./access_instance.py -N dev01
+./access_instance.py -N dev01
 ```
 
 To access members of the instance family "fam01" created above:
@@ -221,7 +221,7 @@ Exiting session with sessionId: rmarable-0a1b2c3d4e5f60789.
 
 Reconnect to fam01-2 by running this command:
 
-$ ./access_instance.py -N fam01
+./access_instance.py -N fam01
 ```
 
 Connecting to the instance directly could also be achieved using this command:

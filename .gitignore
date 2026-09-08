@@ -22,6 +22,6 @@ tools/
 vars_files/
 .venv/
 kill-instance.*.sh
-CLAUDE-STATE.md
+CLAUDE-STATE*.md
 .pytest_cache/
 .terraform-plugin-cache/

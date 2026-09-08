@@ -5,7 +5,9 @@ its AWS client as an explicit argument, so none of these need to run
 against real AWS.
 """
 
+import json
 import time
+from datetime import UTC
 from datetime import datetime as DateTime
 from unittest.mock import MagicMock, patch
 
@@ -63,6 +65,16 @@ class TestGenerateSnsTimestamps:
         datestamp, timestamp = instance_builder.generate_sns_timestamps(now=fixed)
         assert datestamp == "09-07-2026"
         assert timestamp == "01:02"
+
+    def test_defaults_to_timezone_aware_utc_now_not_deprecated_utcnow(self):
+        # Regression test: this used to call the deprecated
+        # datetime.utcnow(); make sure it stays on the timezone-aware
+        # datetime.now(timezone.utc) replacement.
+        with patch("instance_builder.DateTime") as mock_datetime:
+            mock_datetime.now.return_value = DateTime(2026, 9, 7, 1, 2, tzinfo=UTC)
+            instance_builder.generate_sns_timestamps()
+        mock_datetime.now.assert_called_once_with(UTC)
+        mock_datetime.utcnow.assert_not_called()
 
 
 def _quitting_mock():
@@ -225,13 +237,17 @@ class TestResolveVpcAndSubnet:
         filters = ec2_client.describe_vpcs.call_args.kwargs["Filters"]
         assert filters == [{"Name": "tag:Name", "Values": ["my-vpc"]}]
 
-    def test_vpc_missing_name_tag_quits(self):
+    def test_vpc_missing_name_tag_quits_with_a_ready_to_run_fix_command(self):
         ec2_client = MagicMock()
         ec2_client.describe_vpcs.return_value = {"Vpcs": [{"VpcId": "vpc-notag"}]}
         quit_fn = MagicMock(side_effect=SystemExit(1))
         with pytest.raises(SystemExit):
             instance_builder.resolve_vpc_and_subnet(ec2_client, "vpc_default", "us-east-1a", quit_fn)
-        quit_fn.assert_called_once_with("vpc-notag lacks a valid Name tag! This will break Terraform.")
+        quit_fn.assert_called_once()
+        error_msg = quit_fn.call_args.args[0]
+        assert "vpc-notag lacks a valid Name tag" in error_msg
+        assert "aws --region us-east-1 ec2 create-tags --resources vpc-notag --tags Key=Name,Value=vpc-notag" in error_msg
+        assert "$ aws" not in error_msg  # no shell marker -- must paste cleanly
 
     def test_no_matching_vpc_quits(self):
         # Regression-preserving test: describe_vpcs returning an empty list
@@ -539,27 +555,37 @@ def _tf_output(text):
     return result
 
 
+def _tf_output_json(instance_id, instance_name, ip_address):
+    return _tf_output(
+        json.dumps(
+            {
+                "instance_id_list": {"sensitive": False, "type": "string", "value": instance_id},
+                "instance_name_index": {"sensitive": False, "type": "string", "value": instance_name},
+                "instance_ip_addresses": {"sensitive": False, "type": "string", "value": ip_address},
+                "instance_public_dns": {"sensitive": False, "type": "string", "value": "ec2-1-2-3-4.compute.amazonaws.com"},
+            }
+        )
+    )
+
+
 class TestFetchWindowsInstanceDetails:
-    def test_parses_id_name_and_ip_from_terraform_show(self):
+    def test_parses_id_name_and_ip_from_terraform_output_json(self):
         with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = [
-                _tf_output('"i-0123456789abcdef0"\n'),
-                _tf_output('"dev01"\n'),
-                _tf_output('"1.2.3.4"\n'),
-            ]
+            mock_run.return_value = _tf_output_json("i-0123456789abcdef0", "dev01", "1.2.3.4")
             instance_id, instance_name, ip_address = instance_builder.fetch_windows_instance_details("/fake/instance_data/dev01/")
         assert instance_id == "i-0123456789abcdef0"
         assert instance_name == "dev01"
         assert ip_address == "1.2.3.4"
-        # Quotes stripped, whitespace stripped.
-        assert '"' not in instance_id
 
-    def test_runs_in_instance_data_dir(self):
+    def test_runs_terraform_output_json_in_instance_data_dir_without_shell(self):
         with patch("subprocess.run") as mock_run:
-            mock_run.return_value = _tf_output('""\n')
+            mock_run.return_value = _tf_output_json("i-0123456789abcdef0", "dev01", "1.2.3.4")
             instance_builder.fetch_windows_instance_details("/fake/instance_data/dev01/")
-        for call in mock_run.call_args_list:
-            assert call.kwargs["cwd"] == "/fake/instance_data/dev01/"
+        mock_run.assert_called_once()
+        call = mock_run.call_args
+        assert call.args[0] == ["terraform", "output", "-json"]
+        assert call.kwargs["cwd"] == "/fake/instance_data/dev01/"
+        assert call.kwargs.get("shell", False) is False
 
 
 class TestDecryptWindowsAdminPasswords:

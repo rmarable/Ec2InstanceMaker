@@ -21,6 +21,7 @@ import ipaddress
 import os
 import sys
 import time
+from datetime import UTC
 from datetime import datetime as DateTime
 
 import boto3
@@ -69,7 +70,7 @@ def generate_instance_serial_number(instance_name, now=None):
 
 def generate_sns_timestamps(now=None):
     if now is None:
-        now = DateTime.utcnow()
+        now = DateTime.now(UTC)
     sns_datestamp = now.strftime("%m") + "-" + now.strftime("%d") + "-" + now.strftime("%Y")
     sns_timestamp = now.strftime("%H") + ":" + now.strftime("%M")
     return sns_datestamp, sns_timestamp
@@ -134,7 +135,16 @@ def resolve_vpc_and_subnet(ec2_client, vpc_name, az, refer_to_docs_and_quit):
         try:
             vpc_name = vpc_information["Vpcs"][0]["Tags"][0]["Value"]
         except KeyError:
-            refer_to_docs_and_quit(vpc_id + " lacks a valid Name tag! This will break Terraform.")
+            refer_to_docs_and_quit(
+                vpc_id
+                + " lacks a valid Name tag! This will break Terraform. Tag it and retry:\n\n"
+                + "aws --region "
+                + az[:-1]
+                + " ec2 create-tags --resources "
+                + vpc_id
+                + " --tags Key=Name,Value="
+                + vpc_id
+            )
 
     try:
         subnet_information = ec2_client.describe_subnets(
@@ -246,7 +256,7 @@ def setup_keypair(ec2_client, ec2_keypair, secret_key_file, region, debug_mode, 
         print("If you are sure this is an error, please delete the original key pair")
         print("by pasting this command into the shell and retrying:")
         print("")
-        print("$ aws --region " + region + " ec2 delete-key-pair --key-name " + ec2_keypair)
+        print("aws --region " + region + " ec2 delete-key-pair --key-name " + ec2_keypair)
         print("")
         print("Aborting...")
         sys.exit(1)
@@ -361,23 +371,26 @@ def build_security_group_tags(security_group_name, instance_name, instance_seria
 
 
 # Function: fetch_windows_instance_details()
-# Purpose: parse instance_id/instance_name/ip_address for Windows
-# instance(s) out of `terraform show` output. The three `terraform show |
-# grep | awk` pipelines are static commands with no interpolated data
-# (the nosec markers below match the identical pattern already used
-# elsewhere in this codebase), so shell=True is not a security concern
-# here.
+# Purpose: fetch instance_id/instance_name/ip_address for Windows
+# instance(s) from Terraform's own structured output
+# (`terraform output -json`) -- DEFAULT_EC2_TEMPLATE.j2 defines
+# instance_id_list/instance_name_index/instance_ip_addresses as real
+# Terraform outputs, so this reads them directly instead of grep/awk-ing
+# `terraform show`'s human-readable text. One list-form subprocess call,
+# no shell=True, no dependency on grep/awk being on PATH, and no fragile
+# text-format parsing that Terraform's human-readable output isn't
+# actually guaranteed to preserve across versions the way `-json` is.
 
 
 def fetch_windows_instance_details(instance_data_dir):
+    import json
     import subprocess
 
-    instance_id_tf = subprocess.run("terraform show | grep instance_id | awk '{print $3}'", stdout=subprocess.PIPE, shell=True, stderr=subprocess.DEVNULL, cwd=instance_data_dir)  # nosec B602 - static command, no interpolation
-    instance_id = instance_id_tf.stdout.decode("utf-8").replace('"', "").strip()
-    instance_name_tf = subprocess.run("terraform show | grep instance_name_index | awk '{print $3}'", stdout=subprocess.PIPE, shell=True, stderr=subprocess.DEVNULL, cwd=instance_data_dir)  # nosec B602 - static command, no interpolation
-    instance_name = instance_name_tf.stdout.decode("utf-8").replace('"', "").strip()
-    ip_addr_tf = subprocess.run("terraform show | grep instance_ip_addresses | awk '{print $3}'", stdout=subprocess.PIPE, shell=True, stderr=subprocess.DEVNULL, cwd=instance_data_dir)  # nosec B602 - static command, no interpolation
-    ip_address = ip_addr_tf.stdout.decode("utf-8").replace('"', "").strip()
+    result = subprocess.run(["terraform", "output", "-json"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, cwd=instance_data_dir)
+    outputs = json.loads(result.stdout.decode("utf-8"))
+    instance_id = outputs["instance_id_list"]["value"]
+    instance_name = outputs["instance_name_index"]["value"]
+    ip_address = outputs["instance_ip_addresses"]["value"]
     return instance_id, instance_name, ip_address
 
 
@@ -698,8 +711,8 @@ def abort_if_vars_file_exists(vars_file_path, argv):
     print("")
     print("Please delete this file and retry the build:")
     print("")
-    print("$ rm " + vars_file_path)
-    print("$ " + " ".join(argv))
+    print("rm " + vars_file_path)
+    print(" ".join(argv))
     print("")
     print("Aborting...")
     sys.exit(1)

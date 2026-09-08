@@ -68,19 +68,12 @@ Create the parent instance which will have permission to spawn children through 
 Access the parent, clone the parent repository, setup the Ec2InstanceMaker environment, and launch a child instance:
 ```
 $ ./access_instance.py -N dev01
-The authenticity of host '34.238.164.100 (34.238.164.100)' can't be established.
-ECDSA key fingerprint is SHA256:qetHMERKP9EGmlJ4gb2RN+shMmxLWfVjtsfr2ubdOPY.
-Are you sure you want to continue connecting (yes/no)? yes
-Warning: Permanently added '34.238.164.100' (ECDSA) to the list of known hosts.
-Last login: Mon Jul 29 16:51:13 2019 from 96-86-108-246-static.hfc.comcastbusiness.net
+Opening an SSM Session Manager connection to: dev01
 
-       __|  __|_  )
-       _|  (     /   Amazon Linux 2 AMI
-      ___|\___|___|
+Starting session with SessionId: rmarable-0123456789abcdef0
 
-https://aws.amazon.com/amazon-linux-2/
-[ec2-user@ip-172-31-45-18 ~]$ cd src
-[ec2-user@ip-172-31-45-18 src]$ git clone https://github.com/rmarable/Ec2InstanceMaker
+sh-5.2$ cd src
+sh-5.2$ git clone https://github.com/rmarable/Ec2InstanceMaker
 Cloning into 'Ec2InstanceMaker'...
 remote: Enumerating objects: 231, done.
 remote: Counting objects: 100% (231/231), done.
@@ -88,41 +81,41 @@ remote: Compressing objects: 100% (77/77), done.
 remote: Total 231 (delta 156), reused 228 (delta 153), pack-reused 0
 Receiving objects: 100% (231/231), 130.89 KiB | 14.54 MiB/s, done.
 Resolving deltas: 100% (156/156), done.
-[ec2-user@ip-172-31-45-18 src]$ cd Ec2InstanceMaker/
-[ec2-user@ip-172-31-45-18 Ec2InstanceMaker]$ ./linux-ec2-setup.sh
+sh-5.2$ cd Ec2InstanceMaker/
+sh-5.2$ ./linux-ec2-setup.sh
 ...
 <output snipped>
 ...
-[ec2-user@ip-172-31-45-18 Ec2InstanceMaker]$ ./make_instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=alinux2
+sh-5.2$ ./make_instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=alinux2
 ...
 <output snipped>
 ...
 ================================================================================
 
 Access the new alinux2 instance via SSM Session Manager:
-$ ./access_instance.py -N dev01
+./access_instance.py -N dev01
 
 Delete the instance:
-$ ./kill-instance.dev01.sh
+./kill-instance.dev01.sh
 
 Build an AMI from the new instance:
-$ ./build-ami.dev01.sh
+./build-ami.dev01.sh
 
 Exiting...
-[ec2-user@ip-172-31-45-18 Ec2InstanceMaker]$ ./access_instance.py -N dev01
-The authenticity of host '18.206.201.204 (18.206.201.204)' can't be established.
-ECDSA key fingerprint is SHA256:vwgr/9FUOkBWjOOVDHWhQ8B6UtIYbzA/6GlVkco/wUA.
-ECDSA key fingerprint is MD5:36:70:69:e7:6c:20:34:11:37:eb:d9:9b:71:97:ad:89.
-Are you sure you want to continue connecting (yes/no)? yes
-Warning: Permanently added '18.206.201.204' (ECDSA) to the list of known hosts.
-Last login: Mon Jul 29 17:00:43 2019 from 34.238.164.100
+sh-5.2$ ./access_instance.py -N dev01
+Opening an SSM Session Manager connection to: dev01
 
-       __|  __|_  )
-       _|  (     /   Amazon Linux 2 AMI
-      ___|\___|___|
+Starting session with SessionId: rmarable-0fedcba9876543210
 
-https://aws.amazon.com/amazon-linux-2/
-[ec2-user@ip-172-31-38-10 ~]$
+sh-5.2$ exit
+exit
+
+
+Exiting session with sessionId: rmarable-0fedcba9876543210.
+
+Reconnect to dev01 by running this command:
+
+./access_instance.py -N dev01
 ```
 
 ## Using a Custom AMI:
@@ -240,8 +233,8 @@ Restarting the source EC2 instance...
 Finished building: ami-01e6876676987e00e
 
 To relaunch rmarable-foo-01 with this new AMI:
-$ ./kill-instance.rmarable-foo-01.sh
-$ ./make_instance.py -A us-east-1a -N rmarable-foo-01 -O rmarabro1 -E rodney.marable@sana.com --vpc_name=vpc-prod --ebs_encryption=true --preserve_ami=true --custom_ami=ami-01e6876676987e00e
+./kill-instance.rmarable-foo-01.sh
+./make_instance.py -A us-east-1a -N rmarable-foo-01 -O rmarabro1 -E rodney.marable@sana.com --vpc_name=vpc-prod --ebs_encryption=true --preserve_ami=true --custom_ami=ami-01e6876676987e00e
 
 Exiting...
 ```

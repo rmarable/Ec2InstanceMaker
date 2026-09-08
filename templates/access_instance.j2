@@ -199,9 +199,9 @@ subprocess.run(
 print('')
 print('Reprint this table and reopen the tunnel:')
 if menu_index == 0:
-    print('$ ./access_instance.py -N {{ instance_name }}')
+    print('./access_instance.py -N {{ instance_name }}')
 else:
-    print('$ ./access_instance.py -N {{ instance_name }} -m ' + str(menu_index))
+    print('./access_instance.py -N {{ instance_name }} -m ' + str(menu_index))
 print('')
 
 {% else %}
@@ -282,9 +282,9 @@ print('Reconnect to ' + ssh_hostname + ' by running this command:')
 print('Reconnect to ' + instance_name + ' by running this command:')
 {% endif %}
 if menu_index == 0:
-    print('$ ./access_instance.py -N {{ instance_name }}')
+    print('./access_instance.py -N {{ instance_name }}')
 else:
-    print('$ ./access_instance.py -N {{ instance_name }} -m ' + str(menu_index))
+    print('./access_instance.py -N {{ instance_name }} -m ' + str(menu_index))
 {% endif %}
 
 # Cleanup and exit.

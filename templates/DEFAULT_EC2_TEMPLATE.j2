@@ -14,7 +14,7 @@
 
 resource "aws_placement_group" "ec2pg-{{ instance_serial_number }}" {
   name     = "ec2pg-{{ instance_serial_number }}"
-  provider = "{{ provider }}"
+  provider = {{ provider }}
   strategy = "{{ placement_group_strategy }}"
 }
 {% endif %}
@@ -50,7 +50,7 @@ resource "aws_spot_instance_request" "{{ instance_name }}" {
 {% else %}
   associate_public_ip_address = "false"
 {% endif %}
-  provider                    = "{{ provider }}"
+  provider                    = {{ provider }}
   root_block_device {
     volume_size = "{{ ebs_root_volume_size }}"
     volume_type = "{{ ebs_root_volume_type }}"

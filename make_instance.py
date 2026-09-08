@@ -816,10 +816,10 @@ kill_instance_script: kill_instance.{instance_name}.sh
     if not is_windows:
         if count == 1:
             print("Access the new " + base_os + " instance via SSM Session Manager:")
-            print("$ ./access_instance.py -N " + instance_name)
+            print("./access_instance.py -N " + instance_name)
         else:
             print("Access the " + str(count) + " members of the " + base_os + " instance family via SSM Session Manager:")
-            print("$ ./access_instance.py -N " + instance_name)
+            print("./access_instance.py -N " + instance_name)
 
     # If base_os is Windows:
     #   - fetch instance_id/ip_address information from the Terraform output
@@ -840,7 +840,7 @@ kill_instance_script: kill_instance.{instance_name}.sh
         print(windows_instance_table)
         print("")
         print("Reprint this table:")
-        print("$ ./access_instance.py -N " + instance_name)
+        print("./access_instance.py -N " + instance_name)
 
     # Print the kill-instance command to the console.
 
@@ -849,13 +849,13 @@ kill_instance_script: kill_instance.{instance_name}.sh
         print("Delete the instance:")
     else:
         print("Delete the instance family:")
-    print("$ ./kill-instance." + instance_name + ".sh")
+    print("./kill-instance." + instance_name + ".sh")
 
     # Print the AMI build command to the console.
 
     print("")
     print("Build an AMI from the new instance:")
-    print("$ ./build-ami." + instance_name + ".sh")
+    print("./build-ami." + instance_name + ".sh")
 
     # Generate the SNS message body and publish a notification announcing
     # creation of the instance(s).

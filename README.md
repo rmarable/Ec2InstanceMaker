@@ -507,7 +507,7 @@ Exiting session with sessionId: rmarable-0123456789abcdef0.
 
 Reconnect to dev01 by running this command:
 
-$ ./access_instance.py -N dev01
+./access_instance.py -N dev01
 ```
 
 For a single Windows instance, `access_instance.py` decrypts the
@@ -563,7 +563,7 @@ Exiting session with sessionId: rmarable-0fedcba9876543210.
 
 Reconnect to fam01-1 by running this command:
 
-$ ./access_instance.py -N fam01
+./access_instance.py -N fam01
 ```
 
 Windows families work the same way — the password table for every member
@@ -602,7 +602,7 @@ Access the new instance family members with Windows Remote Desktop:
 +---------------+---------------+----------------------------------+
 
 Reprint this table:
-$ ./access_instance -N dev01
+./access_instance.py -N dev01
 ```
 
 ### Managing Instances

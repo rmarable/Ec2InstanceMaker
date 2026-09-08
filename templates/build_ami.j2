@@ -123,8 +123,8 @@ echo ""
 echo "Finished building: $AMI_ID"
 echo ""
 echo "To relaunch {{ instance_name }} with this new AMI:"
-echo "\$ ./kill-instance.{{ instance_name }}.sh"
-echo "\$ ${MAKE_INSTANCE_CMD} --custom_ami=$AMI_ID"
+echo "./kill-instance.{{ instance_name }}.sh"
+echo "${MAKE_INSTANCE_CMD} --custom_ami=$AMI_ID"
 
 # Cleanup and exit.
 
