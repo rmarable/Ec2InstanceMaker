@@ -16,12 +16,14 @@
 # make_instance.py.
 ################################################################################
 
+import errno
 import ipaddress
 import os
 import sys
 import time
 from datetime import datetime as DateTime
 
+import boto3
 from botocore.exceptions import ClientError
 
 # Function: validate_az_and_region()
@@ -585,3 +587,256 @@ def setup_cloudwatch_logging(logs_client, log_group_name, log_retention_days, re
         logs_client.put_retention_policy(logGroupName=log_group_name, retentionInDays=log_retention_days)
     except ClientError as e:
         refer_to_docs_and_quit("AWS API error while setting retention policy on " + log_group_name + ": " + str(e))
+
+
+################################################################################
+# The functions below extract the remaining logic that was still inline in
+# make_instance.py -- see CLAUDE-STATE.md for the phased plan this completes.
+################################################################################
+
+# Function: validate_instance_name_and_owner_casing()
+# Purpose: reject instance_name/instance_owner values containing uppercase
+# letters -- both feed into AWS resource names and tags where mixed case
+# has caused real problems before (S3/DNS-style naming rules elsewhere in
+# AWS), so this is caught here rather than surfacing as a confusing
+# downstream API error.
+
+
+def validate_instance_name_and_owner_casing(instance_name, instance_owner, refer_to_docs_and_quit):
+    if any(char.isupper() for char in instance_name) or any(char.isupper() for char in instance_owner):
+        refer_to_docs_and_quit("instance_name and instance_owner may not contain uppercase letters!")
+
+
+# Function: get_terraform_version()
+# Purpose: get the installed Terraform version, aborting with a clear
+# message if Terraform is missing. Replaces the original
+# `subprocess.check_output("terraform -version | head -1 | awk '{print
+# $2}'", shell=True, ...)` pipeline -- list-form `terraform -version` with
+# the version token parsed in Python needs no shell=True and no dependency
+# on head/awk being on PATH too. A missing `terraform` binary now raises a
+# catchable FileNotFoundError instead of silently producing empty output
+# for the original code's `if not TERRAFORM_VERSION:` check to notice.
+
+
+def get_terraform_version(refer_to_docs_and_quit, run=None):
+    import subprocess
+
+    if run is None:
+        run = subprocess.run
+    try:
+        result = run(["terraform", "-version"], capture_output=True, text=True)
+    except FileNotFoundError:
+        refer_to_docs_and_quit("Terraform is missing! Please visit: https://www.terraform.io/downloads")
+        return None
+    first_line = result.stdout.splitlines()[0] if result.stdout else ""
+    parts = first_line.split()
+    if len(parts) < 2:
+        refer_to_docs_and_quit("Terraform is missing! Please visit: https://www.terraform.io/downloads")
+        return None
+    return parts[1]
+
+
+# Function: create_aws_clients()
+# Purpose: construct every boto3 client/resource make_instance.py needs in
+# one place -- a single seam for tests to mock instead of patching
+# boto3.client globally with per-service dispatch logic. Constructing a
+# boto3 client/resource performs no network I/O by itself (that only
+# happens when a method on it is actually called), so bundling every
+# client's construction here, ahead of where each was previously created
+# piecemeal through the build flow, changes nothing observable.
+
+
+class AwsClients:
+    def __init__(self, ec2_client, ec2, iam, sns_client, stsclient):
+        self.ec2_client = ec2_client
+        self.ec2 = ec2
+        self.iam = iam
+        self.sns_client = sns_client
+        self.stsclient = stsclient
+
+
+def create_aws_clients(region, boto3_client=boto3.client, boto3_resource=boto3.resource):
+    return AwsClients(
+        ec2_client=boto3_client("ec2", region_name=region),
+        ec2=boto3_resource("ec2", region_name=region),
+        iam=boto3_client("iam"),
+        sns_client=boto3_client("sns", region_name=region),
+        stsclient=boto3_client("sts", region_name=region, endpoint_url="https://sts." + region + ".amazonaws.com"),
+    )
+
+
+# Function: ensure_state_directories()
+# Purpose: idempotently create the three top-level local state directories
+# this tool writes into.
+
+
+def ensure_state_directories(instance_data_dir):
+    for directory in ("./vars_files", instance_data_dir, "./active_instances"):
+        try:
+            os.makedirs(directory)
+        except OSError as e:
+            if e.errno != errno.EEXIST:
+                raise
+
+
+# Function: abort_if_vars_file_exists()
+# Purpose: refuse to proceed if vars_file_path already exists -- an
+# existing vars_file means this instance_name was already built, and
+# silently building over it would corrupt local state. Prints the exact
+# commands an operator needs to clear it and retry. Exits directly via
+# sys.exit(1) (matching setup_keypair()'s precedent above) rather than
+# refer_to_docs_and_quit, since this bespoke multi-line guidance message
+# predates that helper and shouldn't be wrapped in its generic boilerplate.
+
+
+def abort_if_vars_file_exists(vars_file_path, argv):
+    if not os.path.isfile(vars_file_path):
+        return
+    print("")
+    print("  WARNING  ".center(80, "*"))
+    print(("  Found an existing " + vars_file_path + " ").center(80, "-"))
+    print("")
+    print("Please delete this file and retry the build:")
+    print("")
+    print("$ rm " + vars_file_path)
+    print("$ " + " ".join(argv))
+    print("")
+    print("Aborting...")
+    sys.exit(1)
+
+
+# Function: write_serial_number_file()
+# Purpose: write the initial serial-number tracking file for a new
+# instance_name, recording the exact command line used to build it (read
+# back later by templates/build_ami.j2's "relaunch with this AMI"
+# guidance). Only writes once per instance_name -- a no-op on any rebuild
+# attempt that got this far (which normally can't happen, since
+# abort_if_vars_file_exists() already refuses a duplicate build first).
+#
+# Bug fix during extraction: the original inline code guarded this with
+# `if not os.path.isfile(instance_serial_number):` -- checking the serial
+# *number string* (e.g. "myinstance-053012092025"), never a real file
+# path, instead of `instance_serial_number_file`. That condition was
+# always true in practice, making the guard a no-op; fixed here to check
+# the actual file path, matching the evident original intent. Also
+# switched to explicit `with open(...)` context managers instead of
+# relying on garbage collection to close the file handles (same class of
+# fix already applied this session to the .pem keypair write).
+
+
+def write_serial_number_file(instance_serial_number_file, instance_name, instance_serial_datestamp, argv):
+    if os.path.isfile(instance_serial_number_file):
+        return
+    with open(instance_serial_number_file, "w") as fh:
+        print(f"{instance_name}.{instance_serial_datestamp}", file=fh)
+    with open(instance_serial_number_file, "a") as fh:
+        print(" ".join(argv), file=fh)
+
+
+# Function: resolve_ebs_optimized_support()
+# Purpose: downgrade ebs_optimized to "false" with a console warning if the
+# selected instance_type doesn't support it, rather than letting Terraform
+# fail later with an opaque AWS error. A no-op (returns ebs_optimized
+# unchanged) if ebs_optimized was already "false".
+
+
+def resolve_ebs_optimized_support(ebs_optimized, instance_type, ebs_optimized_support, instance_name):
+    if ebs_optimized != "true":
+        return ebs_optimized
+    if ebs_optimized_support == "unsupported":
+        print("")
+        print("*** WARNING ***")
+        print(instance_type + " does not support EBS optimization!")
+        print("Disabling ebs_optimization for: " + instance_name)
+        return "false"
+    print("")
+    print("EBS optimization: Enabled")
+    return ebs_optimized
+
+
+# Function: resolve_request_type_pricing()
+# Purpose: for ondemand, print the "spot is cheaper" reminder and return
+# sentinel UNDEFINED pricing values. For spot, look up and buffer the
+# current Spot price. fetch_spot_price_raw/compute_buffered_spot_price are
+# dependency-injected (already-tested functions of the same name above).
+
+
+def resolve_request_type_pricing(request_type, ec2_client, instance_type, is_windows, az, spot_buffer, debug_mode, fetch_spot_price_raw, compute_buffered_spot_price, p_val):
+    if request_type == "ondemand":
+        print("")
+        print("Selected: ondemand (NOTE: spot instances are **MUCH** cheaper!)")
+        return "UNDEFINED", "UNDEFINED"
+    spot_price_raw = fetch_spot_price_raw(ec2_client, instance_type, is_windows, az)
+    spot_price = compute_buffered_spot_price(spot_price_raw, spot_buffer)
+    p_val("spot_price_raw", debug_mode)
+    p_val("spot_price_buffer", debug_mode)
+    p_val("spot_price", debug_mode)
+    print("")
+    print("Setting spot_price: $" + str(spot_price) + "/hr")
+    return spot_price, spot_buffer
+
+
+# Function: resolve_placement_group_strategy()
+# Purpose: validate and enable the EC2 placement group, or reset
+# placement_group_strategy to the UNDEFINED sentinel when disabled. Aborts
+# if a single instance requests a placement group (Terraform doesn't
+# support a one-member "cluster").
+
+
+def resolve_placement_group_strategy(enable_placement_group, count, instance_type, placement_group_strategy, instance_type_info, ec2_placement_group_check, refer_to_docs_and_quit, debug_mode, p_val):
+    if enable_placement_group != "true":
+        return "UNDEFINED"
+    if count == 1:
+        refer_to_docs_and_quit("Using placement groups requires deploying more than a single instance!")
+    ec2_placement_group_check(instance_type, placement_group_strategy, instance_type_info["placement_group_strategies"], debug_mode)
+    print("Enabling: EC2 Placement Group")
+    print("Strategy: " + placement_group_strategy)
+    print("")
+    if debug_mode == "true":
+        p_val("placement_group_strategy", debug_mode)
+    return placement_group_strategy
+
+
+# Function: create_sns_topic_and_subscribe()
+# Purpose: create a unique SNS topic for this instance(s)'s build/teardown
+# notifications and subscribe instance_owner_email to it.
+
+
+def create_sns_topic_and_subscribe(sns_client, instance_serial_number, instance_owner_email):
+    sns_topic_name = "Ec2_Instance_SNS_Alerts_" + str(instance_serial_number)
+    sns_topic = sns_client.create_topic(Name=sns_topic_name)
+    sns_topic_arn = sns_topic["TopicArn"]
+    sns_client.subscribe(TopicArn=sns_topic_arn, Protocol="email", Endpoint=instance_owner_email)
+    return sns_topic_name, sns_topic_arn
+
+
+# Function: publish_sns_notification()
+# Purpose: publish the build-completion notification to the SNS topic.
+
+
+def publish_sns_notification(sns_client, sns_topic_arn, sns_message_body, sns_instance_subject):
+    sns_client.publish(TopicArn=sns_topic_arn, Message=sns_message_body, Subject=sns_instance_subject)
+
+
+# Function: build_windows_password_table()
+# Purpose: build the printable Name/IP/Administrator-password table for
+# newly-created Windows instance(s). Uses an in-memory CSV (io.StringIO)
+# rather than a real temp file on disk -- prettytable.from_csv only needs
+# a file-like object, so there's no reason to touch the filesystem, and no
+# leftover temp file to clean up if something raises partway through.
+
+
+def build_windows_password_table(instance_data_dir, ec2_keypair, fetch_windows_instance_details, decrypt_windows_admin_passwords):
+    import io
+
+    from prettytable import from_csv
+
+    windows_instance_id, windows_instance_name, windows_ip_address = fetch_windows_instance_details(instance_data_dir)
+    windows_administrator_password = decrypt_windows_admin_passwords(instance_data_dir, ec2_keypair, windows_instance_id)
+
+    csv_buffer = io.StringIO()
+    csv_buffer.write("Instance Name,IP Address,Adminstrator Password\n")
+    for name, ip_address, password in zip(windows_instance_name.split(","), windows_ip_address.split(","), windows_administrator_password.split(","), strict=True):
+        csv_buffer.write(name + "," + ip_address + "," + password + "\n")
+    csv_buffer.seek(0)
+    return from_csv(csv_buffer)

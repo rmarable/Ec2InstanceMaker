@@ -887,3 +887,213 @@ class TestSetupCloudwatchLogging:
 
         with pytest.raises(SystemExit):
             instance_builder.setup_cloudwatch_logging(logs_client, "/ec2instancemaker/dev01", 30, quit_fn)
+
+
+class TestValidateInstanceNameAndOwnerCasing:
+    def test_all_lowercase_is_fine(self):
+        quit_fn = _quitting_mock()
+        instance_builder.validate_instance_name_and_owner_casing("dev01", "alice", quit_fn)
+        quit_fn.assert_not_called()
+
+    def test_uppercase_instance_name_quits(self):
+        quit_fn = _quitting_mock()
+        with pytest.raises(SystemExit):
+            instance_builder.validate_instance_name_and_owner_casing("Dev01", "alice", quit_fn)
+        quit_fn.assert_called_once()
+
+    def test_uppercase_instance_owner_quits(self):
+        quit_fn = _quitting_mock()
+        with pytest.raises(SystemExit):
+            instance_builder.validate_instance_name_and_owner_casing("dev01", "Alice", quit_fn)
+        quit_fn.assert_called_once()
+
+
+class TestGetTerraformVersion:
+    def test_parses_version_from_first_line(self):
+        quit_fn = _quitting_mock()
+        run = MagicMock(return_value=MagicMock(stdout="Terraform v1.5.7\non darwin_arm64\n"))
+        result = instance_builder.get_terraform_version(quit_fn, run=run)
+        assert result == "v1.5.7"
+        quit_fn.assert_not_called()
+
+    def test_missing_terraform_binary_quits(self):
+        quit_fn = _quitting_mock()
+        run = MagicMock(side_effect=FileNotFoundError())
+        with pytest.raises(SystemExit):
+            instance_builder.get_terraform_version(quit_fn, run=run)
+        quit_fn.assert_called_once()
+
+    def test_empty_output_quits(self):
+        quit_fn = _quitting_mock()
+        run = MagicMock(return_value=MagicMock(stdout=""))
+        with pytest.raises(SystemExit):
+            instance_builder.get_terraform_version(quit_fn, run=run)
+        quit_fn.assert_called_once()
+
+    def test_uses_list_form_not_shell(self):
+        quit_fn = _quitting_mock()
+        run = MagicMock(return_value=MagicMock(stdout="Terraform v1.5.7\n"))
+        instance_builder.get_terraform_version(quit_fn, run=run)
+        called_args = run.call_args
+        assert called_args.args[0] == ["terraform", "-version"]
+        assert called_args.kwargs.get("shell", False) is False
+
+
+class TestCreateAwsClients:
+    def test_constructs_every_client_with_correct_service_and_region(self):
+        boto3_client = MagicMock(side_effect=lambda service, **kwargs: (service, kwargs))
+        boto3_resource = MagicMock(side_effect=lambda service, **kwargs: (service, kwargs))
+
+        clients = instance_builder.create_aws_clients("us-east-1", boto3_client, boto3_resource)
+
+        assert clients.ec2_client == ("ec2", {"region_name": "us-east-1"})
+        assert clients.ec2 == ("ec2", {"region_name": "us-east-1"})
+        assert clients.iam == ("iam", {})
+        assert clients.sns_client == ("sns", {"region_name": "us-east-1"})
+        assert clients.stsclient == ("sts", {"region_name": "us-east-1", "endpoint_url": "https://sts.us-east-1.amazonaws.com"})
+
+
+class TestEnsureStateDirectories:
+    def test_creates_all_three_directories(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        instance_builder.ensure_state_directories("./instance_data/dev01/")
+        assert (tmp_path / "vars_files").is_dir()
+        assert (tmp_path / "instance_data" / "dev01").is_dir()
+        assert (tmp_path / "active_instances").is_dir()
+
+    def test_idempotent_when_directories_already_exist(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        instance_builder.ensure_state_directories("./instance_data/dev01/")
+        instance_builder.ensure_state_directories("./instance_data/dev01/")  # should not raise
+
+
+class TestAbortIfVarsFileExists:
+    def test_no_op_when_file_does_not_exist(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        instance_builder.abort_if_vars_file_exists("./vars_files/dev01.yml", ["make_instance.py"])
+
+    def test_quits_when_file_exists(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "vars_files").mkdir()
+        (tmp_path / "vars_files" / "dev01.yml").write_text("existing")
+        with pytest.raises(SystemExit):
+            instance_builder.abort_if_vars_file_exists("./vars_files/dev01.yml", ["make_instance.py", "-N", "dev01"])
+
+
+class TestWriteSerialNumberFile:
+    def test_writes_name_and_argv_lines(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "active_instances").mkdir()
+        serial_file = "./active_instances/dev01.serial"
+        instance_builder.write_serial_number_file(serial_file, "dev01", "000000010926", ["make_instance.py", "-N", "dev01"])
+        content = (tmp_path / "active_instances" / "dev01.serial").read_text()
+        assert "dev01.000000010926" in content
+        assert "make_instance.py -N dev01" in content
+
+    def test_no_op_when_file_already_exists(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "active_instances").mkdir()
+        serial_file = tmp_path / "active_instances" / "dev01.serial"
+        serial_file.write_text("original content\n")
+        instance_builder.write_serial_number_file(str(serial_file), "dev01", "000000010926", ["make_instance.py"])
+        assert serial_file.read_text() == "original content\n"
+
+
+class TestResolveEbsOptimizedSupport:
+    def test_disabled_stays_disabled(self):
+        assert instance_builder.resolve_ebs_optimized_support("false", "t3.micro", "supported", "dev01") == "false"
+
+    def test_unsupported_instance_type_downgrades_with_warning(self, capsys):
+        result = instance_builder.resolve_ebs_optimized_support("true", "t2.micro", "unsupported", "dev01")
+        assert result == "false"
+        assert "does not support EBS optimization" in capsys.readouterr().out
+
+    def test_supported_instance_type_stays_enabled(self, capsys):
+        result = instance_builder.resolve_ebs_optimized_support("true", "t3.micro", "supported", "dev01")
+        assert result == "true"
+        assert "EBS optimization: Enabled" in capsys.readouterr().out
+
+
+class TestResolveRequestTypePricing:
+    def test_ondemand_returns_undefined_sentinels(self):
+        fetch_spot_price_raw = MagicMock()
+        compute_buffered_spot_price = MagicMock()
+        p_val = MagicMock()
+        spot_price, spot_buffer = instance_builder.resolve_request_type_pricing(
+            "ondemand", MagicMock(), "t3.micro", False, "us-east-1a", 0.318, "false", fetch_spot_price_raw, compute_buffered_spot_price, p_val
+        )
+        assert spot_price == "UNDEFINED"
+        assert spot_buffer == "UNDEFINED"
+        fetch_spot_price_raw.assert_not_called()
+        compute_buffered_spot_price.assert_not_called()
+
+    def test_spot_computes_buffered_price(self):
+        fetch_spot_price_raw = MagicMock(return_value=0.0116)
+        compute_buffered_spot_price = MagicMock(return_value=0.01518)
+        p_val = MagicMock()
+        ec2_client = MagicMock()
+        spot_price, spot_buffer = instance_builder.resolve_request_type_pricing(
+            "spot", ec2_client, "t3.micro", False, "us-east-1a", 0.318, "false", fetch_spot_price_raw, compute_buffered_spot_price, p_val
+        )
+        assert spot_price == 0.01518
+        assert spot_buffer == 0.318
+        fetch_spot_price_raw.assert_called_once_with(ec2_client, "t3.micro", False, "us-east-1a")
+        compute_buffered_spot_price.assert_called_once_with(0.0116, 0.318)
+
+
+class TestResolvePlacementGroupStrategy:
+    def test_disabled_returns_undefined(self):
+        refer_to_docs_and_quit = MagicMock()
+        result = instance_builder.resolve_placement_group_strategy("false", 1, "t3.micro", "cluster", {}, MagicMock(), refer_to_docs_and_quit, "false", MagicMock())
+        assert result == "UNDEFINED"
+        refer_to_docs_and_quit.assert_not_called()
+
+    def test_single_instance_with_placement_group_quits(self):
+        quit_fn = _quitting_mock()
+        with pytest.raises(SystemExit):
+            instance_builder.resolve_placement_group_strategy("true", 1, "t3.micro", "cluster", {"placement_group_strategies": ["cluster"]}, MagicMock(), quit_fn, "false", MagicMock())
+        quit_fn.assert_called_once()
+
+    def test_enabled_with_multiple_instances_validates_and_returns_strategy(self):
+        ec2_placement_group_check = MagicMock()
+        refer_to_docs_and_quit = MagicMock()
+        instance_type_info = {"placement_group_strategies": ["cluster", "spread"]}
+        result = instance_builder.resolve_placement_group_strategy("true", 3, "t3.micro", "cluster", instance_type_info, ec2_placement_group_check, refer_to_docs_and_quit, "false", MagicMock())
+        assert result == "cluster"
+        ec2_placement_group_check.assert_called_once_with("t3.micro", "cluster", ["cluster", "spread"], "false")
+        refer_to_docs_and_quit.assert_not_called()
+
+
+class TestCreateSnsTopicAndSubscribe:
+    def test_creates_topic_and_subscribes_email(self):
+        sns_client = MagicMock()
+        sns_client.create_topic.return_value = {"TopicArn": "arn:aws:sns:us-east-1:123456789012:Ec2_Instance_SNS_Alerts_dev01-000000010926"}
+        topic_name, topic_arn = instance_builder.create_sns_topic_and_subscribe(sns_client, "dev01-000000010926", "alice@example.com")
+        assert topic_name == "Ec2_Instance_SNS_Alerts_dev01-000000010926"
+        assert topic_arn == "arn:aws:sns:us-east-1:123456789012:Ec2_Instance_SNS_Alerts_dev01-000000010926"
+        sns_client.create_topic.assert_called_once_with(Name="Ec2_Instance_SNS_Alerts_dev01-000000010926")
+        sns_client.subscribe.assert_called_once_with(TopicArn=topic_arn, Protocol="email", Endpoint="alice@example.com")
+
+
+class TestPublishSnsNotification:
+    def test_publishes_with_correct_arguments(self):
+        sns_client = MagicMock()
+        instance_builder.publish_sns_notification(sns_client, "arn:aws:sns:...", "body text", "subject text")
+        sns_client.publish.assert_called_once_with(TopicArn="arn:aws:sns:...", Message="body text", Subject="subject text")
+
+
+class TestBuildWindowsPasswordTable:
+    def test_builds_table_from_fetched_and_decrypted_values(self):
+        fetch_windows_instance_details = MagicMock(return_value=("i-abc,i-def", "dev01-0,dev01-1", "10.0.0.1,10.0.0.2"))
+        decrypt_windows_admin_passwords = MagicMock(return_value="pw-one,pw-two")
+
+        table = instance_builder.build_windows_password_table("./instance_data/dev01/", "dev01-000000010926_us-east-1", fetch_windows_instance_details, decrypt_windows_admin_passwords)
+
+        decrypt_windows_admin_passwords.assert_called_once_with("./instance_data/dev01/", "dev01-000000010926_us-east-1", "i-abc,i-def")
+        rendered = str(table)
+        assert "dev01-0" in rendered
+        assert "10.0.0.1" in rendered
+        assert "pw-one" in rendered
+        assert "dev01-1" in rendered
+        assert "10.0.0.2" in rendered
+        assert "pw-two" in rendered

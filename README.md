@@ -340,8 +340,8 @@ options:
   --instance_owner_email INSTANCE_OWNER_EMAIL, -E INSTANCE_OWNER_EMAIL
                         Email address of the instance_owner (REQUIRED)
   --base_os {al2023,alinux2,alma9,alma10,rhel9,rhel10,rocky9,rocky10,ubuntu2404,ubuntu2604,windows2019,windows2022,windows2025}, -B {al2023,alinux2,alma9,alma10,rhel9,rhel10,rocky9,rocky10,ubuntu2404,ubuntu2604,windows2019,windows2022,windows2025}
-                        instance base operating system (default = alinux2
-                        a.k.a. Amazon Linux 2)
+                        instance base operating system (default = al2023
+                        a.k.a. Amazon Linux 2023)
   --count COUNT, -C COUNT
                         number of EC2 instances to create (default = 1)
   --custom_ami CUSTOM_AMI

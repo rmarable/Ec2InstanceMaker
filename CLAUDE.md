@@ -12,13 +12,16 @@ each run generates a per-instance Terraform/shell toolchain on disk under
 
 There is a `tests/` directory (pytest — see "Linting and CI" below) covering
 `aux_data.py`'s pure logic, mocked-AWS behavior of its boto3-calling
-functions, and behavioral assertions on rendered template output. It does
-not cover `make_instance.py`'s own orchestration flow (untestable without a
-much larger refactor — see CLAUDE-STATE.md) or a real end-to-end build.
-"Testing" a behavioral change beyond what `tests/` covers means running the
-relevant script against a real (or sandbox) AWS account and inspecting the
-generated files and AWS side effects — see "Manually exercising the tool"
-below.
+functions, behavioral assertions on rendered template output, and (since
+`make_instance.py` was wrapped in `main(argv=None)` — see CLAUDE-STATE.md
+for the extraction history) a coarse orchestration test in
+`tests/test_make_instance_integration.py` that calls `main()` directly
+with every AWS/Terraform-touching function mocked, exercising the real
+`instance_parameters` dict against the real Jinja2 templates. It does not
+cover a real end-to-end build against live AWS. "Testing" a behavioral
+change beyond what `tests/` covers means running the relevant script
+against a real (or sandbox) AWS account and inspecting the generated files
+and AWS side effects — see "Manually exercising the tool" below.
 
 ## Environment setup
 
@@ -128,14 +131,16 @@ $ pre-commit run --all-files  # run everything on demand
 
 ## Architecture
 
-**`make_instance.py`** is the orchestrator: a linear, top-to-bottom
-`__main__`-style script (no classes) that parses CLI args and then calls,
-in sequence, the extracted functions in `instance_builder.py` (AZ/region
-validation, EBS/spot-price validation, VPC/subnet/security-group
-resolution, AMI/keypair/IAM setup, Terraform apply, vars-file writing,
-etc. — see `instance_builder.py` below for the full list) threading their
-results through local variables into the final `instance_parameters`
-dict. The broad shape:
+**`make_instance.py`** is the orchestrator: `parse_args(argv=None)` builds
+and parses the CLI flags, and `main(argv=None)` calls, in sequence, the
+extracted functions in `instance_builder.py` (AZ/region validation,
+EBS/spot-price validation, VPC/subnet/security-group resolution,
+AMI/keypair/IAM setup, Terraform apply, vars-file writing, etc. — see
+`instance_builder.py` below for the full list) threading their results
+through local variables into the final `instance_parameters` dict, ending
+with `if __name__ == "__main__": main()`. No classes — free functions with
+explicit arguments throughout, same as `instance_builder.py`. The broad
+shape:
 1. Parses CLI flags (argparse) and validates them (AZ, base_os/instance
    type compatibility, EBS size/type, etc.) using helpers from
    `aux_data.py`.
@@ -220,15 +225,19 @@ down every place that needs to know about it.
 CLAUDE-STATE.md for the extraction history). Every function here takes its
 dependencies as explicit arguments — no hidden globals, no reliance on
 `make_instance.py`'s execution order — and is covered by
-`tests/test_instance_builder.py` (180+ tests). Covers: AZ/region
+`tests/test_instance_builder.py` (100+ tests). Covers: AZ/region
 validation, instance serial number / SNS timestamp generation, EBS
 size/IOPS validation, spot-price lookup, VPC/subnet/security-group
 resolution, AMI resolution, EC2 keypair setup, the full IAM role/policy/
 instance-profile setup (both the "create a new role" and "use a
 pre-existing role" paths, including the previously-duplicated instance-
 profile-creation logic now shared between them), the SNS notification
-body, Terraform apply, security-group tagging, Windows instance-details/
-Administrator-password retrieval, and vars-file writing.
+body/topic creation/publish, Terraform apply and version detection,
+security-group tagging, Windows instance-details/Administrator-password
+retrieval (built from an in-memory CSV, not a real temp file), state
+directory setup and the duplicate-build guard, `create_aws_clients()`
+(bundles every boto3 client/resource construction behind one seam,
+`AwsClients`), and vars-file writing.
 
 **Deliberately left inline in `make_instance.py`, not extracted:** the
 `instance_parameters` dict literal itself (a direct mapping of already-
