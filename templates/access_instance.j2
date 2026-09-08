@@ -186,16 +186,21 @@ print('Opening a Remote Desktop tunnel to: ' + rdp_instance_name)
 print('Connect your Remote Desktop client to: localhost:' + rdp_local_port)
 print('Press Ctrl+C to close the tunnel when finished.')
 print('')
-subprocess.run(
-    [
-        'aws', 'ssm', 'start-session',
-        '--target', rdp_instance_id,
-        '--region', region,
-        '--document-name', 'AWS-StartPortForwardingSession',
-        '--parameters', '{"portNumber":["3389"],"localPortNumber":["' + rdp_local_port + '"]}',
-    ],
-    cwd=instance_data_dir,
-)
+try:
+    subprocess.run(
+        [
+            'aws', 'ssm', 'start-session',
+            '--target', rdp_instance_id,
+            '--region', region,
+            '--document-name', 'AWS-StartPortForwardingSession',
+            '--parameters', '{"portNumber":["3389"],"localPortNumber":["' + rdp_local_port + '"]}',
+        ],
+        cwd=instance_data_dir,
+    )
+except KeyboardInterrupt:
+    pass
+print('')
+print('Closed the Remote Desktop tunnel to: ' + rdp_instance_name)
 print('')
 print('Reprint this table and reopen the tunnel:')
 if menu_index == 0:
@@ -255,7 +260,10 @@ with open(csvTempFile, newline='') as infh:
                     print('Aborting...')
                     sys.exit(1)
             else:
-                subprocess.run(['aws', 'ssm', 'start-session', '--target', ssh_instance_id, '--region', region], cwd=instance_data_dir)
+                try:
+                    subprocess.run(['aws', 'ssm', 'start-session', '--target', ssh_instance_id, '--region', region], cwd=instance_data_dir)
+                except KeyboardInterrupt:
+                    pass
 
 {% else %}
 # Connect to the new instance via SSM Session Manager.
@@ -270,7 +278,10 @@ if ec2_IpAddress == '':
     print('Aborting...')
     sys.exit(1)
 else:
-    subprocess.run(['aws', 'ssm', 'start-session', '--target', ec2_InstanceId, '--region', region], cwd=instance_data_dir)
+    try:
+        subprocess.run(['aws', 'ssm', 'start-session', '--target', ec2_InstanceId, '--region', region], cwd=instance_data_dir)
+    except KeyboardInterrupt:
+        pass
 {% endif %}
 
 # Print reconnection information to the console.

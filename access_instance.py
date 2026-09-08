@@ -42,8 +42,14 @@ if os.path.exists("instance_data/" + instance_name + "/access_instance." + insta
     try:
         subprocess.run(cmd, cwd=os.path.join("instance_data", instance_name))
     except KeyboardInterrupt:
+        # Ctrl-C during an active SSM session (not just an unanswered menu
+        # prompt) lands here too -- both this process and the child script
+        # are in the same terminal foreground process group and receive the
+        # same SIGINT, so this fires whether or not a selection was ever
+        # made. Keep the message generic rather than assuming which case it
+        # was.
         print("")
-        print("No selection detected!")
+        print("Interrupted.")
         print("Exiting...")
         sys.exit(1)
 else:

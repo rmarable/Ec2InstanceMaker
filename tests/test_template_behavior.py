@@ -310,6 +310,31 @@ class TestAccessInstanceHardening:
         assert "tempfile.mkstemp" in access_script
         assert "/tmp/_csvTempFile_" not in access_script  # nosec B108 - asserting the old insecure pattern is ABSENT, not present
 
+    @staticmethod
+    def _assert_wrapped_in_try_except_keyboard_interrupt(script_lines, needle):
+        # Regression tests for a real bug found via a live session: Ctrl-C
+        # while an `aws ssm start-session` call is active used to propagate
+        # as an unhandled KeyboardInterrupt, printing a raw Python traceback
+        # instead of exiting cleanly (both this script and the aws CLI child
+        # process are in the same terminal foreground process group, so
+        # Ctrl-C reaches both). Checks a `try:` line precedes the call
+        # (allowing for a multi-line subprocess.run(...) call, e.g. the RDP
+        # tunnel's) and an `except KeyboardInterrupt:` follows it shortly
+        # after, regardless of exact indentation depth.
+        call_index = next(i for i, line in enumerate(script_lines) if needle in line)
+        assert any(script_lines[i].strip() == "try:" for i in range(max(call_index - 3, 0), call_index))
+        assert any(script_lines[i].strip() == "except KeyboardInterrupt:" for i in range(call_index + 1, min(call_index + 10, len(script_lines))))
+
+    def test_single_instance_ssm_session_survives_ctrl_c(self):
+        rendered = render({"base_os": "al2023", "count": 1})
+        access_script = rendered["access_instance.j2"]
+        self._assert_wrapped_in_try_except_keyboard_interrupt(access_script.splitlines(), "subprocess.run(['aws', 'ssm', 'start-session', '--target', ec2_InstanceId")
+
+    def test_family_ssm_session_survives_ctrl_c(self):
+        rendered = render({"base_os": "al2023", "count": 3})
+        access_script = rendered["access_instance.j2"]
+        self._assert_wrapped_in_try_except_keyboard_interrupt(access_script.splitlines(), "subprocess.run(['aws', 'ssm', 'start-session', '--target', ssh_instance_id")
+
 
 class TestAccessInstanceWindowsRdpTunnel:
     """Windows access no longer requires exposing port 3389 to any CIDR --
@@ -349,6 +374,14 @@ class TestAccessInstanceWindowsRdpTunnel:
         access_script = rendered["access_instance.j2"]
         assert "'aws', 'ssm', 'start-session'," in access_script
         assert "rdp_local_port" in access_script
+
+    def test_rdp_tunnel_survives_ctrl_c(self):
+        # Ctrl-C is the *documented* way to close this tunnel ("Press
+        # Ctrl+C to close the tunnel when finished.") -- it must never
+        # produce a raw traceback.
+        rendered = render(dict(self.WINDOWS_OVERRIDES, count=1))
+        access_script = rendered["access_instance.j2"].splitlines()
+        TestAccessInstanceHardening._assert_wrapped_in_try_except_keyboard_interrupt(access_script, "'aws', 'ssm', 'start-session',")
 
 
 class TestInstanceUserdataSsmAgentInstall:
