@@ -827,7 +827,7 @@ installed, won't have it; Claude Code loads MCP servers at startup only.
 
 To register it outside this checkout:
 ```
-$ claude mcp add ec2instancemaker /path/to/Ec2InstanceMaker/.venv/bin/python3 /path/to/Ec2InstanceMaker/mcp_server.py
+$ claude mcp add ec2instancemaker $(pwd)/.venv/bin/python3 $(pwd)/mcp_server.py
 ```
 
 Claude Desktop app: Settings -> Connectors -> Add connector -> Local

@@ -553,8 +553,8 @@ read automatically by any Claude Code session started from the repo
 root; no registration step. Verify with `/mcp` inside that session —
 `ec2instancemaker` should list all 8 tools. To register it for use
 outside this checkout: `claude mcp add ec2instancemaker
-/path/to/Ec2InstanceMaker/.venv/bin/python3
-/path/to/Ec2InstanceMaker/mcp_server.py`. A session started before
+$(pwd)/.venv/bin/python3 $(pwd)/mcp_server.py` (run from the repo root).
+A session started before
 `.mcp.json` existed, or before `requirements-mcp.txt` was installed,
 will not have the server — Claude Code loads MCP servers at startup
 only.
