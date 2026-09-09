@@ -137,16 +137,27 @@ CI installs it the same way (`.github/workflows/lint.yml`).
 ## Architecture
 
 **`make_instance.py`** is the orchestrator: `parse_args(argv=None)` builds
-and parses the CLI flags, and `main(argv=None)` (fully type-hinted, `->
-NoReturn` -- every path ends in `sys.exit`) calls, in sequence, 5 phase
-functions defined in this same file (`resolve_network_and_compute`,
-`resolve_vpc_security_and_keypair`, `provision_iam_sns_and_logging`,
-`render_and_apply`, `report_and_notify`), each wrapping calls into the
-extracted functions in `instance_builder.py` (AZ/region validation,
-EBS/spot-price validation, VPC/subnet/security-group resolution,
-AMI/keypair/IAM setup, Terraform apply, vars-file writing, etc. — see
-`instance_builder.py` below for the full list). The 5 phase functions
-deliberately stay in `make_instance.py`, not `instance_builder.py` --
+and parses the CLI flags, and `run_build(argv, refer_to_docs_and_quit,
+ctrlc_abort_seconds=None)` (fully type-hinted, returns a `BuildReport`)
+calls, in sequence, 5 phase functions defined in this same file
+(`resolve_network_and_compute`, `resolve_vpc_security_and_keypair`,
+`provision_iam_sns_and_logging`, `render_and_apply`, `report_and_notify`),
+each wrapping calls into the extracted functions in `instance_builder.py`
+(AZ/region validation, EBS/spot-price validation, VPC/subnet/security-group
+resolution, AMI/keypair/IAM setup, Terraform apply, vars-file writing,
+etc. — see `instance_builder.py` below for the full list).
+`main(argv=None) -> NoReturn` is a thin CLI wrapper: `run_build(argv,
+refer_to_docs_and_quit); sys.exit(0)`. `mcp_server.py`'s `build_instance`
+tool calls `run_build()` directly instead, passing its own
+`refer_to_docs_and_quit` (raises instead of exiting a long-running server
+process) and `ctrlc_abort_seconds=0` (skips the CTRL-C window entirely --
+see `mcp_server.py` below for why). Every phase function (and `render_and_
+apply`'s `ctrlC_Abort` call) takes `refer_to_docs_and_quit: QuitFn` as an
+explicit parameter rather than reaching for `aux_data.refer_to_docs_and_
+quit` by bare name -- the same convention `instance_builder.py`/
+`manage_instance.py` already use -- specifically so a caller other than
+`main()` can swap in a non-exiting one. The 5 phase functions deliberately
+stay in `make_instance.py`, not `instance_builder.py` --
 `tests/test_make_instance_integration.py`'s `monkeypatch.setattr(
 make_instance, "resolve_vpc_and_subnet", ...)`-style mocks only intercept
 attribute lookups on `make_instance`'s own namespace, so a phase body
@@ -157,9 +168,8 @@ existing mock. Values threaded between phases are bundled into small
 result dataclass per phase) rather than unpacked individually -- the same
 pattern `AwsClients`/`InstanceParameters` already established -- since
 several phases would otherwise need 15-25 parameters unpacked one at a
-time. `main()` ends with `if __name__ == "__main__": main()`. No classes
-beyond those dataclasses — free functions with explicit arguments
-throughout, same as `instance_builder.py`. The broad shape:
+time. No classes beyond those dataclasses — free functions with explicit
+arguments throughout, same as `instance_builder.py`. The broad shape:
 1. Parses CLI flags (argparse) and validates them (AZ, base_os/instance
    type compatibility, EBS size/type, etc.) using helpers from
    `aux_data.py`.
@@ -279,9 +289,15 @@ structure) via `dataclasses.asdict()` at each call site. The
 `--debug_mode` parameter dump is its own function,
 `print_debug_parameters(params: InstanceParameters) -> None`, reading
 every field off that one typed argument instead of ~50 separate local
-variables. **Deliberately left inline, not extracted further:** pure
-`print()`-only blocks (e.g. the kill-instance/build-ami command
-reminders) with no logic to test, and argparse's own flag definitions.
+variables. `report_and_notify()` (phase 5) prints the same post-apply
+console guidance it always has (access/kill/build-ami commands, the
+Windows password table if applicable) but now also returns a `BuildReport`
+dataclass summarizing all of it — the CLI's own `print()` calls are
+unchanged, this is purely an added return value for a programmatic caller
+like `mcp_server.py`'s `build_instance` tool. **Deliberately left inline,
+not extracted further:** pure `print()`-only blocks (e.g. the kill-
+instance/build-ami command reminders) with no logic to test, and
+argparse's own flag definitions.
 
 The 5-phase split (and everything above it in this file) was verified
 against a real live AWS build, not just mocks: `./make_instance.py -A
@@ -433,36 +449,62 @@ this one *is* unit tested (`tests/test_manage_instance.py`, a plain
 dependency-injected functions gated behind
 `if __name__ == "__main__": main()`.
 
-**`mcp_server.py`** exposes read-only lookups as MCP tools (via `mcp`'s
+**`mcp_server.py`** exposes Ec2InstanceMaker as MCP tools (via `mcp`'s
 `MCPServer`, `requirements-mcp.txt` — an optional dependency, not part of
 `requirements.txt`, since it's only needed to actually run the server, not
-to use the CLI toolkit) so an MCP client like Claude Code can query what's
-built/running without a human running `manage_instance.py` by hand:
-`list_instances(region)` and `get_instance_status(instance_name, region=None)`
-call `manage_instance.py`'s already-tested `list_all_managed_instances()`/
-`find_managed_instances()`/`resolve_region()` directly (no subprocess),
-and `get_build_record(instance_name)` reads `./vars_files/<name>.yml`
-straight off disk (no AWS call at all). This is deliberately read-only —
-no tool here creates, modifies, or destroys anything; build/destroy tools
-are an intentionally separate, not-yet-built follow-up, since letting an
-LLM trigger a real `make_instance.py`/`kill-instance.<name>.sh` run needs
-its own confirmation-gating design, not just Claude Code's own permission
-prompts. Two things make reusing `manage_instance.py`'s functions here
-straightforward: they already take `refer_to_docs_and_quit` as an
+to use the CLI toolkit) so an MCP client like Claude Code can query and
+drive builds without a human running the CLI scripts by hand. Five tools,
+two read-only and two read-write:
+- `list_instances(region)` / `get_instance_status(instance_name,
+  region=None)` call `manage_instance.py`'s already-tested
+  `list_all_managed_instances()`/`find_managed_instances()`/
+  `resolve_region()` directly (no subprocess), and `get_build_record(
+  instance_name)` reads `./vars_files/<name>.yml` straight off disk (no
+  AWS call at all).
+- `build_instance(...)` mirrors `make_instance.py`'s `parse_args()` flags
+  as typed keyword arguments (`Literal` types for every `choices=[...]`
+  flag, so MCP clients get a real enum-constrained JSON schema, not an
+  unconstrained string) plus a required `confirm: bool`, builds an `argv`
+  list from them, and calls `make_instance.run_build(argv, _mcp_quit,
+  ctrlc_abort_seconds=0)` directly — `ctrlc_abort_seconds=0` skips the
+  CLI's interactive CTRL-C window entirely, since there's no human at a
+  terminal to type into it; `confirm=True` is the real safety gate here
+  instead, checked before `run_build()` is ever called. Returns
+  `dataclasses.asdict()` of the `BuildReport` `run_build()` produces.
+  Creates real, billable AWS resources and can take several minutes
+  (Terraform apply + SSM provisioning) — see `make_instance.py` above for
+  what `run_build()`/`ctrlc_abort_seconds` actually do.
+- `destroy_instance(instance_name, confirm)` delegates to
+  `manage_instance.terminate_via_kill_script(instance_name, True,
+  _mcp_quit)` — `auto_confirm=True` skips that function's own `input()`
+  prompt, since `confirm=True` (checked the same way as `build_instance`,
+  before the call) is the MCP-level replacement for it. Needed zero
+  source changes to `manage_instance.py`: `terminate_via_kill_script()`
+  already took `refer_to_docs_and_quit`/`run_kill_script`/`confirm_input`
+  as injected parameters.
+
+Two things made reusing `manage_instance.py`'s/`make_instance.py`'s
+functions here straightforward: they take `refer_to_docs_and_quit` as an
 injected `Callable[[str], NoReturn]` rather than calling `sys.exit()`
 directly, so `mcp_server.py` swaps in `_mcp_quit()` (raises `RuntimeError`
-instead of exiting — a long-running server process can't have a lookup
-failure kill it), and neither function touches `subprocess` in the first
-place (that only shows up in `manage_instance.py`'s `terminate_via_kill_script()`/
-`main()`, which nothing here imports). Each `@mcp.tool()`-decorated
-function is a thin wrapper (constructs a real `boto3.client("ec2", ...)`
-and delegates) around a plain, separately-tested `_list_instances()`/
-`_get_instance_status()` — same dependency-injection pattern as
-`tests/test_manage_instance.py`, without exposing an `ec2_client`
-parameter in the tool's own JSON schema. Registered for Claude Code via
-the project-scoped `.mcp.json` (stdio transport, `.venv/bin/python3
-mcp_server.py`). Covered by `tests/test_mcp_server.py`; brought into
-`pyproject.toml`'s `[tool.mypy]` scope like every other top-level script.
+instead of exiting — a long-running server process can't have a lookup or
+validation failure kill it), and none of the read-only functions touch
+`subprocess` at all (only `terminate_via_kill_script()` does, deliberately,
+since the actual teardown logic lives in generated shell, not reusable
+Python). Each read-only `@mcp.tool()`-decorated function is a thin wrapper
+(constructs a real `boto3.client("ec2", ...)` and delegates) around a
+plain, separately-tested `_list_instances()`/`_get_instance_status()` —
+same dependency-injection pattern as `tests/test_manage_instance.py`,
+without exposing an `ec2_client` parameter in the tool's own JSON schema.
+`build_instance`/`destroy_instance` are tested by patching `run_build()`/
+`terminate_via_kill_script()` directly on `mcp_server`'s own namespace
+(same `monkeypatch.setattr(module, name, ...)` convention
+`tests/test_make_instance_integration.py` uses), plus one true end-to-end
+test that drives the real `run_build()` with only the AWS/Terraform
+boundary mocked. Registered for Claude Code via the project-scoped
+`.mcp.json` (stdio transport, `.venv/bin/python3 mcp_server.py`). Covered
+by `tests/test_mcp_server.py`; brought into `pyproject.toml`'s
+`[tool.mypy]` scope like every other top-level script.
 
 ## Working conventions specific to this repo
 

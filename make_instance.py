@@ -15,6 +15,7 @@ import dataclasses
 import functools
 import os
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from math import pi
 from typing import Literal, NoReturn
@@ -79,11 +80,12 @@ from instance_builder import (
 )
 from template_engine import render_instance_templates
 
-# Type alias used throughout this module's signatures -- same duplicated
+# Type aliases used throughout this module's signatures -- same duplicated
 # convention as instance_builder.py/aux_data.py/manage_instance.py/
-# access_instance.py (see the comment there for why it's not shared via
+# access_instance.py (see the comment there for why they're not shared via
 # import).
 BoolStr = Literal["true", "false"]
+QuitFn = Callable[[str], NoReturn]
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -387,6 +389,23 @@ class IamSnsAndLoggingResolution:
     sns_timestamp: str
 
 
+# BuildReport is run_build()'s return value -- the same information
+# report_and_notify() prints to the console for a CLI operator, structured
+# for a programmatic caller (mcp_server.py's build_instance tool) instead.
+
+
+@dataclass
+class BuildReport:
+    instance_name: str
+    count: int
+    is_windows: bool
+    access_command: str | None
+    windows_password_table: str | None
+    kill_script: str
+    build_ami_script: str
+    sns_topic_arn: str
+
+
 # Function: resolve_network_and_compute()
 # Purpose: phase 1 -- AZ/region validation, instance_type_info, base_os
 # checks/family, EBS optimize/encrypt/resize, spot pricing, placement
@@ -399,6 +418,7 @@ def resolve_network_and_compute(
     ebs: EbsRequest,
     spot_buffer: float,
     placement_group_strategy: str,
+    refer_to_docs_and_quit: QuitFn,
 ) -> NetworkAndComputeResolution:
     ec2_client = aws_clients.ec2_client
     debug_mode = settings.debug_mode
@@ -490,6 +510,7 @@ def resolve_vpc_security_and_keypair(
     ssh_allowed_ips: str,
     custom_ami: str,
     ec2_keypair: str,
+    refer_to_docs_and_quit: QuitFn,
 ) -> VpcSecurityAndKeypairResolution:
     ec2_client = aws_clients.ec2_client
     ec2 = aws_clients.ec2
@@ -556,6 +577,7 @@ def provision_iam_sns_and_logging(
     aws_clients: AwsClients,
     iam_role: str,
     iam_json_policy: str,
+    refer_to_docs_and_quit: QuitFn,
 ) -> IamSnsAndLoggingResolution:
     debug_mode = settings.debug_mode
 
@@ -610,6 +632,11 @@ def provision_iam_sns_and_logging(
 # Purpose: phase 4 -- assemble InstanceParameters, print the --debug_mode
 # dump, write the vars_file, render the Jinja2 templates, run the
 # CTRL-C-abort safety window, apply Terraform, and tag the security group.
+# ctrlc_abort_seconds overrides the window's length (default: computed from
+# debug_mode, same as always) -- mcp_server.py's build_instance tool passes
+# 0, since there's no human at a terminal to type CTRL-C in the first place;
+# real safety there comes from the tool's own required confirm=True
+# argument instead.
 
 
 def render_and_apply(
@@ -624,6 +651,8 @@ def render_and_apply(
     instance_data_dir_abs: str,
     custom_user_prelogin_scripts: list[str],
     custom_user_postboot_scripts: list[str],
+    refer_to_docs_and_quit: QuitFn,
+    ctrlc_abort_seconds: int | None = None,
 ) -> None:
     debug_mode = settings.debug_mode
 
@@ -817,7 +846,7 @@ kill_instance_script: kill_instance.{instance_name}.sh
         print("Rendered instance templates into: " + instance_data_dir_abs, file=fh)
 
     ctrlC_Abort(
-        30 if debug_mode == "true" else 5,
+        ctrlc_abort_seconds if ctrlc_abort_seconds is not None else (30 if debug_mode == "true" else 5),
         80,
         settings.vars_file_path,
         settings.instance_data_dir,
@@ -852,8 +881,10 @@ kill_instance_script: kill_instance.{instance_name}.sh
 # Function: report_and_notify()
 # Purpose: phase 5 -- print post-apply console guidance (access/kill/AMI
 # commands), decrypt and print the Windows password table if applicable,
-# and publish the build-completion SNS notification. Terminal: every path
-# through main() ends here, so this is NoReturn like main() itself.
+# publish the build-completion SNS notification, and return a BuildReport
+# summarizing all of it for a programmatic caller. Every path through
+# run_build() ends here; main() is the only caller that then calls
+# sys.exit(0) itself.
 
 
 def report_and_notify(
@@ -862,19 +893,22 @@ def report_and_notify(
     network: NetworkAndComputeResolution,
     vpc: VpcSecurityAndKeypairResolution,
     iam_sns: IamSnsAndLoggingResolution,
-) -> NoReturn:
+    refer_to_docs_and_quit: QuitFn,
+) -> BuildReport:
     print("")
     print("".center(80, "="))
     print("")
 
+    access_command = None
     if not network.is_windows:
+        access_command = "./access_instance.py -N " + settings.instance_name
         if settings.count == 1:
             print("Access the new " + settings.base_os + " instance via SSM Session Manager:")
-            print("./access_instance.py -N " + settings.instance_name)
         else:
             print("Access the " + str(settings.count) + " members of the " + settings.base_os + " instance family via SSM Session Manager:")
-            print("./access_instance.py -N " + settings.instance_name)
+        print(access_command)
 
+    windows_instance_table = None
     if network.is_windows:
         windows_instance_table = build_windows_password_table(
             settings.instance_data_dir, vpc.ec2_keypair, functools.partial(fetch_windows_instance_details, refer_to_docs_and_quit=refer_to_docs_and_quit), decrypt_windows_admin_passwords
@@ -894,21 +928,43 @@ def report_and_notify(
         print("Delete the instance:")
     else:
         print("Delete the instance family:")
-    print("./kill-instance." + settings.instance_name + ".sh")
+    kill_script = "./kill-instance." + settings.instance_name + ".sh"
+    print(kill_script)
 
     print("")
     print("Build an AMI from the new instance:")
-    print("./build-ami." + settings.instance_name + ".sh")
+    build_ami_script = "./build-ami." + settings.instance_name + ".sh"
+    print(build_ami_script)
 
     sns_message_body, sns_instance_subject = build_sns_message(settings.count, settings.instance_name, settings.instance_type, settings.request_type, iam_sns.sns_datestamp, iam_sns.sns_timestamp)
     publish_sns_notification(aws_clients.sns_client, iam_sns.sns_topic_arn, sns_message_body, sns_instance_subject)
 
     print("")
     print("Exiting...")
-    sys.exit(0)
+
+    return BuildReport(
+        instance_name=settings.instance_name,
+        count=settings.count,
+        is_windows=network.is_windows,
+        access_command=access_command,
+        windows_password_table=windows_instance_table,
+        kill_script=kill_script,
+        build_ami_script=build_ami_script,
+        sns_topic_arn=iam_sns.sns_topic_arn,
+    )
 
 
-def main(argv: list[str] | None = None) -> NoReturn:
+# Function: run_build()
+# Purpose: the actual build orchestration -- parses argv, validates
+# parameters, and threads settings through all 5 phases, returning the
+# BuildReport report_and_notify() produces. main() (the CLI entry point,
+# below) is a thin sys.exit(0)-after wrapper around this; mcp_server.py's
+# build_instance tool calls this directly instead, passing its own
+# refer_to_docs_and_quit (raises instead of exiting) and
+# ctrlc_abort_seconds=0 (no interactive terminal to type CTRL-C into).
+
+
+def run_build(argv: list[str] | None, refer_to_docs_and_quit: QuitFn, ctrlc_abort_seconds: int | None = None) -> BuildReport:
     # Create variables from the optional instance parameter values provided
     # from the command line. Recording argv (falling back to sys.argv only
     # when the caller didn't provide one, e.g. the real `if __name__ ==
@@ -1085,17 +1141,17 @@ def main(argv: list[str] | None = None) -> NoReturn:
     # clean, friendly abort instead of a raw traceback from something
     # further down the line.
 
-    network = resolve_network_and_compute(settings, aws_clients, ebs, spot_buffer, placement_group_strategy)
+    network = resolve_network_and_compute(settings, aws_clients, ebs, spot_buffer, placement_group_strategy, refer_to_docs_and_quit)
 
     # Phase 2: VPC/subnet, ssh_allowed_ips, security group, ec2_user home
     # directory, AMI, keypair.
 
-    vpc = resolve_vpc_security_and_keypair(settings, aws_clients, network, vpc_name, security_group, ssh_allowed_ips, custom_ami, ec2_keypair)
+    vpc = resolve_vpc_security_and_keypair(settings, aws_clients, network, vpc_name, security_group, ssh_allowed_ips, custom_ami, ec2_keypair, refer_to_docs_and_quit)
 
     # Phase 3: CloudWatch log group, IAM role/policy/profile setup, Turbot
     # environment variables, SNS topic creation/subscribe/timestamps.
 
-    iam_sns = provision_iam_sns_and_logging(settings, aws_clients, iam_role, iam_json_policy)
+    iam_sns = provision_iam_sns_and_logging(settings, aws_clients, iam_role, iam_json_policy, refer_to_docs_and_quit)
 
     options = BuildOptions(
         preserve_ami=preserve_ami,
@@ -1110,13 +1166,20 @@ def main(argv: list[str] | None = None) -> NoReturn:
     # write the vars_file, render the Jinja2 templates, run the CTRL-C-abort
     # safety window, apply Terraform, and tag the security group.
 
-    render_and_apply(settings, aws_clients, network, vpc, iam_sns, options, ebs, cwd, instance_data_dir_abs, custom_user_prelogin_scripts, custom_user_postboot_scripts)
+    render_and_apply(
+        settings, aws_clients, network, vpc, iam_sns, options, ebs, cwd, instance_data_dir_abs, custom_user_prelogin_scripts, custom_user_postboot_scripts, refer_to_docs_and_quit, ctrlc_abort_seconds
+    )
 
     # Phase 5: post-apply console guidance, Windows password table if
     # applicable, and the build-completion SNS notification. Terminal --
-    # every path through main() ends here.
+    # every path through run_build() ends here.
 
-    report_and_notify(settings, aws_clients, network, vpc, iam_sns)
+    return report_and_notify(settings, aws_clients, network, vpc, iam_sns, refer_to_docs_and_quit)
+
+
+def main(argv: list[str] | None = None) -> NoReturn:
+    run_build(argv, refer_to_docs_and_quit)
+    sys.exit(0)
 
 
 if __name__ == "__main__":

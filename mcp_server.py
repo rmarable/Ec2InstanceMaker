@@ -13,8 +13,10 @@
 # 		are a separate, not-yet-built follow-up.
 ################################################################################
 
+import dataclasses
 import os
-from typing import Any, NoReturn
+from math import pi
+from typing import Any, Literal, NoReturn
 
 import boto3
 import yaml
@@ -22,7 +24,8 @@ from mcp.server.mcpserver import MCPServer
 from mypy_boto3_ec2.client import EC2Client
 from mypy_boto3_ec2.type_defs import InstanceTypeDef
 
-from manage_instance import find_managed_instances, list_all_managed_instances, resolve_region, tag_value
+from make_instance import BoolStr, run_build
+from manage_instance import find_managed_instances, list_all_managed_instances, resolve_region, tag_value, terminate_via_kill_script
 
 mcp = MCPServer("ec2instancemaker")
 
@@ -105,6 +108,172 @@ def get_build_record(instance_name: str) -> dict[str, Any]:
     if not content:
         raise RuntimeError('Build record at "' + vars_file_path + '" is empty or unreadable.')
     return dict(content)
+
+
+# Type aliases mirroring make_instance.py's parse_args() choices -- gives
+# MCP clients a real enum-constrained JSON schema for these parameters
+# instead of an unconstrained string, even though the dataclasses
+# run_build() threads them through (EbsRequest, BuildOptions, etc.) mostly
+# just declare str/BoolStr. A Literal value is a valid BoolStr/str, so this
+# is a pure schema improvement at the tool boundary, not a behavior change.
+_BaseOs = Literal["al2023", "alinux2", "alma9", "alma10", "rhel9", "rhel10", "rocky9", "rocky10", "ubuntu2404", "ubuntu2604", "windows2019", "windows2022", "windows2025"]
+_EbsVolumeType = Literal["gp2", "io1", "st1"]
+_IamJsonPolicy = Literal["MinimalEc2InstancePolicy.json", "GenericEc2InstancePolicy.json", "ExtendedEc2InstancePolicy.json"]
+_RequestType = Literal["ondemand", "spot"]
+_ProdLevel = Literal["dev", "test", "stage", "prod"]
+_PlacementGroupStrategy = Literal["cluster", "spread"]
+
+
+@mcp.tool()
+def build_instance(
+    az: str,
+    instance_name: str,
+    instance_owner: str,
+    instance_owner_email: str,
+    confirm: bool,
+    base_os: _BaseOs = "al2023",
+    count: int = 1,
+    custom_ami: str = "UNDEFINED",
+    custom_user_scripts: str = "default",
+    debug_mode: BoolStr = "false",
+    ebs_encryption: BoolStr = "false",
+    ebs_optimized: BoolStr = "true",
+    ebs_root_volume_iops: int = 0,
+    ebs_root_volume_size: int = 8,
+    ebs_root_volume_type: _EbsVolumeType = "gp2",
+    ebs_device_volume_iops: int = 0,
+    ebs_device_volume_size: int = 8,
+    ebs_device_volume_type: _EbsVolumeType = "gp2",
+    ec2_keypair: str = "ec2_keypair_default",
+    enable_placement_group: BoolStr = "false",
+    hyperthreading: BoolStr = "true",
+    iam_json_policy: _IamJsonPolicy = "GenericEc2InstancePolicy.json",
+    iam_name_prefix: str = "Ec2InstanceMaker",
+    iam_role: str = "UNDEFINED",
+    instance_owner_department: str = "compbio",
+    request_type: _RequestType = "ondemand",
+    instance_type: str = "t2.micro",
+    prod_level: _ProdLevel = "dev",
+    enable_cloudwatch_logs: BoolStr = "true",
+    log_retention_days: int = 30,
+    placement_group_strategy: _PlacementGroupStrategy = "cluster",
+    preserve_ami: BoolStr = "true",
+    preserve_cloudwatch_logs: BoolStr = "false",
+    project_id: str = "UNDEFINED",
+    public_ip: BoolStr = "true",
+    security_group: str = "ec2instancemaker_sg",
+    spot_buffer: float = round(1 / pi, 8),
+    ssh_allowed_ips: str = "UNDEFINED",
+    turbot_account: str = "DISABLED",
+    vpc_name: str = "vpc_default",
+) -> dict[str, Any]:
+    """Build a new Ec2InstanceMaker EC2 instance or family -- the MCP
+    equivalent of running make_instance.py. Creates real, billable AWS
+    resources (EC2 instance(s), security group, IAM role/policy/profile,
+    SNS topic, and, if enabled, a CloudWatch log group) and can take
+    several minutes (Terraform apply, then SSM provisioning). Requires
+    confirm=True: unlike the CLI, there is no interactive CTRL-C abort
+    window here. See make_instance.py --help / README.md for what each
+    parameter does."""
+    if not confirm:
+        raise RuntimeError('Set confirm=True to actually build "' + instance_name + '" -- this creates real, billable AWS resources.')
+
+    argv = [
+        "--az",
+        az,
+        "--instance_name",
+        instance_name,
+        "--instance_owner",
+        instance_owner,
+        "--instance_owner_email",
+        instance_owner_email,
+        "--base_os",
+        base_os,
+        "--count",
+        str(count),
+        "--custom_ami",
+        custom_ami,
+        "--custom_user_scripts",
+        custom_user_scripts,
+        "--debug_mode",
+        debug_mode,
+        "--ebs_encryption",
+        ebs_encryption,
+        "--ebs_optimized",
+        ebs_optimized,
+        "--ebs_root_volume_iops",
+        str(ebs_root_volume_iops),
+        "--ebs_root_volume_size",
+        str(ebs_root_volume_size),
+        "--ebs_root_volume_type",
+        ebs_root_volume_type,
+        "--ebs_device_volume_iops",
+        str(ebs_device_volume_iops),
+        "--ebs_device_volume_size",
+        str(ebs_device_volume_size),
+        "--ebs_device_volume_type",
+        ebs_device_volume_type,
+        "--ec2_keypair",
+        ec2_keypair,
+        "--enable_placement_group",
+        enable_placement_group,
+        "--hyperthreading",
+        hyperthreading,
+        "--iam_json_policy",
+        iam_json_policy,
+        "--iam_name_prefix",
+        iam_name_prefix,
+        "--iam_role",
+        iam_role,
+        "--instance_owner_department",
+        instance_owner_department,
+        "--request_type",
+        request_type,
+        "--instance_type",
+        instance_type,
+        "--prod_level",
+        prod_level,
+        "--enable_cloudwatch_logs",
+        enable_cloudwatch_logs,
+        "--log_retention_days",
+        str(log_retention_days),
+        "--placement_group_strategy",
+        placement_group_strategy,
+        "--preserve_ami",
+        preserve_ami,
+        "--preserve_cloudwatch_logs",
+        preserve_cloudwatch_logs,
+        "--project_id",
+        project_id,
+        "--public_ip",
+        public_ip,
+        "--security_group",
+        security_group,
+        "--spot_buffer",
+        str(spot_buffer),
+        "--ssh_allowed_ips",
+        ssh_allowed_ips,
+        "--turbot_account",
+        turbot_account,
+        "--vpc_name",
+        vpc_name,
+    ]
+    report = run_build(argv, _mcp_quit, ctrlc_abort_seconds=0)
+    return dataclasses.asdict(report)
+
+
+@mcp.tool()
+def destroy_instance(instance_name: str, confirm: bool) -> dict[str, Any]:
+    """Tear down an Ec2InstanceMaker-built instance or family: the EC2
+    instance(s), security group, IAM role/policy/profile, SNS topic, and
+    local state -- delegates to ./kill-instance.<instance_name>.sh, the
+    same script manage_instance.py -A terminate uses. Only works from the
+    repo checkout where the instance was built. Irreversible; requires
+    confirm=True."""
+    if not confirm:
+        raise RuntimeError('Set confirm=True to actually destroy "' + instance_name + '" -- this permanently deletes real AWS resources and cannot be undone.')
+    returncode = terminate_via_kill_script(instance_name, True, _mcp_quit)
+    return {"instance_name": instance_name, "kill_script_returncode": returncode}
 
 
 if __name__ == "__main__":
