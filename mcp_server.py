@@ -21,6 +21,7 @@ from typing import Any, Literal, NoReturn
 import boto3
 import yaml
 from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 from mypy_boto3_ec2.client import EC2Client
 from mypy_boto3_ec2.type_defs import InstanceTypeDef
 
@@ -37,11 +38,17 @@ mcp = MCPServer("ec2instancemaker")
 # lookup failure needs to surface as a tool error, not kill the server.
 # Raising satisfies the same Callable[[str], NoReturn] shape those
 # functions were already written against; no changes to manage_instance.py
-# were needed to reuse them here.
+# were needed to reuse them here. Raises ToolError, not a plain exception --
+# confirmed via a real stdio smoke test that this mcp SDK version (2.x)
+# treats any other exception type as an unexpected crash and masks its
+# message from the client (only "Error executing tool <name>" reaches
+# them, logged server-side as an "unexpected exception"). ToolError is the
+# SDK's designated type for an intentional, client-visible tool failure --
+# its message reaches the caller as-is.
 
 
 def _mcp_quit(error_msg: str) -> NoReturn:
-    raise RuntimeError(error_msg)
+    raise ToolError(error_msg)
 
 
 # Function: _instance_summary()
@@ -102,11 +109,11 @@ def get_build_record(instance_name: str) -> dict[str, Any]:
     read only; makes no AWS API call."""
     vars_file_path = os.path.join("vars_files", instance_name + ".yml")
     if not os.path.exists(vars_file_path):
-        raise RuntimeError('No build record found at "' + vars_file_path + '".')
+        raise ToolError('No build record found at "' + vars_file_path + '".')
     with open(vars_file_path) as fh:
         content = yaml.safe_load(fh)
     if not content:
-        raise RuntimeError('Build record at "' + vars_file_path + '" is empty or unreadable.')
+        raise ToolError('Build record at "' + vars_file_path + '" is empty or unreadable.')
     return dict(content)
 
 
@@ -176,7 +183,7 @@ def build_instance(
     window here. See make_instance.py --help / README.md for what each
     parameter does."""
     if not confirm:
-        raise RuntimeError('Set confirm=True to actually build "' + instance_name + '" -- this creates real, billable AWS resources.')
+        raise ToolError('Set confirm=True to actually build "' + instance_name + '" -- this creates real, billable AWS resources.')
 
     argv = [
         "--az",
@@ -271,7 +278,7 @@ def destroy_instance(instance_name: str, confirm: bool) -> dict[str, Any]:
     repo checkout where the instance was built. Irreversible; requires
     confirm=True."""
     if not confirm:
-        raise RuntimeError('Set confirm=True to actually destroy "' + instance_name + '" -- this permanently deletes real AWS resources and cannot be undone.')
+        raise ToolError('Set confirm=True to actually destroy "' + instance_name + '" -- this permanently deletes real AWS resources and cannot be undone.')
     returncode = terminate_via_kill_script(instance_name, True, _mcp_quit)
     return {"instance_name": instance_name, "kill_script_returncode": returncode}
 

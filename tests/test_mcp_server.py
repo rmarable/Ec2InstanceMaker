@@ -20,6 +20,7 @@ from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
 from botocore.exceptions import ClientError
+from mcp.server.mcpserver.exceptions import ToolError
 
 import make_instance
 import mcp_server
@@ -57,7 +58,7 @@ SPOT_INSTANCE = {
 
 class TestMcpQuit:
     def test_raises_runtime_error(self):
-        with pytest.raises(RuntimeError, match="boom"):
+        with pytest.raises(ToolError, match="boom"):
             mcp_server._mcp_quit("boom")
 
 
@@ -94,7 +95,7 @@ class TestListInstances:
     def test_api_error_raises_runtime_error(self):
         client = _ec2_client([])
         client.get_paginator.return_value.paginate.side_effect = _client_error("Throttling")
-        with pytest.raises(RuntimeError):
+        with pytest.raises(ToolError):
             mcp_server._list_instances(client, "us-east-1")
 
     def test_tool_wrapper_constructs_real_client_for_region(self):
@@ -113,7 +114,7 @@ class TestGetInstanceStatus:
 
     def test_no_matches_raises_runtime_error(self):
         client = _ec2_client([])
-        with pytest.raises(RuntimeError):
+        with pytest.raises(ToolError):
             mcp_server._get_instance_status(client, "dev01", "us-east-1")
 
     def test_tool_wrapper_resolves_region_and_constructs_client(self):
@@ -128,7 +129,7 @@ class TestGetInstanceStatus:
         assert result[0]["name"] == "dev01"
 
     def test_tool_wrapper_missing_region_raises_runtime_error(self):
-        with patch("os.path.exists", return_value=False), pytest.raises(RuntimeError):
+        with patch("os.path.exists", return_value=False), pytest.raises(ToolError):
             mcp_server.get_instance_status("dev01", None)
 
 
@@ -139,11 +140,11 @@ class TestGetBuildRecord:
         assert result == {"region": "us-east-1", "base_os": "al2023"}
 
     def test_missing_vars_file_raises_runtime_error(self):
-        with patch("os.path.exists", return_value=False), pytest.raises(RuntimeError, match="No build record"):
+        with patch("os.path.exists", return_value=False), pytest.raises(ToolError, match="No build record"):
             mcp_server.get_build_record("dev01")
 
     def test_empty_vars_file_raises_runtime_error(self):
-        with patch("os.path.exists", return_value=True), patch("builtins.open", mock_open(read_data="")), pytest.raises(RuntimeError, match="empty"):
+        with patch("os.path.exists", return_value=True), patch("builtins.open", mock_open(read_data="")), pytest.raises(ToolError, match="empty"):
             mcp_server.get_build_record("dev01")
 
 
@@ -165,7 +166,7 @@ def _build_report(**overrides):
 class TestBuildInstance:
     def test_confirm_false_raises_without_calling_run_build(self):
         run_build_mock = MagicMock()
-        with patch("mcp_server.run_build", run_build_mock), pytest.raises(RuntimeError, match="confirm=True"):
+        with patch("mcp_server.run_build", run_build_mock), pytest.raises(ToolError, match="confirm=True"):
             mcp_server.build_instance(az="us-east-2a", instance_name="dev01", instance_owner="tester", instance_owner_email="tester@example.com", confirm=False)
         run_build_mock.assert_not_called()
 
@@ -204,7 +205,7 @@ class TestBuildInstance:
 class TestDestroyInstance:
     def test_confirm_false_raises_without_calling_kill_script(self):
         terminate_mock = MagicMock()
-        with patch("mcp_server.terminate_via_kill_script", terminate_mock), pytest.raises(RuntimeError, match="confirm=True"):
+        with patch("mcp_server.terminate_via_kill_script", terminate_mock), pytest.raises(ToolError, match="confirm=True"):
             mcp_server.destroy_instance("dev01", confirm=False)
         terminate_mock.assert_not_called()
 
