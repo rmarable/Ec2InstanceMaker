@@ -16,6 +16,7 @@ Exits non-zero if any rendered file fails its linter, or if `shellcheck` or
 `terraform` aren't on PATH.
 """
 
+import dataclasses
 import json
 import os
 import shutil
@@ -30,7 +31,34 @@ import yaml
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO_ROOT)
 
+from instance_builder import InstanceParameters  # noqa: E402
 from template_engine import TEMPLATE_MAP, _build_render_context, render_instance_templates  # noqa: E402
+
+# InstanceParameters fields no CONTEXTS scenario below supplies -- none are
+# referenced by any of the 8 templates this harness renders (verified via
+# grep against templates/), except instance_data_dir, which
+# _build_render_context() unconditionally overwrites with its own separate
+# argument regardless of what's here. Static placeholders are safe for all
+# 13: constructing InstanceParameters(**_SYNTHETIC_EXTRAS, **scenario) below
+# turns a scenario with a missing or misspelled key into a loud TypeError
+# naming the exact problem, instead of either a silent no-op (an unused/
+# typo'd dict key is never an error) or a StrictUndefined failure buried in
+# whichever specific template happens to reference the missing one.
+_SYNTHETIC_EXTRAS: dict[str, Any] = {
+    "aws_account_id": "123456789012",
+    "DEPLOYMENT_DATE": "January 1, 2026",
+    "TERRAFORM_VERSION": "v1.5.7",
+    "iam_name_prefix": "Ec2InstanceMaker",
+    "instance_data_dir": "UNUSED",
+    "log_retention_days": 30,
+    "prod_level": "dev",
+    "security_group_name": "ec2instancemaker_sg",
+    "sns_datestamp": "01-01-2026",
+    "sns_timestamp": "00:00",
+    "ssh_allowed_ips": "10.0.0.0/16",
+    "turbot_account": "DISABLED",
+    "vpc_id": "vpc-0123456789abcdef0",
+}
 
 CONTEXTS: dict[str, dict[str, Any]] = {
     "linux_ondemand": {
@@ -877,8 +905,10 @@ def main() -> int:
             instance_data_dir = os.path.join(scratch_root, "instance_data", instance_name)
             os.makedirs(instance_data_dir)
 
-            render_instance_templates(instance_parameters, scratch_root, instance_data_dir)
-            context = _build_render_context(instance_parameters, scratch_root, instance_data_dir)
+            params = InstanceParameters(**_SYNTHETIC_EXTRAS, **instance_parameters)
+            rendered_parameters = dataclasses.asdict(params)
+            render_instance_templates(rendered_parameters, scratch_root, instance_data_dir)
+            context = _build_render_context(rendered_parameters, scratch_root, instance_data_dir)
 
             for _src, dest_key in TEMPLATE_MAP:
                 if dest_key in SKIP_LINT:
