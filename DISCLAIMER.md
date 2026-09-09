@@ -18,6 +18,10 @@ By using this Open Source software:
 
 You cannot create cases with AWS Technical Support or engage AWS support engineers in public forums if you have any questions, problems, or issues using this Open Source software.
 
+## AI Training Restriction
+
+No content on this site may be used to train artificial intelligence systems without permission in writing from the author (Rodney Marable).
+
 ```
 "Play at your own risk!"
  -- Planet Patrol
