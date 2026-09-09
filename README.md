@@ -810,6 +810,41 @@ To modify this behavior, the instance(s) must be built by setting `preserve_ami=
 
 This is *not* a recommended best practice and should only be enabled when testing.
 
+## MCP Server
+
+Ec2InstanceMaker also ships an MCP (Model Context Protocol) server,
+`mcp_server.py`, so it can be driven by Claude Code or any other MCP
+client instead of (or alongside) the command line. Install its one extra
+dependency with `pip install -r requirements-mcp.txt` (see INSTALL.md);
+it's kept separate from `requirements.txt` since it's only needed to run
+the server, not the CLI scripts themselves.
+
+It exposes five tools:
+
+* `list_instances(region)` -- list every Ec2InstanceMaker-managed instance
+  in a region.
+* `get_instance_status(instance_name, region=None)` -- status of one
+  instance or family.
+* `get_build_record(instance_name)` -- the local build-time parameters
+  from `vars_files/<instance_name>.yml`.
+* `build_instance(...)` -- build a new instance or family. Mirrors
+  `make_instance.py`'s command line flags and requires an explicit
+  `confirm=True` argument before it will touch AWS -- there is no
+  interactive abort window here like there is on the command line, since
+  an MCP client has no terminal to type CTRL-C into.
+* `destroy_instance(instance_name, confirm)` -- tear down an instance or
+  family (the same teardown `kill-instance.<instance_name>.sh` performs).
+  Also requires `confirm=True`.
+
+`build_instance`/`destroy_instance` create and delete real, billable AWS
+resources just like the command line tools do -- treat `confirm=True`
+with the same care you'd give running `make_instance.py` or
+`kill-instance.<instance_name>.sh` directly.
+
+To use it with Claude Code, run Claude Code from within the
+Ec2InstanceMaker repository -- the checked-in `.mcp.json` registers the
+server automatically.
+
 ## Troubleshooting
 
 * Python version 3.12 or greater is required by this software.  Additionally,
