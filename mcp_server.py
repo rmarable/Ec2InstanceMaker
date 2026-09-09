@@ -347,4 +347,11 @@ def destroy_instance(instance_name: str, confirm: bool) -> dict[str, Any]:
 
 
 if __name__ == "__main__":
+    # Claude Code's .mcp.json runs this with the repo root as cwd already,
+    # so this chdir is a no-op there. Claude Desktop's "Local command"
+    # connector has no cwd concept -- it just runs command+args -- so
+    # without this, every relative path here (vars_files/<name>.yml, etc.)
+    # would resolve against whatever cwd the connector happens to launch
+    # with instead of the repo root.
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))
     mcp.run()

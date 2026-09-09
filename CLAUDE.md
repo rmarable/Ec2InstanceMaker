@@ -537,6 +537,26 @@ outside this checkout: `claude mcp add ec2instancemaker
 will not have the server — Claude Code loads MCP servers at startup
 only.
 
+Claude Desktop app: Settings → Connectors → Add connector → Local
+command. Command: `/path/to/Ec2InstanceMaker/.venv/bin/python3`.
+Arguments: `/path/to/Ec2InstanceMaker/mcp_server.py`. Unlike `.mcp.json`,
+a Local command connector has no cwd concept — it just runs
+command+args — so `mcp_server.py`'s `if __name__ == "__main__":` block
+`os.chdir()`s to its own file's directory before calling `mcp.run()`,
+making every relative path here (`vars_files/<name>.yml`, etc.) resolve
+against the repo root regardless of the connector's launch cwd. A no-op
+for Claude Code, which already runs it from the repo root.
+
+Browser-only claude.ai (no desktop app) cannot use this server at all —
+it only supports Remote connectors (Streamable HTTP + OAuth 2.1, server
+reachable over the public internet from Anthropic's IP ranges), and
+`mcp_server.py` only implements stdio transport. Turning it into a
+Remote connector is a separate, much larger effort: real hosting, TLS,
+OAuth, and — since it would no longer run as the local user — a
+non-local AWS credential story (an IAM role on whatever compute runs it)
+for tools that create/destroy real, billable resources. Not attempted
+here.
+
 ## Working conventions specific to this repo
 
 - **Be pythonic.** When it comes to Python, be like Jake The Snake: keep

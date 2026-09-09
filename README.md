@@ -830,6 +830,14 @@ To register it outside this checkout:
 $ claude mcp add ec2instancemaker /path/to/Ec2InstanceMaker/.venv/bin/python3 /path/to/Ec2InstanceMaker/mcp_server.py
 ```
 
+Claude Desktop app: Settings -> Connectors -> Add connector -> Local
+command. Command: `/path/to/Ec2InstanceMaker/.venv/bin/python3`.
+Arguments: `/path/to/Ec2InstanceMaker/mcp_server.py`.
+
+Browser-only claude.ai (no desktop app) can't use this server -- it only
+supports Remote connectors (a public HTTPS endpoint with OAuth), and
+`mcp_server.py` only implements stdio transport.
+
 `start_instance`/`stop_instance`/`reboot_instance`/`build_instance`/
 `destroy_instance` all require `confirm=True`. `build_instance`/
 `destroy_instance` create or delete real, billable AWS resources -- same
