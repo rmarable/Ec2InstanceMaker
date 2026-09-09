@@ -59,10 +59,15 @@ or validation rules instead of re-deriving them from `make_instance.py`.
 ## Linting and CI
 
 ```bash
-$ pip install -r requirements-test.txt
+$ pip install -r requirements-test.txt -r requirements-mcp.txt
 $ pre-commit install          # one-time, wires the git commit hook
 $ pre-commit run --all-files  # run everything on demand
 ```
+
+`requirements-mcp.txt` (just `mcp`) is needed here because `tests/`/mypy
+cover `mcp_server.py` too — see "Architecture" below — even though it's
+not a `requirements.txt` runtime dependency of the CLI toolkit itself.
+CI installs it the same way (`.github/workflows/lint.yml`).
 
 `.pre-commit-config.yaml` is the single source of truth for what counts as
 "clean" — the same config runs locally (on `git commit`) and in CI
@@ -445,9 +450,10 @@ dependency-injected functions gated behind
 `if __name__ == "__main__": main()`.
 
 **`mcp_server.py`** exposes Ec2InstanceMaker as MCP tools (via `mcp`'s
-`MCPServer`, `requirements.txt`) so an MCP client like Claude Code can
-query and drive builds without a human running the CLI scripts by hand.
-Five tools,
+`MCPServer`, `requirements-mcp.txt` — an optional dependency, not part of
+`requirements.txt`, since it's only needed to actually run the server, not
+to use the CLI toolkit) so an MCP client like Claude Code can query and
+drive builds without a human running the CLI scripts by hand. Five tools,
 two read-only and two read-write:
 - `list_instances(region)` / `get_instance_status(instance_name,
   region=None)` call `manage_instance.py`'s already-tested
@@ -500,15 +506,17 @@ boundary mocked. Registered for Claude Code via the project-scoped
 by `tests/test_mcp_server.py`; brought into `pyproject.toml`'s
 `[tool.mypy]` scope like every other top-level script.
 
-Setup: `mcp` installs with the rest of `requirements.txt` — no separate
-step. `.mcp.json` is read automatically by any Claude Code session
-started from the repo root; no registration step. Verify with `/mcp`
-inside that session — `ec2instancemaker` should list all 5 tools. To
-register it for use outside this checkout: `claude mcp add
-ec2instancemaker /path/to/Ec2InstanceMaker/.venv/bin/python3
+Setup: `pip install -r requirements-mcp.txt` into `.venv` (separate from
+`requirements.txt` — only needed to run the server). `.mcp.json` is
+read automatically by any Claude Code session started from the repo
+root; no registration step. Verify with `/mcp` inside that session —
+`ec2instancemaker` should list all 5 tools. To register it for use
+outside this checkout: `claude mcp add ec2instancemaker
+/path/to/Ec2InstanceMaker/.venv/bin/python3
 /path/to/Ec2InstanceMaker/mcp_server.py`. A session started before
-`.mcp.json` existed will not have the server — Claude Code loads MCP
-servers at startup only.
+`.mcp.json` existed, or before `requirements-mcp.txt` was installed,
+will not have the server — Claude Code loads MCP servers at startup
+only.
 
 ## Working conventions specific to this repo
 
