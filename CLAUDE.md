@@ -132,15 +132,29 @@ $ pre-commit run --all-files  # run everything on demand
 ## Architecture
 
 **`make_instance.py`** is the orchestrator: `parse_args(argv=None)` builds
-and parses the CLI flags, and `main(argv=None)` calls, in sequence, the
+and parses the CLI flags, and `main(argv=None)` (fully type-hinted, `->
+NoReturn` -- every path ends in `sys.exit`) calls, in sequence, 5 phase
+functions defined in this same file (`resolve_network_and_compute`,
+`resolve_vpc_security_and_keypair`, `provision_iam_sns_and_logging`,
+`render_and_apply`, `report_and_notify`), each wrapping calls into the
 extracted functions in `instance_builder.py` (AZ/region validation,
 EBS/spot-price validation, VPC/subnet/security-group resolution,
 AMI/keypair/IAM setup, Terraform apply, vars-file writing, etc. — see
-`instance_builder.py` below for the full list) threading their results
-through local variables into the final `instance_parameters` dict, ending
-with `if __name__ == "__main__": main()`. No classes — free functions with
-explicit arguments throughout, same as `instance_builder.py`. The broad
-shape:
+`instance_builder.py` below for the full list). The 5 phase functions
+deliberately stay in `make_instance.py`, not `instance_builder.py` --
+`tests/test_make_instance_integration.py`'s `monkeypatch.setattr(
+make_instance, "resolve_vpc_and_subnet", ...)`-style mocks only intercept
+attribute lookups on `make_instance`'s own namespace, so a phase body
+living in `instance_builder.py` would have its AWS-touching calls resolve
+directly to that module's own functions, silently bypassing every
+existing mock. Values threaded between phases are bundled into small
+`@dataclass`es (`BuildSettings`, `EbsRequest`, `BuildOptions`, and one
+result dataclass per phase) rather than unpacked individually -- the same
+pattern `AwsClients`/`InstanceParameters` already established -- since
+several phases would otherwise need 15-25 parameters unpacked one at a
+time. `main()` ends with `if __name__ == "__main__": main()`. No classes
+beyond those dataclasses — free functions with explicit arguments
+throughout, same as `instance_builder.py`. The broad shape:
 1. Parses CLI flags (argparse) and validates them (AZ, base_os/instance
    type compatibility, EBS size/type, etc.) using helpers from
    `aux_data.py`.
@@ -155,8 +169,10 @@ shape:
    Jinja2 templates in `templates/*.j2` directly (via `jinja2.Environment`,
    no subprocess) into a fresh `instance_data/<instance_name>/` directory
    (Terraform config, access/build/kill/AMI shell scripts), building the
-   render context straight from the in-memory `instance_parameters` dict,
-   and symlinks the generated `kill-instance.<name>.sh` and
+   render context from the in-memory `instance_parameters`
+   (`InstanceParameters` dataclass instance, converted via
+   `dataclasses.asdict()`), and symlinks the generated
+   `kill-instance.<name>.sh` and
    `build-ami.<name>.sh` scripts back into the repo root for convenient
    operator access — all before Terraform ever runs.
 5. Shells out to `terraform init/plan/apply` inside that
@@ -239,16 +255,40 @@ security-group tagging, Windows instance-details/Administrator-password
 retrieval (built from an in-memory CSV, not a real temp file), state
 directory setup and the duplicate-build guard, `create_aws_clients()`
 (bundles every boto3 client/resource construction behind one seam,
-`AwsClients`), and vars-file writing.
+`AwsClients`), the `InstanceParameters` dataclass make_instance.py
+assembles per build (64 typed fields — a missing or misspelled one is a
+construction-time error instead of a `StrictUndefined` failure deep in
+template rendering), and vars-file writing. Every function/dataclass here
+is fully type-hinted, including real `boto3-stubs` types (`EC2Client`,
+`IAMClient`, `SecurityGroup`, etc.) instead of `Any` for boto3
+clients/resources — see `pyproject.toml`'s `[tool.mypy]` section, which
+now covers every top-level `.py` file in the repo (including
+`scripts/lint_templates.py`) except the test suite itself.
 
-**Deliberately left inline in `make_instance.py`, not extracted:** the
-`instance_parameters` dict literal itself (a direct mapping of already-
-extracted-and-tested local variables — wrapping it in a function would add
-indirection without a testability gain), the thin
-`template_engine.render_instance_templates()` call, and pure `print()`-only
-blocks (e.g. the kill-instance/build-ami command reminders) with no logic
-to test. If you're looking for where the *next* extraction should go,
-these are exactly the kinds of blocks that don't need one.
+`instance_parameters` (an `InstanceParameters` dataclass instance, not a
+bare dict — see `instance_builder.py` below) is assembled inside the
+`render_and_apply` phase from the other 4 phases' dataclass results, then
+bridged to `write_vars_file()`/`render_instance_templates()` (both stay
+`dict[str, Any]`-typed, general-purpose, used nowhere else with a typed
+structure) via `dataclasses.asdict()` at each call site. The
+`--debug_mode` parameter dump is its own function,
+`print_debug_parameters(params: InstanceParameters) -> None`, reading
+every field off that one typed argument instead of ~50 separate local
+variables. **Deliberately left inline, not extracted further:** pure
+`print()`-only blocks (e.g. the kill-instance/build-ami command
+reminders) with no logic to test, and argparse's own flag definitions.
+
+The 5-phase split (and everything above it in this file) was verified
+against a real live AWS build, not just mocks: `./make_instance.py -A
+us-east-1b -N test01 -O rmarable -E rodney.marable@gmail.com` completed
+end to end in account `183295445014` (EC2 instance created, SSM
+provisioning ran `build_instance.sh` and a postboot script successfully,
+IAM role/profile/keypair/CloudWatch log group all created correctly), and
+`./kill-instance.test01.sh` tore every resource back down cleanly
+afterward — independently confirmed via `aws ec2 describe-instances`
+(terminated), `describe-security-groups`/`iam get-role` (both
+`NotFound`), and local state file removal. See CLAUDE-STATE.md for
+details.
 
 **`template_engine.py`** renders `templates/*.j2` with plain Jinja2. Two
 templates (`DEFAULT_EC2_TEMPLATE.j2`, `build_ami.j2`) use an Ansible-style
