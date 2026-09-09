@@ -21,3 +21,18 @@ exclude_dirs = [".venv"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.12"
+# Scoped to just the fully type-hinted files -- make_instance.py and
+# access_instance.py have no annotations yet (untested-at-the-function-level
+# orchestration code; see CLAUDE.md), so including them here would just be
+# permanent, unfixable noise rather than real checking.
+files = ["aux_data.py", "instance_builder.py", "manage_instance.py", "template_engine.py"]
+# boto3/botocore ARE stubbed (boto3-stubs[ec2,iam,sns,sts,logs] --
+# requirements-test.txt, a dev-only dependency; real importable runtime
+# modules, not stub-only, so EC2Client/IAMClient/etc. are used directly as
+# types, not faked as Any). jinja2/prettytable/yaml have no stubs and
+# aren't worth adding one for -- this only silences "missing library
+# stubs" for those, not real errors in this codebase's own code.
+ignore_missing_imports = true

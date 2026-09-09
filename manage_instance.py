@@ -15,15 +15,26 @@ import argparse
 import os
 import subprocess
 import sys
+from collections.abc import Callable
+from typing import Literal, NoReturn
 
 import boto3
 import yaml
 from botocore.exceptions import ClientError, EndpointConnectionError
+from mypy_boto3_ec2.client import EC2Client
+from mypy_boto3_ec2.type_defs import FilterTypeDef, InstanceTypeDef
 from prettytable import PrettyTable
 
 # Import some external lists and functions.
 # Source: aux_data.py
 from aux_data import refer_to_docs_and_quit
+from instance_builder import validate_instance_name_format
+
+# Type aliases used throughout this module's signatures -- same duplicated
+# convention as instance_builder.py/aux_data.py (see the comment there for
+# why they're not shared via import).
+QuitFn = Callable[[str], NoReturn]
+Action = Literal["start", "stop", "reboot", "terminate", "status", "list-all"]
 
 MANAGED_BY_TAG_VALUE = "Ec2InstanceMaker"
 
@@ -33,7 +44,7 @@ MANAGED_BY_TAG_VALUE = "Ec2InstanceMaker"
 # it isn't present.
 
 
-def tag_value(instance, key, default="?"):
+def tag_value(instance: InstanceTypeDef, key: str, default: str = "?") -> str:
     return next((tag["Value"] for tag in instance.get("Tags", []) if tag["Key"] == key), default)
 
 
@@ -42,7 +53,7 @@ def tag_value(instance, key, default="?"):
 # recorded in ./vars_files/<instance_name>.yml at build time.
 
 
-def resolve_region(instance_name, region, refer_to_docs_and_quit):
+def resolve_region(instance_name: str, region: str | None, refer_to_docs_and_quit: QuitFn) -> str:
     if region is not None:
         return region
     vars_file_path = "./vars_files/" + instance_name + ".yml"
@@ -64,8 +75,8 @@ def resolve_region(instance_name, region, refer_to_docs_and_quit):
 # create, even if its Name happens to collide with something else.
 
 
-def find_managed_instances(ec2_client, instance_name, region, refer_to_docs_and_quit):
-    filters = [
+def find_managed_instances(ec2_client: EC2Client, instance_name: str, region: str, refer_to_docs_and_quit: QuitFn) -> list[InstanceTypeDef]:
+    filters: list[FilterTypeDef] = [
         {"Name": "tag:Name", "Values": [instance_name, instance_name + "-*"]},
         {"Name": "tag:ManagedBy", "Values": [MANAGED_BY_TAG_VALUE]},
         {"Name": "instance-state-name", "Values": ["pending", "running", "shutting-down", "stopping", "stopped"]},
@@ -90,8 +101,8 @@ def find_managed_instances(ec2_client, instance_name, region, refer_to_docs_and_
 # this never quits, it returns an empty list.
 
 
-def list_all_managed_instances(ec2_client, region, refer_to_docs_and_quit):
-    filters = [
+def list_all_managed_instances(ec2_client: EC2Client, region: str, refer_to_docs_and_quit: QuitFn) -> list[InstanceTypeDef]:
+    filters: list[FilterTypeDef] = [
         {"Name": "tag:ManagedBy", "Values": [MANAGED_BY_TAG_VALUE]},
         {"Name": "instance-state-name", "Values": ["pending", "running", "shutting-down", "stopping", "stopped"]},
     ]
@@ -112,7 +123,7 @@ def list_all_managed_instances(ec2_client, region, refer_to_docs_and_quit):
 # that actually explains the constraint.
 
 
-def check_spot_lifecycle_conflict(instances, action, refer_to_docs_and_quit):
+def check_spot_lifecycle_conflict(instances: list[InstanceTypeDef], action: Action, refer_to_docs_and_quit: QuitFn) -> None:
     if action not in ("start", "stop"):
         return
     spot_instance_ids = [instance["InstanceId"] for instance in instances if instance.get("InstanceLifecycle") == "spot"]
@@ -132,7 +143,7 @@ def check_spot_lifecycle_conflict(instances, action, refer_to_docs_and_quit):
 # will even work against it -- see check_spot_lifecycle_conflict()).
 
 
-def print_status_table(instances):
+def print_status_table(instances: list[InstanceTypeDef]) -> None:
     print("")
     for instance in instances:
         is_spot = "Yes" if instance.get("InstanceLifecycle") == "spot" else "No"
@@ -147,7 +158,7 @@ def print_status_table(instances):
 # nothing but "No".
 
 
-def print_all_instances_table(instances):
+def print_all_instances_table(instances: list[InstanceTypeDef]) -> None:
     if not instances:
         print("No Ec2InstanceMaker-managed instances were found.")
         return
@@ -177,7 +188,13 @@ def print_all_instances_table(instances):
 # access_instance.py already uses. Returns the subprocess exit code.
 
 
-def terminate_via_kill_script(instance_name, auto_confirm, refer_to_docs_and_quit, run_kill_script=subprocess.run, confirm_input=input):
+def terminate_via_kill_script(
+    instance_name: str,
+    auto_confirm: bool,
+    refer_to_docs_and_quit: QuitFn,
+    run_kill_script: Callable[[list[str]], subprocess.CompletedProcess[bytes]] = subprocess.run,
+    confirm_input: Callable[[str], str] = input,
+) -> int:
     kill_script = "kill-instance." + instance_name + ".sh"
     if not os.path.exists(kill_script):
         refer_to_docs_and_quit('kill-instance script "' + kill_script + '" was not found! Run manage_instance.py from the repo checkout where "' + instance_name + '" was built.')
@@ -191,7 +208,7 @@ def terminate_via_kill_script(instance_name, auto_confirm, refer_to_docs_and_qui
     return run_kill_script(["bash", kill_script]).returncode
 
 
-def main():
+def main() -> NoReturn:
     parser = argparse.ArgumentParser(description="manage_instance.py: start, stop, reboot, terminate, check status, or list Ec2InstanceMaker-built EC2 instances")
     parser.add_argument("--instance_name", "-N", help="name of the EC2 instance or family (required for all actions except --list-all)", required=False, default=None)
     parser.add_argument("--region", "-r", help="AWS region (default: read from ./vars_files/<instance_name>.yml; required for --list-all)", required=False, default=None)
@@ -203,15 +220,27 @@ def main():
     action_group.add_argument("--list-all", "-l", action="store_const", dest="action", const="list-all", help="list every Ec2InstanceMaker-managed instance in --region")
 
     args = parser.parse_args()
-    instance_name = args.instance_name
-    action = args.action
-    region = args.region
-    auto_confirm = args.auto_confirm
+    instance_name: str | None = args.instance_name
+    # argparse's own choices/const values are the only ones action can ever
+    # hold, but argparse itself has no way to express that statically --
+    # this annotated assignment documents (and lets mypy enforce downstream)
+    # the closed set every other function in this file expects.
+    action: Action = args.action
+    region: str | None = args.region
+    auto_confirm: bool = args.auto_confirm
 
-    if action != "list-all" and not instance_name:
-        refer_to_docs_and_quit("--instance_name/-N is required for --action=" + str(action) + "!")
+    if instance_name:
+        validate_instance_name_format(instance_name, refer_to_docs_and_quit)
 
     if action == "terminate":
+        # instance_name is required for every action except --list-all;
+        # checked here (rather than once upfront) so the None-check is
+        # directly adjacent to each use site -- lets a type checker narrow
+        # instance_name from str | None to str for the rest of each branch,
+        # instead of a single combined "action != list-all and not
+        # instance_name" condition it can't use for narrowing at all.
+        if instance_name is None:
+            refer_to_docs_and_quit("--instance_name/-N is required for --action=" + str(action) + "!")
         sys.exit(terminate_via_kill_script(instance_name, auto_confirm, refer_to_docs_and_quit))
 
     if action == "list-all":
@@ -222,6 +251,8 @@ def main():
         print_all_instances_table(instances)
         sys.exit(0)
 
+    if instance_name is None:
+        refer_to_docs_and_quit("--instance_name/-N is required for --action=" + str(action) + "!")
     region = resolve_region(instance_name, region, refer_to_docs_and_quit)
     ec2_client = boto3.client("ec2", region_name=region)
     instances = find_managed_instances(ec2_client, instance_name, region, refer_to_docs_and_quit)
@@ -246,14 +277,18 @@ def main():
             print("Aborting...")
             sys.exit(1)
 
-    action_calls = {
-        "start": ec2_client.start_instances,
-        "stop": ec2_client.stop_instances,
-        "reboot": ec2_client.reboot_instances,
-    }
-
+    # Each EC2 client method below has its own boto3-stubs keyword-argument
+    # shape (different optional params per action) -- a dict-dispatch table
+    # of the three bound methods used to type as "callable with unknown
+    # signature" under mypy, since it can't unify them. A direct if/elif
+    # keeps every call fully type-checked with no Protocol/cast needed.
     try:
-        action_calls[action](InstanceIds=instance_ids)
+        if action == "start":
+            ec2_client.start_instances(InstanceIds=instance_ids)
+        elif action == "stop":
+            ec2_client.stop_instances(InstanceIds=instance_ids)
+        else:
+            ec2_client.reboot_instances(InstanceIds=instance_ids)
     except (ClientError, EndpointConnectionError) as e:
         refer_to_docs_and_quit("AWS API error while trying to " + action + " " + instance_name + ": " + str(e))
 

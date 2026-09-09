@@ -590,3 +590,23 @@ class TestCloudWatchLogsTeardown:
     def test_disabled_logging_means_no_teardown_logic_at_all(self):
         rendered = render({"enable_cloudwatch_logs": "false"})["kill_instance.j2"]
         assert "CloudWatch Logs group" not in rendered
+
+
+class TestEbsDeviceVolumeIops:
+    """Regression tests: the secondary EBS device's ebs_block_device block
+    used to read ebs_root_volume_iops and gate on ebs_root_volume_type
+    instead of its own device_ counterparts -- an io1 device volume paired
+    with a non-io1 root never got an iops value at all, and an io1 root
+    paired with a non-io1 device silently leaked the root's iops onto the
+    device block instead.
+    """
+
+    def test_device_io1_gets_its_own_iops_value(self):
+        rendered = render({"ebs_root_volume_type": "gp2", "ebs_root_volume_iops": 0, "ebs_device_volume_type": "io1", "ebs_device_volume_iops": 3000})["DEFAULT_EC2_TEMPLATE.j2"]
+        device_block = rendered.split("ebs_block_device {")[1]
+        assert 'iops        = "3000"' in device_block
+
+    def test_root_io1_does_not_leak_its_iops_onto_a_non_io1_device(self):
+        rendered = render({"ebs_root_volume_type": "io1", "ebs_root_volume_iops": 3000, "ebs_device_volume_type": "gp2", "ebs_device_volume_iops": 0})["DEFAULT_EC2_TEMPLATE.j2"]
+        device_block = rendered.split("ebs_block_device {")[1]
+        assert "iops" not in device_block

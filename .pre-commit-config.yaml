@@ -71,6 +71,22 @@ repos:
         language: system
         pass_filenames: false
 
+      - id: mypy
+        name: Type-check aux_data.py, instance_builder.py, manage_instance.py, template_engine.py
+        description: >
+          Only these four files have type hints -- make_instance.py and
+          access_instance.py are untested-at-the-function-level orchestration
+          scripts with no annotations yet, so mypy's `files` list in
+          pyproject.toml deliberately excludes them rather than producing
+          permanent, unfixable noise. pass_filenames is false and mypy is
+          invoked bare (no file args) so it always checks its own `files`
+          list in full, regardless of which of the four actually changed --
+          same pattern as render-and-lint-templates below.
+        entry: mypy
+        language: system
+        pass_filenames: false
+        files: ^(aux_data\.py|instance_builder\.py|manage_instance\.py|template_engine\.py)$
+
       - id: render-and-lint-templates
         name: Render templates/*.j2 and lint the output (shellcheck/ruff/terraform)
         description: >

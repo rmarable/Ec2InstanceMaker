@@ -22,11 +22,39 @@ import os
 import re
 import sys
 import time
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC
 from datetime import datetime as DateTime
+from typing import Any, Literal, NoReturn, cast
 
 import boto3
 from botocore.exceptions import ClientError
+from mypy_boto3_ec2.client import EC2Client
+from mypy_boto3_ec2.literals import InstanceTypeType
+from mypy_boto3_ec2.service_resource import EC2ServiceResource, SecurityGroup
+from mypy_boto3_ec2.type_defs import FilterTypeDef
+from mypy_boto3_iam.client import IAMClient
+from mypy_boto3_logs.client import CloudWatchLogsClient
+from mypy_boto3_sns.client import SNSClient
+from mypy_boto3_sts.client import STSClient
+
+# Type aliases used throughout this module's signatures:
+# - QuitFn: the shape of refer_to_docs_and_quit/illegal_az_msg and every
+#   other operator-facing fatal-error callback -- always prints a message
+#   and calls sys.exit(1), so it never returns to its caller.
+# - BoolStr: this codebase's pervasive Ansible-style string-boolean
+#   convention ("true"/"false" as literal strings, not real bool values --
+#   they get serialized directly into generated shell/Terraform templates).
+#   Literal instead of bare str so a typo'd "True"/"yes" is a type error,
+#   not a silently-false runtime comparison.
+# boto3/botocore clients and resources are typed via boto3-stubs
+# (mypy_boto3_*), a dev-only dependency (requirements-test.txt) -- it ships
+# real, importable runtime modules (not stub-only), generated directly from
+# each AWS service's API model, so a wrong method name or kwarg on any of
+# these is now a type error, not a runtime AttributeError/ClientError.
+QuitFn = Callable[[str], NoReturn]
+BoolStr = Literal["true", "false"]
 
 # Function: validate_az_and_region()
 # Purpose: abort cleanly if the selected AWS Region/Availability Zone is
@@ -35,7 +63,7 @@ from botocore.exceptions import ClientError
 # first call to hit a bogus region with a recognizable, catchable error.
 
 
-def validate_az_and_region(ec2_client, az, illegal_az_msg):
+def validate_az_and_region(ec2_client: EC2Client, az: str, illegal_az_msg: QuitFn) -> None:
     import botocore
 
     try:
@@ -52,7 +80,7 @@ def validate_az_and_region(ec2_client, az, illegal_az_msg):
 # the real current time; tests pass a fixed value for determinism.
 
 
-def generate_instance_serial_number(instance_name, now=None):
+def generate_instance_serial_number(instance_name: str, now: time.struct_time | None = None) -> dict[str, str]:
     if now is None:
         now = time.localtime()
     return {
@@ -69,7 +97,7 @@ def generate_instance_serial_number(instance_name, now=None):
 # pass a fixed value for determinism.
 
 
-def generate_sns_timestamps(now=None):
+def generate_sns_timestamps(now: DateTime | None = None) -> tuple[str, str]:
     if now is None:
         now = DateTime.now(UTC)
     sns_datestamp = now.strftime("%m") + "-" + now.strftime("%d") + "-" + now.strftime("%Y")
@@ -80,19 +108,28 @@ def generate_sns_timestamps(now=None):
 # Function: validate_and_resize_ebs_volumes()
 # Purpose: enforce the 16 TB EBS size ceiling, bump undersized root/device
 # volumes up to AWS's recommended 30 GB minimum for Windows Server, and
-# validate provisioned-IOPS bounds when ebs_root_volume_type == "io1".
+# validate provisioned-IOPS bounds for whichever of the root/device volumes
+# is actually "io1" -- root_volume_type and device_volume_type are
+# independently selectable CLI flags, so each must be checked against its
+# own type, not the other's (a real bug found during an adversarial
+# review: this used to gate both IOPS checks on ebs_root_volume_type alone,
+# so an io1 *device* volume paired with a non-io1 root never got its IOPS
+# bounds validated -- or an IOPS value at all, since
+# DEFAULT_EC2_TEMPLATE.j2's device ebs_block_device had the identical bug,
+# fixed alongside this).
 # Returns the (possibly Windows-adjusted) root/device volume sizes.
 
 
 def validate_and_resize_ebs_volumes(
-    ebs_root_volume_size,
-    ebs_device_volume_size,
-    ebs_root_volume_type,
-    ebs_root_volume_iops,
-    ebs_device_volume_iops,
-    is_windows,
-    refer_to_docs_and_quit,
-):
+    ebs_root_volume_size: int,
+    ebs_device_volume_size: int,
+    ebs_root_volume_type: str,
+    ebs_device_volume_type: str,
+    ebs_root_volume_iops: int,
+    ebs_device_volume_iops: int,
+    is_windows: bool,
+    refer_to_docs_and_quit: QuitFn,
+) -> tuple[int, int]:
     if ebs_root_volume_size > 16000:
         refer_to_docs_and_quit("Maximum allowed EBS volume size is 16 TB (16000 GB)!")
     if ebs_device_volume_size > 16000:
@@ -102,11 +139,10 @@ def validate_and_resize_ebs_volumes(
             ebs_root_volume_size = 30
         if ebs_device_volume_size <= 30:
             ebs_device_volume_size = 30
-    if ebs_root_volume_type == "io1":
-        if (ebs_root_volume_iops == 0) or (ebs_root_volume_iops > 16000):
-            refer_to_docs_and_quit("ebs_root_volume_iops must be set to a value between 100 and 16,000!")
-        if (ebs_device_volume_iops == 0) or (ebs_device_volume_iops > 16000):
-            refer_to_docs_and_quit("ebs_device_volume_iops must be set to a value between 100 and 16,000!")
+    if ebs_root_volume_type == "io1" and ((ebs_root_volume_iops == 0) or (ebs_root_volume_iops > 16000)):
+        refer_to_docs_and_quit("ebs_root_volume_iops must be set to a value between 100 and 16,000!")
+    if ebs_device_volume_type == "io1" and ((ebs_device_volume_iops == 0) or (ebs_device_volume_iops > 16000)):
+        refer_to_docs_and_quit("ebs_device_volume_iops must be set to a value between 100 and 16,000!")
     return ebs_root_volume_size, ebs_device_volume_size
 
 
@@ -125,7 +161,7 @@ def validate_and_resize_ebs_volumes(
 # a future increment, not bundled into this one.
 
 
-def resolve_vpc_and_subnet(ec2_client, vpc_name, az, refer_to_docs_and_quit):
+def resolve_vpc_and_subnet(ec2_client: EC2Client, vpc_name: str, az: str, refer_to_docs_and_quit: QuitFn) -> tuple[str, str, str]:
     if vpc_name == "vpc_default":
         vpc_information = ec2_client.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])
     else:
@@ -176,7 +212,7 @@ def resolve_vpc_and_subnet(ec2_client, vpc_name, az, refer_to_docs_and_quit):
 # operator-friendly.
 
 
-def resolve_ssh_allowed_ips(ec2_client, vpc_id, ssh_allowed_ips, refer_to_docs_and_quit):
+def resolve_ssh_allowed_ips(ec2_client: EC2Client, vpc_id: str, ssh_allowed_ips: str, refer_to_docs_and_quit: QuitFn) -> str:
     if ssh_allowed_ips == "UNDEFINED":
         vpc_info = ec2_client.describe_vpcs(VpcIds=[vpc_id])
         return vpc_info["Vpcs"][0]["CidrBlock"]
@@ -200,10 +236,19 @@ def resolve_ssh_allowed_ips(ec2_client, vpc_id, ssh_allowed_ips, refer_to_docs_a
 # propagating) and the parsed vpc_security_group_ids string.
 
 
-def resolve_security_group(ec2, region, security_group_name, instance_serial_number, vpc_id, is_windows, ssh_allowed_ips, add_inbound_security_group_rule):
+def resolve_security_group(
+    ec2: EC2ServiceResource,
+    region: str,
+    security_group_name: str,
+    instance_serial_number: str,
+    vpc_id: str,
+    is_windows: bool,
+    ssh_allowed_ips: str,
+    add_inbound_security_group_rule: Callable[[str, SecurityGroup, str, str, int, int], None],
+) -> tuple[str, str]:
     if security_group_name == "ec2instancemaker_sg":
         security_group_name = security_group_name + "_" + instance_serial_number
-    filters = [{"Name": "group-name", "Values": [security_group_name]}]
+    filters: list[FilterTypeDef] = [{"Name": "group-name", "Values": [security_group_name]}, {"Name": "vpc-id", "Values": [vpc_id]}]
     sg_id = list(ec2.security_groups.filter(Filters=filters))
     if not sg_id:
         security_group = ec2.create_security_group(GroupName=security_group_name, Description="EC2 security group - created by Ec2InstanceMaker", VpcId=vpc_id)
@@ -227,7 +272,7 @@ def resolve_security_group(ec2, region, security_group_name, instance_serial_num
 # not a generic error.
 
 
-def setup_keypair(ec2_client, ec2_keypair, secret_key_file, region, debug_mode, refer_to_docs_and_quit):
+def setup_keypair(ec2_client: EC2Client, ec2_keypair: str, secret_key_file: str, region: str, debug_mode: BoolStr, refer_to_docs_and_quit: QuitFn) -> None:
     try:
         ec2_client.describe_key_pairs(KeyNames=[ec2_keypair])
         if debug_mode == "true":
@@ -272,7 +317,15 @@ def setup_keypair(ec2_client, ec2_keypair, secret_key_file, region, debug_mode, 
 # doesn't need to import aux_data.py directly.
 
 
-def resolve_ami(custom_ami, base_os, architecture, aws_account_id, get_ami_info, check_custom_ami, refer_to_docs_and_quit):
+def resolve_ami(
+    custom_ami: str,
+    base_os: str,
+    architecture: str,
+    aws_account_id: str,
+    get_ami_info: Callable[[str, str], str],
+    check_custom_ami: Callable[[str, str, str], str],
+    refer_to_docs_and_quit: QuitFn,
+) -> str:
     if custom_ami == "UNDEFINED":
         return get_ami_info(base_os, architecture)
     aws_ami = check_custom_ami(custom_ami, aws_account_id, architecture)
@@ -285,9 +338,12 @@ def resolve_ami(custom_ami, base_os, architecture, aws_account_id, get_ami_info,
 # Purpose: look up the most recent EC2 Spot price for instance_type/az.
 
 
-def fetch_spot_price_raw(ec2_client, instance_type, is_windows, az):
+def fetch_spot_price_raw(ec2_client: EC2Client, instance_type: str, is_windows: bool, az: str) -> float:
     product_description = "Windows" if is_windows else "Linux/UNIX"
-    prices = ec2_client.describe_spot_price_history(InstanceTypes=[instance_type], MaxResults=1, ProductDescriptions=[product_description], AvailabilityZone=az)
+    # See the matching cast in aux_data.get_instance_type_info() -- same
+    # reasoning: instance_type stays a plain str so a new AWS instance
+    # family works without waiting on a boto3-stubs update.
+    prices = ec2_client.describe_spot_price_history(InstanceTypes=[cast(InstanceTypeType, instance_type)], MaxResults=1, ProductDescriptions=[product_description], AvailabilityZone=az)
     return float(prices["SpotPriceHistory"][0]["SpotPrice"])
 
 
@@ -297,7 +353,7 @@ def fetch_spot_price_raw(ec2_client, instance_type, is_windows, az):
 # spot_price = spot_price_raw + (spot_buffer * spot_price_raw)
 
 
-def compute_buffered_spot_price(spot_price_raw, spot_buffer):
+def compute_buffered_spot_price(spot_price_raw: float, spot_buffer: float) -> float:
     return round(spot_price_raw + (spot_buffer * spot_price_raw), 8)
 
 
@@ -306,7 +362,7 @@ def compute_buffered_spot_price(spot_price_raw, spot_buffer):
 # (or instance family) creation.
 
 
-def build_sns_message(count, instance_name, instance_type, request_type, sns_datestamp, sns_timestamp):
+def build_sns_message(count: int, instance_name: str, instance_type: str, request_type: str, sns_datestamp: str, sns_timestamp: str) -> tuple[str, str]:
     if count > 1:
         sns_message_body = f"""\
 Ec2InstanceMaker has created a new instance family.
@@ -344,7 +400,7 @@ TimeStamp:    {sns_timestamp}
 # directory.
 
 
-def apply_terraform(instance_data_dir, debug_mode, refer_to_docs_and_quit):
+def apply_terraform(instance_data_dir: str, debug_mode: BoolStr, refer_to_docs_and_quit: QuitFn) -> None:
     import subprocess
 
     tf_env = {**os.environ, "TF_LOG": "DEBUG"} if debug_mode == "true" else None
@@ -364,7 +420,16 @@ def apply_terraform(instance_data_dir, debug_mode, refer_to_docs_and_quit):
 # the Terraform apply completes.
 
 
-def build_security_group_tags(security_group_name, instance_name, instance_serial_number, instance_owner, instance_owner_email, instance_owner_department, deployment_date_tag, project_id):
+def build_security_group_tags(
+    security_group_name: str,
+    instance_name: str,
+    instance_serial_number: str,
+    instance_owner: str,
+    instance_owner_email: str,
+    instance_owner_department: str,
+    deployment_date_tag: str,
+    project_id: str,
+) -> list[dict[str, str]]:
     tags = [
         {"Key": "Name", "Value": security_group_name},
         {"Key": "Purpose", "Value": "EC2 security group for " + instance_name},
@@ -392,7 +457,7 @@ def build_security_group_tags(security_group_name, instance_name, instance_seria
 # actually guaranteed to preserve across versions the way `-json` is.
 
 
-def fetch_windows_instance_details(instance_data_dir, refer_to_docs_and_quit):
+def fetch_windows_instance_details(instance_data_dir: str, refer_to_docs_and_quit: QuitFn) -> tuple[str, str, str]:
     import json
     import subprocess
 
@@ -422,7 +487,7 @@ def fetch_windows_instance_details(instance_data_dir, refer_to_docs_and_quit):
 _WINDOWS_PASSWORD_NOT_YET_AVAILABLE = "(not yet available -- Windows password generation can take several minutes after launch; try again shortly)"
 
 
-def decrypt_windows_admin_passwords(instance_data_dir, ec2_keypair, instance_ids_csv):
+def decrypt_windows_admin_passwords(instance_data_dir: str, ec2_keypair: str, instance_ids_csv: str) -> str:
     import subprocess
 
     from jq import jq
@@ -455,7 +520,7 @@ def decrypt_windows_admin_passwords(instance_data_dir, ec2_keypair, instance_ids
 # formula, not a behavior change.
 
 
-def derive_iam_names(iam_name_prefix, instance_serial_number):
+def derive_iam_names(iam_name_prefix: str, instance_serial_number: str) -> tuple[str, str, str]:
     return (
         iam_name_prefix + "-role-" + instance_serial_number,
         iam_name_prefix + "-policy-" + instance_serial_number,
@@ -468,7 +533,9 @@ def derive_iam_names(iam_name_prefix, instance_serial_number):
 # document if it doesn't already exist (the iam_role == "UNDEFINED" path).
 
 
-def ensure_iam_role_created(iam, role_name, policy_name, instance_json_policy_stage, instance_json_policy_template, debug_mode, refer_to_docs_and_quit):
+def ensure_iam_role_created(
+    iam: IAMClient, role_name: str, policy_name: str, instance_json_policy_stage: str, instance_json_policy_template: str, debug_mode: BoolStr, refer_to_docs_and_quit: QuitFn
+) -> None:
     try:
         iam.get_role(RoleName=role_name)
         if debug_mode == "true":
@@ -501,7 +568,7 @@ def ensure_iam_role_created(iam, role_name, policy_name, instance_json_policy_st
 # here is a hard, immediate failure, since this role wasn't ours to create.
 
 
-def ensure_iam_role_exists(iam, role_name, debug_mode, refer_to_docs_and_quit):
+def ensure_iam_role_exists(iam: IAMClient, role_name: str, debug_mode: BoolStr, refer_to_docs_and_quit: QuitFn) -> None:
     try:
         iam.get_role(RoleName=role_name)
         if debug_mode == "true":
@@ -521,7 +588,7 @@ def ensure_iam_role_exists(iam, role_name, debug_mode, refer_to_docs_and_quit):
 # since both need exactly this.
 
 
-def ensure_iam_instance_profile(iam, profile_name, role_name, debug_mode, refer_to_docs_and_quit):
+def ensure_iam_instance_profile(iam: IAMClient, profile_name: str, role_name: str, debug_mode: BoolStr, refer_to_docs_and_quit: QuitFn) -> None:
     try:
         iam.get_instance_profile(InstanceProfileName=profile_name)
         print("Found IAM EC2 instance profile: " + profile_name)
@@ -544,13 +611,23 @@ def ensure_iam_instance_profile(iam, profile_name, role_name, debug_mode, refer_
 # ec2_iam_instance_profile, preserve_iam_role).
 
 
-def setup_iam(iam, iam_role, iam_name_prefix, iam_json_policy, instance_data_dir, instance_serial_number, debug_mode, refer_to_docs_and_quit, modify_iam_policy_document):
+def setup_iam(
+    iam: IAMClient,
+    iam_role: str,
+    iam_name_prefix: str,
+    iam_json_policy: str,
+    instance_data_dir: str,
+    instance_serial_number: str,
+    debug_mode: BoolStr,
+    refer_to_docs_and_quit: QuitFn,
+    modify_iam_policy_document: Callable[[str, str, str, str], None],
+) -> tuple[str, str, str, BoolStr]:
     if iam_role == "UNDEFINED":
         role_name, policy_name, profile_name = derive_iam_names(iam_name_prefix, instance_serial_number)
         instance_json_policy_src = "templates/" + iam_json_policy
         instance_json_policy_stage = instance_data_dir + "stage-" + iam_json_policy
         instance_json_policy_template = instance_data_dir + iam_json_policy
-        preserve_iam_role = "false"
+        preserve_iam_role: BoolStr = "false"
         modify_iam_policy_document(instance_json_policy_src, instance_json_policy_stage, iam_name_prefix, instance_serial_number)
         ensure_iam_role_created(iam, role_name, policy_name, instance_json_policy_stage, instance_json_policy_template, debug_mode, refer_to_docs_and_quit)
     else:
@@ -568,7 +645,7 @@ def setup_iam(iam, iam_role, iam_name_prefix, iam_json_policy, instance_data_dir
 # to vars_file_path -- the human-readable per-instance audit record.
 
 
-def write_vars_file(vars_file_path, vars_file_template, instance_parameters):
+def write_vars_file(vars_file_path: str, vars_file_template: str, instance_parameters: dict[str, Any]) -> None:
     with open(vars_file_path, "w") as fh:
         fh.write(vars_file_template.format(**instance_parameters))
 
@@ -584,7 +661,7 @@ def write_vars_file(vars_file_path, vars_file_template, instance_parameters):
 # to render.
 
 
-def resolve_custom_user_scripts(names, custom_user_scripts_dir, refer_to_docs_and_quit):
+def resolve_custom_user_scripts(names: list[str], custom_user_scripts_dir: str, refer_to_docs_and_quit: QuitFn) -> tuple[list[str], list[str]]:
     prelogin_names = []
     postboot_names = []
     for name in names:
@@ -612,7 +689,7 @@ def resolve_custom_user_scripts(names, custom_user_scripts_dir, refer_to_docs_an
 # racing the agent's own auto-create-with-indefinite-retention behavior.
 
 
-def setup_cloudwatch_logging(logs_client, log_group_name, log_retention_days, refer_to_docs_and_quit):
+def setup_cloudwatch_logging(logs_client: CloudWatchLogsClient, log_group_name: str, log_retention_days: int, refer_to_docs_and_quit: QuitFn) -> None:
     try:
         logs_client.create_log_group(logGroupName=log_group_name, tags={"ManagedBy": "Ec2InstanceMaker"})
     except ClientError as e:
@@ -653,12 +730,12 @@ def setup_cloudwatch_logging(logs_client, log_group_name, log_retention_days, re
 # use `first.last`/`first_last` conventions.
 
 
-def validate_instance_name_format(instance_name, refer_to_docs_and_quit):
+def validate_instance_name_format(instance_name: str, refer_to_docs_and_quit: QuitFn) -> None:
     if not re.fullmatch(r"[a-z][a-z0-9-]*", instance_name):
         refer_to_docs_and_quit("instance_name must start with a lowercase letter and contain only lowercase letters, numbers, and hyphens!")
 
 
-def validate_instance_name_and_owner_format(instance_name, instance_owner, refer_to_docs_and_quit):
+def validate_instance_name_and_owner_format(instance_name: str, instance_owner: str, refer_to_docs_and_quit: QuitFn) -> None:
     validate_instance_name_format(instance_name, refer_to_docs_and_quit)
     if not re.fullmatch(r"[a-z][a-z0-9._-]*", instance_owner):
         refer_to_docs_and_quit("instance_owner must start with a lowercase letter and contain only lowercase letters, numbers, periods, underscores, and hyphens!")
@@ -675,7 +752,7 @@ def validate_instance_name_and_owner_format(instance_name, instance_owner, refer
 # for the original code's `if not TERRAFORM_VERSION:` check to notice.
 
 
-def get_terraform_version(refer_to_docs_and_quit, run=None):
+def get_terraform_version(refer_to_docs_and_quit: QuitFn, run: Callable[..., Any] | None = None) -> str | None:
     import subprocess
 
     if run is None:
@@ -703,22 +780,24 @@ def get_terraform_version(refer_to_docs_and_quit, run=None):
 # piecemeal through the build flow, changes nothing observable.
 
 
+@dataclass
 class AwsClients:
-    def __init__(self, ec2_client, ec2, iam, sns_client, stsclient):
-        self.ec2_client = ec2_client
-        self.ec2 = ec2
-        self.iam = iam
-        self.sns_client = sns_client
-        self.stsclient = stsclient
+    ec2_client: EC2Client
+    ec2: EC2ServiceResource
+    iam: IAMClient
+    sns_client: SNSClient
+    stsclient: STSClient
+    logs_client: CloudWatchLogsClient
 
 
-def create_aws_clients(region, boto3_client=boto3.client, boto3_resource=boto3.resource):
+def create_aws_clients(region: str, boto3_client: Callable[..., Any] = boto3.client, boto3_resource: Callable[..., Any] = boto3.resource) -> AwsClients:
     return AwsClients(
         ec2_client=boto3_client("ec2", region_name=region),
         ec2=boto3_resource("ec2", region_name=region),
         iam=boto3_client("iam"),
         sns_client=boto3_client("sns", region_name=region),
         stsclient=boto3_client("sts", region_name=region, endpoint_url="https://sts." + region + ".amazonaws.com"),
+        logs_client=boto3_client("logs", region_name=region),
     )
 
 
@@ -727,7 +806,7 @@ def create_aws_clients(region, boto3_client=boto3.client, boto3_resource=boto3.r
 # this tool writes into.
 
 
-def ensure_state_directories(instance_data_dir):
+def ensure_state_directories(instance_data_dir: str) -> None:
     for directory in ("./vars_files", instance_data_dir, "./active_instances"):
         try:
             os.makedirs(directory)
@@ -746,7 +825,7 @@ def ensure_state_directories(instance_data_dir):
 # predates that helper and shouldn't be wrapped in its generic boilerplate.
 
 
-def abort_if_vars_file_exists(vars_file_path, argv):
+def abort_if_vars_file_exists(vars_file_path: str, argv: list[str]) -> None:
     if not os.path.isfile(vars_file_path):
         return
     print("")
@@ -781,7 +860,7 @@ def abort_if_vars_file_exists(vars_file_path, argv):
 # fix already applied this session to the .pem keypair write).
 
 
-def write_serial_number_file(instance_serial_number_file, instance_name, instance_serial_datestamp, argv):
+def write_serial_number_file(instance_serial_number_file: str, instance_name: str, instance_serial_datestamp: str, argv: list[str]) -> None:
     if os.path.isfile(instance_serial_number_file):
         return
     with open(instance_serial_number_file, "w") as fh:
@@ -797,7 +876,7 @@ def write_serial_number_file(instance_serial_number_file, instance_name, instanc
 # unchanged) if ebs_optimized was already "false".
 
 
-def resolve_ebs_optimized_support(ebs_optimized, instance_type, ebs_optimized_support, instance_name):
+def resolve_ebs_optimized_support(ebs_optimized: BoolStr, instance_type: str, ebs_optimized_support: str, instance_name: str) -> BoolStr:
     if ebs_optimized != "true":
         return ebs_optimized
     if ebs_optimized_support == "unsupported":
@@ -818,7 +897,18 @@ def resolve_ebs_optimized_support(ebs_optimized, instance_type, ebs_optimized_su
 # dependency-injected (already-tested functions of the same name above).
 
 
-def resolve_request_type_pricing(request_type, ec2_client, instance_type, is_windows, az, spot_buffer, debug_mode, fetch_spot_price_raw, compute_buffered_spot_price, p_val):
+def resolve_request_type_pricing(
+    request_type: Literal["ondemand", "spot"],
+    ec2_client: EC2Client,
+    instance_type: str,
+    is_windows: bool,
+    az: str,
+    spot_buffer: float,
+    debug_mode: BoolStr,
+    fetch_spot_price_raw: Callable[[EC2Client, str, bool, str], float],
+    compute_buffered_spot_price: Callable[[float, float], float],
+    p_val: Callable[[str, str], None],
+) -> tuple[str, str] | tuple[float, float]:
     if request_type == "ondemand":
         print("")
         print("Selected: ondemand (NOTE: spot instances are **MUCH** cheaper!)")
@@ -840,7 +930,17 @@ def resolve_request_type_pricing(request_type, ec2_client, instance_type, is_win
 # support a one-member "cluster").
 
 
-def resolve_placement_group_strategy(enable_placement_group, count, instance_type, placement_group_strategy, instance_type_info, ec2_placement_group_check, refer_to_docs_and_quit, debug_mode, p_val):
+def resolve_placement_group_strategy(
+    enable_placement_group: BoolStr,
+    count: int,
+    instance_type: str,
+    placement_group_strategy: str,
+    instance_type_info: dict[str, Any],
+    ec2_placement_group_check: Callable[[str, str, list[str], str], None],
+    refer_to_docs_and_quit: QuitFn,
+    debug_mode: BoolStr,
+    p_val: Callable[[str, str], None],
+) -> str:
     if enable_placement_group != "true":
         return "UNDEFINED"
     if count == 1:
@@ -859,7 +959,7 @@ def resolve_placement_group_strategy(enable_placement_group, count, instance_typ
 # notifications and subscribe instance_owner_email to it.
 
 
-def create_sns_topic_and_subscribe(sns_client, instance_serial_number, instance_owner_email):
+def create_sns_topic_and_subscribe(sns_client: SNSClient, instance_serial_number: str, instance_owner_email: str) -> tuple[str, str]:
     sns_topic_name = "Ec2_Instance_SNS_Alerts_" + str(instance_serial_number)
     sns_topic = sns_client.create_topic(Name=sns_topic_name)
     sns_topic_arn = sns_topic["TopicArn"]
@@ -871,7 +971,7 @@ def create_sns_topic_and_subscribe(sns_client, instance_serial_number, instance_
 # Purpose: publish the build-completion notification to the SNS topic.
 
 
-def publish_sns_notification(sns_client, sns_topic_arn, sns_message_body, sns_instance_subject):
+def publish_sns_notification(sns_client: SNSClient, sns_topic_arn: str, sns_message_body: str, sns_instance_subject: str) -> None:
     sns_client.publish(TopicArn=sns_topic_arn, Message=sns_message_body, Subject=sns_instance_subject)
 
 
@@ -883,7 +983,12 @@ def publish_sns_notification(sns_client, sns_topic_arn, sns_message_body, sns_in
 # leftover temp file to clean up if something raises partway through.
 
 
-def build_windows_password_table(instance_data_dir, ec2_keypair, fetch_windows_instance_details, decrypt_windows_admin_passwords):
+def build_windows_password_table(
+    instance_data_dir: str,
+    ec2_keypair: str,
+    fetch_windows_instance_details: Callable[[str], tuple[str, str, str]],
+    decrypt_windows_admin_passwords: Callable[[str, str, str], str],
+) -> Any:
     import io
 
     from prettytable import from_csv

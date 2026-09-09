@@ -19,6 +19,7 @@
 import os
 import shlex
 import subprocess
+from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
@@ -49,7 +50,7 @@ TEMPLATE_MAP = [
 # own file on disk, same as everything else.
 
 
-def render_prelogin_scripts(names, env, context):
+def render_prelogin_scripts(names: list[str], env: Environment, context: dict[str, Any]) -> list[dict[str, str]]:
     """Render each selected custom_user_prelogin_script.j2_<name> and
     return their content for embedding into instance_userdata.j2's
     cloud-config write_files/runcmd -- these aren't written to
@@ -59,7 +60,7 @@ def render_prelogin_scripts(names, env, context):
     return [{"name": name, "content": env.get_template("custom_user_prelogin_script.j2_" + name).render(**context)} for name in names]
 
 
-def render_postboot_scripts(names, env, context, instance_data_dir, instance_name):
+def render_postboot_scripts(names: list[str], env: Environment, context: dict[str, Any], instance_data_dir: str, instance_name: str) -> list[str]:
     """Render each selected custom_user_postboot_script.j2_<name> to its
     own file in instance_data_dir (same pattern as every other generated
     script) and return the list of destination filenames, for
@@ -78,7 +79,7 @@ def render_postboot_scripts(names, env, context, instance_data_dir, instance_nam
     return filenames
 
 
-def _lookup(plugin, arg):
+def _lookup(plugin: str, arg: str) -> str:
     # arg is always a literal baked into templates/*.j2 source (e.g. the
     # 'date "+%B %-d, %Y"' build-date stamp), never runtime/operator input,
     # and shelling out is this shim's entire purpose (replicating Ansible's
@@ -88,13 +89,13 @@ def _lookup(plugin, arg):
     raise NotImplementedError(f'lookup plugin "{plugin}" is not supported')
 
 
-def _bool_filter(value):
+def _bool_filter(value: Any) -> bool:
     if isinstance(value, bool):
         return value
     return str(value).strip().lower() in ("yes", "true", "t", "1", "on")
 
 
-def _shquote_filter(value):
+def _shquote_filter(value: Any) -> str:
     # For interpolating free-text operator input (instance_owner_email/
     # instance_owner_department/project_id -- none of these are restricted
     # to a safe charset the way instance_name/instance_owner are,
@@ -106,7 +107,7 @@ def _shquote_filter(value):
     return shlex.quote(str(value))
 
 
-def _tf_shquote_filter(value):
+def _tf_shquote_filter(value: Any) -> str:
     # Same purpose as shquote above, but for interpolating into
     # DEFAULT_EC2_TEMPLATE.j2's local-exec `command` string specifically --
     # that string is itself an HCL double-quoted string literal, not raw
@@ -126,7 +127,7 @@ def _tf_shquote_filter(value):
     return shell_quoted.replace("\\", "\\\\").replace('"', '\\"')
 
 
-def _make_environment(local_workingdir):
+def _make_environment(local_workingdir: str) -> Environment:
     # autoescape is intentionally off: output is Terraform/shell/Python/JSON,
     # not HTML, and HTML-escaping quotes/angle-brackets would corrupt it.
     # The loader searches templates/ (toolkit-owned) and custom_user_scripts/
@@ -146,7 +147,7 @@ def _make_environment(local_workingdir):
     return env
 
 
-def _build_render_context(instance_parameters, local_workingdir, instance_data_dir):
+def _build_render_context(instance_parameters: dict[str, Any], local_workingdir: str, instance_data_dir: str) -> dict[str, Any]:
     context = dict(instance_parameters)
     instance_name = context["instance_name"]
     context.update(
@@ -169,7 +170,7 @@ def _build_render_context(instance_parameters, local_workingdir, instance_data_d
     return context
 
 
-def render_instance_templates(instance_parameters, local_workingdir, instance_data_dir):
+def render_instance_templates(instance_parameters: dict[str, Any], local_workingdir: str, instance_data_dir: str) -> None:
     """Render the EC2 instance template set and symlink the kill/build-ami
     scripts back into the repo root.
 

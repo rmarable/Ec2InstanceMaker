@@ -6,6 +6,25 @@
 # Purpose:	Data structures and functions to support Ec2InstanceMaker
 ################################################################################
 
+from collections.abc import Iterator
+from typing import Any, Literal, NoReturn, cast
+
+from mypy_boto3_ec2.client import EC2Client
+from mypy_boto3_ec2.literals import InstanceTypeType
+from mypy_boto3_ec2.service_resource import SecurityGroup
+from mypy_boto3_iam.client import IAMClient
+
+# Type aliases used throughout this module's signatures -- duplicated
+# (rather than imported) from instance_builder.py's identical aliases,
+# since instance_builder.py must not import aux_data.py (see resolve_ami()
+# there) and the reverse import would be a new, needless coupling for one
+# line of typing:
+# - BoolStr: this codebase's pervasive Ansible-style string-boolean
+#   convention ("true"/"false" as literal strings, not real bool values).
+# boto3/botocore clients and resources are typed via boto3-stubs
+# (mypy_boto3_*, a dev-only dependency) rather than a fabricated Any.
+BoolStr = Literal["true", "false"]
+
 # Global variable definitions
 
 null_list = [""]
@@ -23,7 +42,7 @@ null_list = [""]
 # needs to be taught these facts; make_instance.py computes them once and
 # threads the results into instance_parameters so templates read them
 # too, instead of re-deriving the same substring logic a third time.
-BASE_OS_FAMILIES = {
+BASE_OS_FAMILIES: dict[str, dict[str, Any]] = {
     "al2023": {"is_windows": False, "package_manager": "yum", "ec2_user": "ec2-user", "awscli_preinstalled": True},
     "alinux2": {"is_windows": False, "package_manager": "yum", "ec2_user": "ec2-user", "awscli_preinstalled": True},
     "alma9": {"is_windows": False, "package_manager": "yum", "ec2_user": "ec2-user", "awscli_preinstalled": False},
@@ -44,7 +63,7 @@ BASE_OS_FAMILIES = {
 # Purpose: look up the family classification for a base_os value
 
 
-def get_base_os_family(base_os):
+def get_base_os_family(base_os: str) -> dict[str, Any]:
     if base_os not in BASE_OS_FAMILIES:
         error_msg = '"' + base_os + '" is not a recognized base_os!'
         refer_to_docs_and_quit(error_msg)
@@ -55,7 +74,7 @@ def get_base_os_family(base_os):
 # Purpose: add a rule to a security group
 
 
-def add_inbound_security_group_rule(region, sec_grp, protocol, cidr, psource, pdest):
+def add_inbound_security_group_rule(region: str, sec_grp: SecurityGroup, protocol: str, cidr: str, psource: int, pdest: int) -> None:
     sec_grp.authorize_ingress(IpProtocol=protocol, CidrIp=cidr, FromPort=psource, ToPort=pdest)
 
 
@@ -63,7 +82,7 @@ def add_inbound_security_group_rule(region, sec_grp, protocol, cidr, psource, pd
 # Purpose: verify the selected EC2 instance_type is supported by base_os
 
 
-def base_os_instance_check(base_os, instance_type, architecture, debug_mode):
+def base_os_instance_check(base_os: str, instance_type: str, architecture: str, debug_mode: BoolStr) -> None:
     unsupported_instance_prefixes = {
         "al2023": ec2_instances_unsupported_al2023,
         "alinux2": ec2_instances_unsupported_alinux2,
@@ -98,11 +117,18 @@ def base_os_instance_check(base_os, instance_type, architecture, debug_mode):
 # rather than a hand-maintained allowlist.
 
 
-def get_instance_type_info(ec2client, instance_type):
+def get_instance_type_info(ec2client: EC2Client, instance_type: str) -> dict[str, Any] | None:
     from botocore.exceptions import ClientError
 
     try:
-        response = ec2client.describe_instance_types(InstanceTypes=[instance_type])
+        # boto3-stubs types InstanceTypes as a Literal of every instance
+        # type AWS had published as of this stub release. instance_type
+        # stays a plain str (see the comment above this function) so a new
+        # AWS instance family works without waiting on a stub update --
+        # this cast documents "intentionally dynamic input," not "this
+        # value is definitely valid"; validity is exactly what this API
+        # call itself determines.
+        response = ec2client.describe_instance_types(InstanceTypes=[cast(InstanceTypeType, instance_type)])
     except ClientError as e:
         if e.response["Error"]["Code"] == "InvalidInstanceType":
             return None
@@ -135,7 +161,7 @@ def get_instance_type_info(ec2client, instance_type):
 # Purpose: verify the existence of a user-provided custom AMI
 
 
-def check_custom_ami(ec2client, custom_ami, aws_account_id, architecture):
+def check_custom_ami(ec2client: EC2Client, custom_ami: str, aws_account_id: str, architecture: str) -> str:
     ami_information = ec2client.describe_images(
         Owners=[aws_account_id],
         Filters=[
@@ -162,21 +188,21 @@ def check_custom_ami(ec2client, custom_ami, aws_account_id, architecture):
 
 
 def ctrlC_Abort(
-    sleep_time,
-    line_length,
-    vars_file_path,
-    instance_data_dir,
-    instance_serial_number_file,
-    ec2client,
-    iam,
-    security_group_name,
-    vpc_security_group_ids,
-    iam_instance_role,
-    iam_instance_policy,
-    iam_instance_profile,
-    preserve_iam_role,
-    ec2_keypair,
-):
+    sleep_time: int,
+    line_length: int,
+    vars_file_path: str,
+    instance_data_dir: str,
+    instance_serial_number_file: str,
+    ec2client: EC2Client,
+    iam: IAMClient,
+    security_group_name: str,
+    vpc_security_group_ids: str,
+    iam_instance_role: str,
+    iam_instance_policy: str,
+    iam_instance_profile: str,
+    preserve_iam_role: BoolStr,
+    ec2_keypair: str,
+) -> None:
     import os
     import sys
     import time
@@ -262,7 +288,7 @@ def ctrlC_Abort(
 CLOUDWATCH_LOGS_RETENTION_DAYS = (1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653)
 
 
-def log_retention_days_check(log_retention_days, debug_mode):
+def log_retention_days_check(log_retention_days: int, debug_mode: BoolStr) -> None:
     if log_retention_days not in CLOUDWATCH_LOGS_RETENTION_DAYS:
         p_fail(str(log_retention_days), "log_retention_days", [str(d) for d in CLOUDWATCH_LOGS_RETENTION_DAYS])
     p_val("log_retention_days", debug_mode)
@@ -272,7 +298,7 @@ def log_retention_days_check(log_retention_days, debug_mode):
 # Purpose: verify the instance_type supports EBS encryption
 
 
-def ebs_encryption_check(instance_type, ebs_encryption_support, instance_name, debug_mode):
+def ebs_encryption_check(instance_type: str, ebs_encryption_support: str, instance_name: str, debug_mode: BoolStr) -> None:
     if ebs_encryption_support == "supported":
         print("")
         print("Enabling: EBS encryption")
@@ -287,7 +313,7 @@ def ebs_encryption_check(instance_type, ebs_encryption_support, instance_name, d
 # group strategy
 
 
-def ec2_placement_group_check(instance_type, placement_group_strategy, placement_group_strategies, debug_mode):
+def ec2_placement_group_check(instance_type: str, placement_group_strategy: str, placement_group_strategies: list[str], debug_mode: BoolStr) -> None:
     if placement_group_strategy not in placement_group_strategies:
         error_msg = instance_type + ' does not support the "' + placement_group_strategy + '" EC2 Placement Group strategy!'
         refer_to_docs_and_quit(error_msg)
@@ -324,7 +350,7 @@ def ec2_placement_group_check(instance_type, placement_group_strategy, placement
 # architecture as "amd64"/"arm64" in the path itself (not "x86_64"), so
 # that segment is wildcarded; it also publishes under hvm-ssd-gp3 (not the
 # older hvm-ssd path used by pre-23.10 releases).
-_AMI_CATALOG = {
+_AMI_CATALOG: dict[str, tuple[str, str]] = {
     "alinux2": ("137112412989", "amzn2-ami-hvm-2.0.*"),  # Amazon
     "al2023": ("137112412989", "al2023-ami-2023.*"),  # Amazon
     "alma9": ("764336703387", "AlmaLinux OS 9*"),  # AlmaLinux OS Foundation
@@ -341,7 +367,7 @@ _AMI_CATALOG = {
 }
 
 
-def get_ami_info(ec2client, base_os, architecture):
+def get_ami_info(ec2client: EC2Client, base_os: str, architecture: str) -> str:
     if base_os not in _AMI_CATALOG:
         error_msg = '"' + base_os + '" is not a recognized base_os!'
         refer_to_docs_and_quit(error_msg)
@@ -363,10 +389,10 @@ def get_ami_info(ec2client, base_os, architecture):
 # Purpose: iterate through a list from item_value=low to item_value=high
 
 
-def menuCount(low, high):
+def menuCount(low: int, high: int) -> Iterator[int]:
     counter = 0
 
-    def tmp():
+    def tmp() -> int | None:
         nonlocal counter
         item_value = low + counter
         if item_value < high:
@@ -381,7 +407,7 @@ def menuCount(low, high):
 # Purpose: abort when an invalid AvailabilityZone is provided
 
 
-def illegal_az_msg(az):
+def illegal_az_msg(az: str) -> NoReturn:
     import sys
 
     print("*** ERROR ***")
@@ -396,7 +422,7 @@ def illegal_az_msg(az):
 # iam_name_prefix
 
 
-def modify_iam_policy_document(instance_json_policy_src, instance_json_policy_stage, iam_name_prefix, instance_serial_number):
+def modify_iam_policy_document(instance_json_policy_src: str, instance_json_policy_stage: str, iam_name_prefix: str, instance_serial_number: str) -> None:
     with open(instance_json_policy_src) as ec2_iam_role_src:
         role_stage_0 = ec2_iam_role_src.read()
         ec2_iam_role_src.close()
@@ -420,7 +446,7 @@ def modify_iam_policy_document(instance_json_policy_src, instance_json_policy_st
 # Purpose: print a failed instance_parameter validation message to stdout
 
 
-def p_fail(p, q, r):
+def p_fail(p: str, q: str, r: str | list[str]) -> NoReturn:
     import sys
     import textwrap
 
@@ -440,9 +466,13 @@ def p_fail(p, q, r):
 
 # Function: p_val()
 # Purpose: print a successful instance_parameter validation message to stdout
+# debug_mode is typed plain str, not BoolStr, since this specific check
+# (unlike every other debug_mode comparison in the codebase) also accepts
+# a capitalized "True" -- narrowing it to BoolStr would make that branch
+# a type error without actually being asked to fix the inconsistency.
 
 
-def p_val(p, debug_mode):
+def p_val(p: str, debug_mode: str) -> None:
     if debug_mode == "True" or debug_mode == "true":
         print(p + " successfully validated")
     else:
@@ -454,7 +484,7 @@ def p_val(p, debug_mode):
 # of instance_parameters.
 
 
-def print_TextHeader(p, action, line_length):
+def print_TextHeader(p: str, action: str, line_length: int) -> None:
     print("")
     print("".center(line_length, "-"))
     T2C = action + " parameter values for " + p
@@ -467,7 +497,7 @@ def print_TextHeader(p, action, line_length):
 # documentation, and quit with a non-successful error code.
 
 
-def refer_to_docs_and_quit(error_msg):
+def refer_to_docs_and_quit(error_msg: str) -> NoReturn:
     import sys
 
     print("*** ERROR ***")

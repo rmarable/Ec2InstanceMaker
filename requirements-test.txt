@@ -4,3 +4,5 @@ bandit[toml]
 pip-audit
 detect-secrets
 pytest
+mypy
+boto3-stubs[ec2,iam,sns,sts,logs]

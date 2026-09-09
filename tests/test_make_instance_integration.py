@@ -35,7 +35,7 @@ def _mock_aws_clients():
     sns_client.create_topic.return_value = {"TopicArn": "arn:aws:sns:us-east-2:123456789012:Ec2_Instance_SNS_Alerts_testint01"}
     stsclient = MagicMock()
     stsclient.get_caller_identity.return_value = {"Account": "123456789012"}
-    return AwsClients(ec2_client=MagicMock(), ec2=MagicMock(), iam=MagicMock(), sns_client=sns_client, stsclient=stsclient)
+    return AwsClients(ec2_client=MagicMock(), ec2=MagicMock(), iam=MagicMock(), sns_client=sns_client, stsclient=stsclient, logs_client=MagicMock())
 
 
 def _happy_path_argv(instance_name="testint01"):

@@ -92,6 +92,7 @@ class TestValidateAndResizeEbsVolumes:
             ebs_root_volume_size=8,
             ebs_device_volume_size=0,
             ebs_root_volume_type="gp2",
+            ebs_device_volume_type="gp2",
             ebs_root_volume_iops=0,
             ebs_device_volume_iops=0,
             is_windows=False,
@@ -105,6 +106,7 @@ class TestValidateAndResizeEbsVolumes:
                 ebs_root_volume_size=16001,
                 ebs_device_volume_size=0,
                 ebs_root_volume_type="gp2",
+                ebs_device_volume_type="gp2",
                 ebs_root_volume_iops=0,
                 ebs_device_volume_iops=0,
                 is_windows=False,
@@ -117,6 +119,7 @@ class TestValidateAndResizeEbsVolumes:
                 ebs_root_volume_size=8,
                 ebs_device_volume_size=16001,
                 ebs_root_volume_type="gp2",
+                ebs_device_volume_type="gp2",
                 ebs_root_volume_iops=0,
                 ebs_device_volume_iops=0,
                 is_windows=False,
@@ -128,6 +131,7 @@ class TestValidateAndResizeEbsVolumes:
             ebs_root_volume_size=8,
             ebs_device_volume_size=10,
             ebs_root_volume_type="gp2",
+            ebs_device_volume_type="gp2",
             ebs_root_volume_iops=0,
             ebs_device_volume_iops=0,
             is_windows=True,
@@ -140,6 +144,7 @@ class TestValidateAndResizeEbsVolumes:
             ebs_root_volume_size=100,
             ebs_device_volume_size=50,
             ebs_root_volume_type="gp2",
+            ebs_device_volume_type="gp2",
             ebs_root_volume_iops=0,
             ebs_device_volume_iops=0,
             is_windows=True,
@@ -152,6 +157,7 @@ class TestValidateAndResizeEbsVolumes:
             ebs_root_volume_size=8,
             ebs_device_volume_size=0,
             ebs_root_volume_type="gp2",
+            ebs_device_volume_type="gp2",
             ebs_root_volume_iops=0,
             ebs_device_volume_iops=0,
             is_windows=False,
@@ -165,6 +171,7 @@ class TestValidateAndResizeEbsVolumes:
                 ebs_root_volume_size=8,
                 ebs_device_volume_size=0,
                 ebs_root_volume_type="io1",
+                ebs_device_volume_type="gp2",
                 ebs_root_volume_iops=0,
                 ebs_device_volume_iops=100,
                 is_windows=False,
@@ -176,18 +183,52 @@ class TestValidateAndResizeEbsVolumes:
             instance_builder.validate_and_resize_ebs_volumes(
                 ebs_root_volume_size=8,
                 ebs_device_volume_size=0,
-                ebs_root_volume_type="io1",
+                ebs_root_volume_type="gp2",
+                ebs_device_volume_type="io1",
                 ebs_root_volume_iops=100,
                 ebs_device_volume_iops=16001,
                 is_windows=False,
                 refer_to_docs_and_quit=_quitting_mock(),
             )
 
+    def test_device_io1_is_validated_independently_of_root_type(self):
+        # Regression test: this used to gate the device IOPS check on
+        # ebs_root_volume_type alone, so a non-io1 root paired with an io1
+        # *device* volume never validated (or required) the device's IOPS
+        # at all. root_volume_type is deliberately "gp2" (never io1) here.
+        with pytest.raises(SystemExit):
+            instance_builder.validate_and_resize_ebs_volumes(
+                ebs_root_volume_size=8,
+                ebs_device_volume_size=0,
+                ebs_root_volume_type="gp2",
+                ebs_device_volume_type="io1",
+                ebs_root_volume_iops=0,
+                ebs_device_volume_iops=0,
+                is_windows=False,
+                refer_to_docs_and_quit=_quitting_mock(),
+            )
+
+    def test_root_io1_does_not_require_device_iops_when_device_is_not_io1(self):
+        # The inverse regression: an io1 root paired with a non-io1 device
+        # must not demand (or misapply) IOPS bounds on the device.
+        root, device = instance_builder.validate_and_resize_ebs_volumes(
+            ebs_root_volume_size=8,
+            ebs_device_volume_size=0,
+            ebs_root_volume_type="io1",
+            ebs_device_volume_type="gp2",
+            ebs_root_volume_iops=100,
+            ebs_device_volume_iops=0,
+            is_windows=False,
+            refer_to_docs_and_quit=_quitting_mock(),
+        )
+        assert (root, device) == (8, 0)
+
     def test_io1_within_range_passes(self):
         root, device = instance_builder.validate_and_resize_ebs_volumes(
             ebs_root_volume_size=8,
             ebs_device_volume_size=0,
             ebs_root_volume_type="io1",
+            ebs_device_volume_type="io1",
             ebs_root_volume_iops=100,
             ebs_device_volume_iops=100,
             is_windows=False,
@@ -201,6 +242,7 @@ class TestValidateAndResizeEbsVolumes:
             ebs_root_volume_size=8,
             ebs_device_volume_size=0,
             ebs_root_volume_type="gp2",
+            ebs_device_volume_type="gp2",
             ebs_root_volume_iops=0,
             ebs_device_volume_iops=0,
             is_windows=False,
@@ -370,6 +412,23 @@ class TestResolveSecurityGroup:
         instance_builder.resolve_security_group(ec2, "us-east-1", "ec2instancemaker_sg", "999_us-east-1", "vpc-abc", False, "10.0.0.0/16", add_rule)
 
         add_rule.assert_called_once_with("us-east-1", created_sg, "tcp", "10.0.0.0/16", 22, 22)
+
+    def test_lookup_is_scoped_to_the_target_vpc(self):
+        # Regression test: a bare group-name filter (with no vpc-id
+        # scoping) would match a same-named security group in a *different*
+        # VPC too, which sg_id[0].id would then silently pick regardless of
+        # which VPC it actually belongs to.
+        import boto3
+
+        fake_sg = boto3.resource("ec2", region_name="us-east-1").SecurityGroup("sg-0123456789abcdef0")
+        ec2 = self._ec2_with_filter_results([[fake_sg]])
+        add_rule = MagicMock()
+
+        instance_builder.resolve_security_group(ec2, "us-east-1", "my-custom-sg", "12345_us-east-1", "vpc-target123", False, "10.0.0.0/16", add_rule)
+
+        called_filters = ec2.security_groups.filter.call_args.kwargs["Filters"]
+        vpc_filter = next(f for f in called_filters if f["Name"] == "vpc-id")
+        assert vpc_filter["Values"] == ["vpc-target123"]
 
 
 class TestSetupKeypair:
@@ -948,6 +1007,38 @@ class TestSetupCloudwatchLogging:
             instance_builder.setup_cloudwatch_logging(logs_client, "/ec2instancemaker/dev01", 30, quit_fn)
 
 
+class TestValidateInstanceNameFormat:
+    # Direct tests for the standalone function access_instance.py and
+    # manage_instance.py call -- previously only exercised transitively
+    # through TestValidateInstanceNameAndOwnerFormat below.
+
+    def test_valid_name_does_not_quit(self):
+        quit_fn = _quitting_mock()
+        instance_builder.validate_instance_name_format("dev01-fam", quit_fn)
+        quit_fn.assert_not_called()
+
+    def test_uppercase_quits(self):
+        quit_fn = _quitting_mock()
+        with pytest.raises(SystemExit):
+            instance_builder.validate_instance_name_format("Dev01", quit_fn)
+        quit_fn.assert_called_once()
+
+    @pytest.mark.parametrize(
+        "malicious_name",
+        [
+            "../../../etc/passwd",
+            "dev01/../../etc",
+            'dev01"; touch /tmp/pwned; echo "',
+            "dev01$(whoami)",
+        ],
+    )
+    def test_rejects_injection_and_traversal_attempts(self, malicious_name):
+        quit_fn = _quitting_mock()
+        with pytest.raises(SystemExit):
+            instance_builder.validate_instance_name_format(malicious_name, quit_fn)
+        quit_fn.assert_called_once()
+
+
 class TestValidateInstanceNameAndOwnerFormat:
     def test_all_lowercase_alphanumeric_with_hyphens_is_fine(self):
         quit_fn = _quitting_mock()
@@ -1057,6 +1148,7 @@ class TestCreateAwsClients:
         assert clients.iam == ("iam", {})
         assert clients.sns_client == ("sns", {"region_name": "us-east-1"})
         assert clients.stsclient == ("sts", {"region_name": "us-east-1", "endpoint_url": "https://sts.us-east-1.amazonaws.com"})
+        assert clients.logs_client == ("logs", {"region_name": "us-east-1"})
 
 
 class TestEnsureStateDirectories:

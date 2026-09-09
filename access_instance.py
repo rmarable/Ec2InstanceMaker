@@ -58,4 +58,3 @@ if os.path.exists("instance_data/" + instance_name + "/access_instance." + insta
 else:
     error_msg = 'instance "' + instance_name + '" does not appear to exist!'
     refer_to_docs_and_quit(error_msg)
-    sys.exit(1)

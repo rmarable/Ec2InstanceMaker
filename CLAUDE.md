@@ -181,7 +181,7 @@ line in `make_instance.py`.
 
 Instance-type validity, CPU architecture (x86_64 vs. Graviton/ARM64), EBS
 optimization/encryption support, and placement group strategies are **not**
-hardcoded lists — `get_instance_type_info(instance_type, region)` calls
+hardcoded lists — `get_instance_type_info(ec2client, instance_type)` calls
 `ec2:DescribeInstanceTypes` and returns them as ground truth from the AWS
 API. This replaced a set of hand-maintained 2019-era allowlists
 (`ec2_instances_full_list` and friends) that went stale and blocked every
@@ -189,10 +189,12 @@ Graviton instance type outright; the API-driven approach needs no updates
 when AWS ships new instance families. `base_os` values are architecture-
 agnostic except Windows, which AWS does not publish ARM64 AMIs for —
 `base_os_instance_check()` rejects any `windows*` + Graviton combination
-before `get_ami_info()` is ever called. `get_ami_info(base_os, region,
-architecture)` and `check_custom_ami(custom_ami, aws_account_id, region,
+before `get_ami_info()` is ever called. `get_ami_info(ec2client, base_os,
+architecture)` and `check_custom_ami(ec2client, custom_ami, aws_account_id,
 architecture)` both take the detected architecture and select the matching
-AMI; per-OS `Name` filters were adjusted so the `architecture` API filter
+AMI; both also take an injected `ec2client` (from `create_aws_clients()`)
+rather than constructing their own, same as `get_instance_type_info()`.
+Per-OS `Name` filters were adjusted so the `architecture` API filter
 does the real narrowing (vendors encode arch differently in AMI names —
 `x86_64`/`arm64` for AL2023, `amd64`/`arm64` for Ubuntu, `x86_64`/`aarch64`
 for Rocky/AlmaLinux — so those tokens are wildcarded out of the `Name`

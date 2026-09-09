@@ -319,6 +319,7 @@ def main(argv=None):
     ec2 = aws_clients.ec2
     iam = aws_clients.iam
     sns_client = aws_clients.sns_client
+    logs_client = aws_clients.logs_client
 
     # Perform error checking on the selected AWS Region and Availability
     # Zone. Abort if a non-existent Availability Zone was chosen. This must
@@ -372,7 +373,6 @@ def main(argv=None):
 
     cloudwatch_log_group = "/ec2instancemaker/" + instance_name
     if enable_cloudwatch_logs == "true":
-        logs_client = boto3.client("logs", region_name=region)
         setup_cloudwatch_logging(logs_client, cloudwatch_log_group, log_retention_days, refer_to_docs_and_quit)
 
     # Provide a mechanism to ensure ebs_optimized is appropriately set for
@@ -395,6 +395,7 @@ def main(argv=None):
         ebs_root_volume_size,
         ebs_device_volume_size,
         ebs_root_volume_type,
+        ebs_device_volume_type,
         ebs_root_volume_iops,
         ebs_device_volume_iops,
         is_windows,
@@ -603,14 +604,13 @@ def main(argv=None):
     if debug_mode == "true":
         print_TextHeader(instance_name, "Printing", 80)
         print("aws_account_id = " + aws_account_id)
-        if turbot_account != "disabled":
+        if turbot_account != "DISABLED":
             print("turbot_account = " + turbot_account)
         print("aws_ami = " + str(aws_ami))
         print("az = " + az)
         print("base_os = " + base_os)
         if count > 1:
             print("count = " + str(count))
-        print("base_os = " + base_os)
         print("ebs_encryption = " + str(ebs_encryption))
         print("ebs_optimized = " + str(ebs_optimized))
         print("ebs_root_volume_size = " + str(ebs_root_volume_size))
@@ -811,10 +811,10 @@ kill_instance_script: kill_instance.{instance_name}.sh
 
     # Apply the common tag set to the EC2 security group.
 
-    SecurityGroupTags = build_security_group_tags(
+    security_group_tags = build_security_group_tags(
         security_group_name, instance_name, instance_serial_number, instance_owner, instance_owner_email, instance_owner_department, DEPLOYMENT_DATE_TAG, project_id
     )
-    ec2_client.create_tags(Resources=[vpc_security_group_ids], Tags=SecurityGroupTags)
+    ec2_client.create_tags(Resources=[vpc_security_group_ids], Tags=security_group_tags)
 
     # Print a pretty spacing bar to improve user readability.
 

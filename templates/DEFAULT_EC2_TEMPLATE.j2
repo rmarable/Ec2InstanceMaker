@@ -63,8 +63,8 @@ resource "aws_spot_instance_request" "{{ instance_name }}" {
     volume_size = "{{ ebs_device_volume_size }}"
     volume_type = "{{ ebs_device_volume_type }}"
     encrypted   = "{{ ebs_encryption | bool | lower }}"
-{% if ebs_root_volume_type == 'io1' %}
-    iops        = "{{ ebs_root_volume_iops }}"
+{% if ebs_device_volume_type == 'io1' %}
+    iops        = "{{ ebs_device_volume_iops }}"
 {% endif %}
   }
   vpc_security_group_ids = ["{{ vpc_security_group_ids }}"]
