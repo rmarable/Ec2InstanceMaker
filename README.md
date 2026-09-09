@@ -273,9 +273,6 @@ this template does *NOT* provide adequate permissions for instances built with
 Ec2InstanceMzker to spwan children of their own.
   * **ExtendedEc2InstancePolicy.json** is equivalent to `GenericEc2InstancePolicy.json` permissions for an EC2 except that it grants Ec2InstanceMaker-spawned
 instances appropriate permissions to spawn children.
-  * **Ec2AdminInstancePolicy.json** is provides the EC2 instance profile with
-full adminstrator rights over the AWS account in question.  *Use this policy
-judiciously!*
   * **build_instance.j2** permits the operator to leverage Terraform's
 post-install hook to perform further configuration of EC2 instances using a
 shell script.

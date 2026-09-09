@@ -355,6 +355,17 @@ class TestResolveSshAllowedIps:
         assert "not-a-cidr" in quit_fn.call_args.args[0]
 
 
+def _fake_security_group(sg_id):
+    # Stands in for a boto3 ec2.SecurityGroup resource. These tests only
+    # ever read .id and compare the object by identity, but constructing a
+    # real resource made boto3 walk the credential chain and issue live
+    # IMDS requests to 169.254.169.254 during the test run -- see the
+    # network block in tests/conftest.py.
+    sg = MagicMock()
+    sg.id = sg_id
+    return sg
+
+
 class TestResolveSecurityGroup:
     def _ec2_with_filter_results(self, results_by_call):
         # results_by_call: list of lists, one per successive .filter() call.
@@ -363,9 +374,7 @@ class TestResolveSecurityGroup:
         return ec2
 
     def test_default_name_gets_serial_suffix(self):
-        import boto3
-
-        fake_sg = boto3.resource("ec2", region_name="us-east-1").SecurityGroup("sg-0123456789abcdef0")
+        fake_sg = _fake_security_group("sg-0123456789abcdef0")
         ec2 = self._ec2_with_filter_results([[fake_sg]])
         add_rule = MagicMock()
 
@@ -377,9 +386,7 @@ class TestResolveSecurityGroup:
         add_rule.assert_not_called()
 
     def test_custom_name_used_as_is(self):
-        import boto3
-
-        fake_sg = boto3.resource("ec2", region_name="us-east-1").SecurityGroup("sg-custom111111111")
+        fake_sg = _fake_security_group("sg-custom111111111")
         ec2 = self._ec2_with_filter_results([[fake_sg]])
         add_rule = MagicMock()
 
@@ -389,9 +396,7 @@ class TestResolveSecurityGroup:
         assert sg_ids == "sg-custom111111111"
 
     def test_creates_group_and_opens_rdp_for_windows(self):
-        import boto3
-
-        created_sg = boto3.resource("ec2", region_name="us-east-1").SecurityGroup("sg-newlycreated0001")
+        created_sg = _fake_security_group("sg-newlycreated0001")
         ec2 = self._ec2_with_filter_results([[], [created_sg]])
         ec2.create_security_group.return_value = created_sg
         add_rule = MagicMock()
@@ -403,9 +408,7 @@ class TestResolveSecurityGroup:
         assert sg_ids == "sg-newlycreated0001"
 
     def test_creates_group_and_opens_ssh_for_linux(self):
-        import boto3
-
-        created_sg = boto3.resource("ec2", region_name="us-east-1").SecurityGroup("sg-newlycreated0002")
+        created_sg = _fake_security_group("sg-newlycreated0002")
         ec2 = self._ec2_with_filter_results([[], [created_sg]])
         ec2.create_security_group.return_value = created_sg
         add_rule = MagicMock()
@@ -419,9 +422,7 @@ class TestResolveSecurityGroup:
         # scoping) would match a same-named security group in a *different*
         # VPC too, which sg_id[0].id would then silently pick regardless of
         # which VPC it actually belongs to.
-        import boto3
-
-        fake_sg = boto3.resource("ec2", region_name="us-east-1").SecurityGroup("sg-0123456789abcdef0")
+        fake_sg = _fake_security_group("sg-0123456789abcdef0")
         ec2 = self._ec2_with_filter_results([[fake_sg]])
         add_rule = MagicMock()
 

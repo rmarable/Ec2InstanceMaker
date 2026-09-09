@@ -59,11 +59,27 @@ then
 	read -p 'Type DELETE to remove and replace: ' DELETE_AMI
 	if [[ $DELETE_AMI == "DELETE" ]]
 	then
+		# Resolve the existing AMI's backing snapshot(s) BEFORE
+		# deregistering it. This block used to read $AMI_SNAPSHOT_ID,
+		# which is not assigned until ~30 lines further down (after the
+		# *new* image is created), so it expanded to the empty string and
+		# the delete-snapshot call silently failed -- orphaning the old
+		# AMI's snapshots on every rebuild, permanently and invisibly:
+		# once the image is deregistered its snapshots can no longer be
+		# found via describe-images, so kill_instance.j2 cannot reach
+		# them either. Every instance this toolkit builds has two EBS
+		# volumes (root plus the /dev/sdf device volume), so this is
+		# normally more than one snapshot -- hence the loop, since
+		# --snapshot-id takes exactly one.
+		EXISTING_AMI_SNAPSHOT_IDS=`aws --region {{ region }} ec2 describe-images --image-ids $AMI_ID | jq -r '.Images[].BlockDeviceMappings[].Ebs.SnapshotId | select(. != null)'`
 		aws --region {{ region }} ec2 deregister-image --image-id $AMI_ID
-		aws --region {{ region }} ec2 delete-snapshot --snapshot-id $AMI_SNAPSHOT_ID
 		echo ""
 		echo "Deleted AMI: $AMI_ID"
-		echo "Deleted EBS snapshot: $AMI_SNAPSHOT_ID"
+		for EXISTING_AMI_SNAPSHOT_ID in $EXISTING_AMI_SNAPSHOT_IDS
+		do
+			aws --region {{ region }} ec2 delete-snapshot --snapshot-id $EXISTING_AMI_SNAPSHOT_ID
+			echo "Deleted EBS snapshot: $EXISTING_AMI_SNAPSHOT_ID"
+		done
 		echo ""
 	else
 		echo ""
@@ -93,7 +109,6 @@ AMI_SNAPSHOT_ID=`aws --region {{ region }} ec2 describe-images --filters Name=im
 echo "Waiting for the new AMI to become available..."
 echo ""
 aws --region {{ region }} ec2 wait image-available --image-ids=$AMI_ID
-AMI_SNAPSHOT_ID_ENCRYPTED=`aws --region {{ region }} ec2 describe-images --filters Name=image-id,Values=$AMI_ID_ENCRYPTED | jq '.Images[].BlockDeviceMappings[].Ebs.SnapshotId' | tr -d \"`
 echo "Waiting for the EBS snapshotting process to complete..."
 echo ""
 aws --region {{ region }} ec2 wait snapshot-completed --snapshot-ids $AMI_SNAPSHOT_ID

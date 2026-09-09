@@ -878,15 +878,38 @@ def lint_terraform_dir(tf_dir: str) -> list[tuple[str, str]]:
     if init.returncode != 0:
         failures.append(("terraform init", init.stdout + init.stderr))
     else:
-        validate = subprocess.run(["terraform", "validate", "-no-color"], cwd=tf_dir, capture_output=True, text=True)
-        combined = validate.stdout + validate.stderr
-        # terraform validate legitimately fails here on file()-referenced
-        # artifacts (the .pem keypair) that only exist after a real build --
-        # that's expected in this synthetic-context check, not a template
-        # bug. Still catch any other/unexpected validate error.
-        if validate.returncode != 0 and "Invalid function argument" not in combined:
-            failures.append(("terraform validate", combined))
+        # -json so expected and unexpected errors can be told apart one
+        # diagnostic at a time. This used to be a substring test over the
+        # whole combined output ("Invalid function argument" not in
+        # combined), which discarded the *entire* validate result whenever
+        # that phrase appeared anywhere -- and since the expected missing
+        # .pem error produces it on every single scenario, any unrelated
+        # validate error in the same run was silently swallowed.
+        validate = subprocess.run(["terraform", "validate", "-json"], cwd=tf_dir, capture_output=True, text=True)
+        if validate.returncode != 0:
+            try:
+                diagnostics = json.loads(validate.stdout).get("diagnostics", [])
+            except json.JSONDecodeError:
+                failures.append(("terraform validate", validate.stdout + validate.stderr))
+            else:
+                unexpected = [d for d in diagnostics if not _is_expected_missing_build_artifact(d)]
+                if unexpected:
+                    failures.append(("terraform validate", json.dumps(unexpected, indent=2)))
     return failures
+
+
+def _is_expected_missing_build_artifact(diagnostic: dict[str, Any]) -> bool:
+    # terraform validate legitimately fails here on file()-referenced
+    # artifacts (the .pem keypair) that only exist after a real build --
+    # that's expected in this synthetic-context check, not a template bug.
+    # Matched narrowly (severity + summary + the .pem path in the detail)
+    # so that an unrelated "Invalid function argument" elsewhere in the
+    # same rendered config is still reported.
+    if diagnostic.get("severity") != "error":
+        return False
+    if diagnostic.get("summary") != "Invalid function argument":
+        return False
+    return ".pem" in (diagnostic.get("detail") or "")
 
 
 def main() -> int:

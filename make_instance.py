@@ -75,6 +75,8 @@ from instance_builder import (
     setup_keypair,
     validate_and_resize_ebs_volumes,
     validate_az_and_region,
+    validate_ec2_keypair_format,
+    validate_iam_name_prefix_format,
     validate_instance_name_and_owner_format,
     write_serial_number_file,
     write_vars_file,
@@ -87,6 +89,29 @@ from template_engine import render_instance_templates
 # import).
 BoolStr = Literal["true", "false"]
 QuitFn = Callable[[str], NoReturn]
+
+
+# Function: _positive_int()
+# Purpose: argparse `type` for --count.
+#
+# A bare `type=int` accepted 0 and negative values. --count 0 was the
+# interesting one: it skipped the count == 1 placement-group guard,
+# rendered `count = 0` into the Terraform config, and then "succeeded" --
+# having created a security group, keypair, IAM role/policy/profile, SNS
+# topic and CloudWatch log group, and zero instances. Rejecting it at the
+# argparse layer also covers mcp_server.build_instance, which reaches
+# run_build() by building an argv list rather than by calling the phase
+# functions directly.
+
+
+def _positive_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value!r} is not an integer") from None
+    if parsed < 1:
+        raise argparse.ArgumentTypeError(f"must be 1 or greater (got {parsed})")
+    return parsed
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -109,7 +134,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         required=False,
         default="al2023",
     )
-    parser.add_argument("--count", "-C", help="number of EC2 instances to create (default = 1)", type=int, required=False, default=1)
+    parser.add_argument("--count", "-C", help="number of EC2 instances to create (default = 1)", type=_positive_int, required=False, default=1)
     parser.add_argument("--custom_ami", help="ami-id of a custom Amazon Machine Image (default = UNDEFINED)", required=False, default="UNDEFINED")
     parser.add_argument(
         "--custom_user_scripts",
@@ -187,7 +212,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="false",
     )
     parser.add_argument("--project_id", "-P", help="Project name or ID number (default = UNDEFINED)", required=False, default="UNDEFINED")
-    parser.add_argument("--public_ip", "-p", help="Attach a public IP address to the instance(s) (default = true)", required=False, default="true")
+    parser.add_argument("--public_ip", "-p", choices=["true", "false"], help="Attach a public IP address to the instance(s) (default = true)", required=False, default="true")
     parser.add_argument("--security_group", "-S", help="Primary security group name for the EC2 instance (default = ec2instancemaker_sg)", required=False, default="ec2instancemaker_sg")
     parser.add_argument(
         "--spot_buffer", help="pricing buffer to protect from Spot market fluctuations: spot_price = spot_price + spot_price*spot_buffer", type=float, required=False, default=round((1 / pi), 8)
@@ -1031,9 +1056,15 @@ def run_build(argv: list[str] | None, refer_to_docs_and_quit: QuitFn, ctrlc_abor
     log_retention_days_check(log_retention_days, debug_mode)
 
     # Raise an error if instance_name or instance_owner contain uppercase
-    # letters.
+    # letters, or if ec2_keypair or iam_name_prefix contain anything
+    # outside their safe charsets. All four run before any AWS resource is
+    # created, which matters: a value rejected later (by AWS itself, or at
+    # template-render time) would abort a build that had already created a
+    # security group and a keypair, with no rollback.
 
     validate_instance_name_and_owner_format(instance_name, instance_owner, refer_to_docs_and_quit)
+    validate_ec2_keypair_format(ec2_keypair, refer_to_docs_and_quit)
+    validate_iam_name_prefix_format(iam_name_prefix, refer_to_docs_and_quit)
 
     # Get the version of Terraform being used to build the instance(s), and
     # abort if Terraform is not installed.

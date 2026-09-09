@@ -123,8 +123,24 @@ def _tf_shquote_filter(value: Any) -> str:
     #      them back to the literal shlex.quote() output before ever
     #      constructing the string it passes to the shell -- so the shell
     #      still sees exactly what shlex.quote() intended.
+    #   3. Escaping HCL's two template sequences -- "${" (interpolation)
+    #      and "%{" (directives) -- via HCL's own "$${"/"%%{" escapes.
+    #      This step is NOT optional and is easy to overlook: Terraform
+    #      expands both sequences in the `command` string *after* this
+    #      template is rendered and *before* the result is handed to
+    #      /bin/sh -c. An expansion whose result contains a single quote
+    #      therefore escapes the '...' wrapping shlex.quote() put around
+    #      the value in step 1, turning operator free text into shell
+    #      commands that run on the workstation performing the apply
+    #      (proven during an adversarial review: a crafted
+    #      --instance_owner_department plus a --project_id of
+    #      "${self.tags.InstanceOwnerDepartment}" executed an arbitrary
+    #      command during `terraform apply`). shlex.quote() cannot see
+    #      this coming -- it quotes for the shell, and the injection
+    #      happens one layer above the shell.
     shell_quoted = shlex.quote(str(value))
-    return shell_quoted.replace("\\", "\\\\").replace('"', '\\"')
+    escaped = shell_quoted.replace("\\", "\\\\").replace('"', '\\"')
+    return escaped.replace("${", "$${").replace("%{", "%%{")
 
 
 def _hcl_escape_filter(value: Any) -> str:
@@ -141,11 +157,13 @@ def _hcl_escape_filter(value: Any) -> str:
     # HCL/Terraform config (proven live during an adversarial review:
     # an unescaped instance_owner_email broke out of a `tags = {...}`
     # block and added a whole extra resource) -- and HCL's "${"
-    # interpolation sequence, neutralized via HCL's own "$${" escape so
-    # a value can't reach Terraform functions or other resources'
-    # attributes either.
+    # interpolation sequence AND its "%{" directive sequence, both
+    # neutralized via HCL's own "$${"/"%%{" escapes so a value can't
+    # reach Terraform functions, another resource's attributes, or a
+    # template directive either. Both sequences matter: a "%{ for ... }"
+    # directive evaluates in a tag value just as readily as "${ ... }".
     escaped = str(value).replace("\\", "\\\\").replace('"', '\\"')
-    return escaped.replace("${", "$${")
+    return escaped.replace("${", "$${").replace("%{", "%%{")
 
 
 def _make_environment(local_workingdir: str) -> Environment:

@@ -58,6 +58,14 @@ from mypy_boto3_sts.client import STSClient
 QuitFn = Callable[[str], NoReturn]
 BoolStr = Literal["true", "false"]
 
+# The narrowest CIDR prefix length --ssh_allowed_ips will accept. /8 is a
+# deliberately conservative floor: it still permits a legitimately large
+# corporate range (16.7M addresses) while rejecting /0 through /7, which
+# are all "a meaningful fraction of the entire internet" -- see
+# resolve_ssh_allowed_ips() below for why a string comparison against
+# "0.0.0.0/0" was not enough on its own.
+MINIMUM_SSH_ALLOWED_IPS_PREFIXLEN = 8
+
 # Function: validate_az_and_region()
 # Purpose: abort cleanly if the selected AWS Region/Availability Zone is
 # invalid. Must run before any other AWS API call that doesn't itself
@@ -209,22 +217,48 @@ def resolve_vpc_and_subnet(ec2_client: EC2Client, vpc_name: str, az: str, refer_
 # gets a scoped security group rather than the open internet. 0.0.0.0/0 is
 # refused outright -- there is no legitimate reason to open SSH/RDP to the
 # entire internet from this tool, and silently accepting it would defeat
-# the point of this function existing. Anything else must at least parse
-# as a real CIDR block; AWS's own error for a malformed CidrIp is not
-# operator-friendly.
+# the point of this function existing.
+#
+# Refusing only the literal string "0.0.0.0/0" is NOT sufficient, which is
+# what this originally did: an adversarial review showed "0.0.0.0/1" plus
+# "128.0.0.0/1" covers the whole internet in two rules, and "0.0.0.0/0.0.0.0"
+# and "1.2.3.4/0" are both /0 by another spelling. The check is therefore on
+# the parsed network's prefix length, not on any string, and the normalized
+# network is what gets returned.
 
 
 def resolve_ssh_allowed_ips(ec2_client: EC2Client, vpc_id: str, ssh_allowed_ips: str, refer_to_docs_and_quit: QuitFn) -> str:
     if ssh_allowed_ips == "UNDEFINED":
         vpc_info = ec2_client.describe_vpcs(VpcIds=[vpc_id])
         return vpc_info["Vpcs"][0]["CidrBlock"]
-    if ssh_allowed_ips == "0.0.0.0/0":
-        refer_to_docs_and_quit("--ssh_allowed_ips may not be 0.0.0.0/0! This would expose the instance's SSH/RDP port to the entire internet.")
     try:
-        ipaddress.ip_network(ssh_allowed_ips, strict=False)
+        network = ipaddress.ip_network(ssh_allowed_ips, strict=False)
     except ValueError:
         refer_to_docs_and_quit('"' + ssh_allowed_ips + '" is not a valid CIDR block!')
-    return ssh_allowed_ips
+    if network.version != 4:
+        refer_to_docs_and_quit(
+            '"'
+            + ssh_allowed_ips
+            + '" is not an IPv4 CIDR block! The security group ingress rule this feeds is IPv4-only (CidrIp), so an IPv6 value would fail inside AWS with a much less obvious error.'
+        )
+    if network.prefixlen < MINIMUM_SSH_ALLOWED_IPS_PREFIXLEN:
+        refer_to_docs_and_quit(
+            '"'
+            + ssh_allowed_ips
+            + '" is too broad -- it covers '
+            + str(network.num_addresses)
+            + " addresses. --ssh_allowed_ips must be /"
+            + str(MINIMUM_SSH_ALLOWED_IPS_PREFIXLEN)
+            + " or narrower so the instance's SSH/RDP port is not exposed to a large swath of the internet. (0.0.0.0/0 is the extreme case, but /1 through /"
+            + str(MINIMUM_SSH_ALLOWED_IPS_PREFIXLEN - 1)
+            + " are barely better -- two /1 rules cover the entire internet.)"
+        )
+    # Return the *normalized* network rather than the operator's raw
+    # string. ip_network(strict=False) accepts host bits set and
+    # alternative spellings ("1.2.3.4/0", "0.0.0.0/0.0.0.0"), so echoing
+    # the input back would let a value that passed the checks above reach
+    # AWS looking different from what was actually validated.
+    return str(network)
 
 
 # Function: resolve_security_group()
@@ -839,6 +873,60 @@ def validate_instance_name_and_owner_format(instance_name: str, instance_owner: 
     validate_instance_name_format(instance_name, refer_to_docs_and_quit)
     if not re.fullmatch(r"[a-z][a-z0-9._-]*", instance_owner):
         refer_to_docs_and_quit("instance_owner must start with a lowercase letter and contain only lowercase letters, numbers, periods, underscores, and hyphens!")
+
+
+# Function: validate_ec2_keypair_format()
+# Purpose: restrict ec2_keypair to a charset that is safe in every context
+# it reaches, for the same reason validate_instance_name_format() exists.
+#
+# ec2_keypair was missed when instance_name/instance_owner were locked
+# down, and it lands in *more* contexts than either of them:
+#   - a Python string literal   (access_instance.j2: `ec2_keypair = '...'`),
+#     which access_instance.py then executes -- and note there is no
+#     Jinja filter for the generated-Python context at all, so escaping
+#     at the template was never an option here;
+#   - a double-quoted bash string (kill_instance.j2: EC2_KEYPAIR="...",
+#     SSH_KEYPAIR_FILE="....pem"), where $(...) and backticks expand;
+#   - an HCL string literal      (DEFAULT_EC2_TEMPLATE.j2: key_name = "...");
+#   - a filesystem path component (instance_data_dir + ec2_keypair +
+#     ".pem"), where "../" would write RSA private key material outside
+#     instance_data/.
+#
+# An adversarial review demonstrated injection in all four. Restricting
+# the charset at the source closes every one of them at once, and is the
+# only option that also covers the generated-Python sink. AWS itself only
+# constrains a key pair name to <=255 ASCII characters, so this is
+# deliberately stricter than the API is.
+
+
+def validate_ec2_keypair_format(ec2_keypair: str, refer_to_docs_and_quit: QuitFn) -> None:
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,254}", ec2_keypair):
+        refer_to_docs_and_quit("ec2_keypair must start with a letter or number, contain only letters, numbers, periods, underscores, and hyphens, and be no longer than 255 characters!")
+
+
+# Function: validate_iam_name_prefix_format()
+# Purpose: restrict iam_name_prefix to IAM's own name charset.
+#
+# iam_name_prefix is string-substituted into the staged IAM policy
+# document by modify_iam_policy_document() (aux_data.py) via a raw
+# str.replace() of the <EC2_IAM_PREFIX> placeholder. With
+# ExtendedEc2InstancePolicy.json -- whose IAMRestricted statement scopes
+# to "role/<EC2_IAM_PREFIX>-*", "policy/<EC2_IAM_PREFIX>-*" and
+# "instance-profile/<EC2_IAM_PREFIX>-*" -- an unvalidated prefix of "*"
+# widens those ARNs to very nearly every IAM entity in the account,
+# exactly inverting the flag's documented purpose of letting DevOps teams
+# *scope* permissions. A prefix containing a double quote instead produces
+# invalid JSON and fails at put_role_policy, after the security group,
+# keypair and log group already exist.
+#
+# IAM's documented charset for role/policy/instance-profile names is
+# [\w+=,.@-], all of which is inert both in a JSON string and in the
+# unquoted shell positions kill_instance.j2 uses. "*" is not in it.
+
+
+def validate_iam_name_prefix_format(iam_name_prefix: str, refer_to_docs_and_quit: QuitFn) -> None:
+    if not re.fullmatch(r"[\w+=,.@-]{1,64}", iam_name_prefix):
+        refer_to_docs_and_quit("iam_name_prefix must contain only letters, numbers, and the characters _+=,.@- and be between 1 and 64 characters long!")
 
 
 # Function: get_terraform_version()

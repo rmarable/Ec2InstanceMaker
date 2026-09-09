@@ -358,7 +358,7 @@ ones:
   `build_instance.j2`/`instance_userdata.j2` — Windows has neither `user_data`
   nor any build-time provisioner at all.
 - `*Ec2InstancePolicy.json` — IAM policy document choices
-  (Minimal/Generic/Extended/Admin) selectable via `--iam_json_policy`; these
+  (Minimal/Generic/Extended) selectable via `--iam_json_policy`; these
   are staged and rewritten per-instance (see `modify_iam_policy_document` in
   `aux_data.py`) to apply the `--iam_name_prefix`.
 
