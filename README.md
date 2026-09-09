@@ -841,9 +841,52 @@ resources just like the command line tools do -- treat `confirm=True`
 with the same care you'd give running `make_instance.py` or
 `kill-instance.<instance_name>.sh` directly.
 
-To use it with Claude Code, run Claude Code from within the
-Ec2InstanceMaker repository -- the checked-in `.mcp.json` registers the
-server automatically.
+### Installing the MCP Server in Claude Code
+
+* Make sure the prerequisites are in place: a Python virtual environment at
+  `.venv/` in the repo root (see "Installation Instructions for the
+  Impatient" above), with both `requirements.txt` and
+  `requirements-mcp.txt` installed into it.
+
+* The repository already checks in a project-scoped `.mcp.json`:
+```
+{
+  "mcpServers": {
+    "ec2instancemaker": {
+      "command": ".venv/bin/python3",
+      "args": ["mcp_server.py"]
+    }
+  }
+}
+```
+  Claude Code reads this file automatically whenever it's started from
+  inside the Ec2InstanceMaker repository -- no manual registration step is
+  needed:
+```
+$ cd ~/src/Ec2InstanceMaker
+$ claude
+```
+
+* To confirm it connected, run `/mcp` inside Claude Code. `ec2instancemaker`
+  should show up as a connected server with 5 tools (`list_instances`,
+  `get_instance_status`, `get_build_record`, `build_instance`,
+  `destroy_instance`). If it's missing, check that `.venv/bin/python3`
+  exists and that `pip install -r requirements-mcp.txt` succeeded --
+  Claude Code silently drops a server whose command fails to launch.
+
+* If you'd rather install it globally instead of relying on the
+  project-scoped file (for example, to use it from a shell outside this
+  checkout), register it by hand with an absolute path:
+```
+$ claude mcp add ec2instancemaker /full/path/to/Ec2InstanceMaker/.venv/bin/python3 /full/path/to/Ec2InstanceMaker/mcp_server.py
+```
+
+* Once connected, just ask Claude Code in plain language -- e.g. "list my
+  Ec2InstanceMaker instances in us-east-1" or "what's the status of
+  dev01?" -- and it will call the appropriate tool. `build_instance` and
+  `destroy_instance` will ask for your confirmation before touching AWS,
+  same as running `make_instance.py`/`kill-instance.<name>.sh` directly
+  would.
 
 ## Troubleshooting
 
