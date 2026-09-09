@@ -718,3 +718,33 @@ class TestEbsDeviceVolumeIops:
         rendered = render({"ebs_root_volume_type": "io1", "ebs_root_volume_iops": 3000, "ebs_device_volume_type": "gp2", "ebs_device_volume_iops": 0})["DEFAULT_EC2_TEMPLATE.j2"]
         device_block = rendered.split("ebs_block_device {")[1]
         assert "iops" not in device_block
+
+
+class TestWindowsPasswordTempFileCleanup:
+    """The generated access script writes decrypted Administrator passwords
+    to a temp CSV. The explicit os.remove() at the bottom only runs on the
+    success path, so a CTRL-C at the family menu -- or any non-numeric
+    input, since int(input()) raises ValueError and nothing catches it --
+    left plaintext local-admin passwords in /tmp indefinitely. The script's
+    own comment claimed the opposite.
+    """
+
+    def _rendered(self):
+        return render({"is_windows": True, "base_os": "windows2022", "count": 3})["access_instance.j2"]
+
+    def test_cleanup_is_registered_immediately_after_the_file_is_created(self):
+        rendered = self._rendered()
+        assert rendered.index("tempfile.mkstemp") < rendered.index("atexit.register(_remove_csv_temp_file)")
+
+    def test_cleanup_is_registered_before_anything_is_written_to_the_file(self):
+        # The passwords are assembled in memory earlier, which is fine --
+        # what matters is that nothing reaches disk before the handler is
+        # armed.
+        rendered = self._rendered()
+        assert rendered.index("atexit.register(_remove_csv_temp_file)") < rendered.index("csv_file.write")
+
+    def test_removal_is_guarded_against_a_missing_file(self):
+        assert "if os.path.exists(csvTempFile):" in self._rendered()
+
+    def test_atexit_is_imported(self):
+        assert "import atexit" in self._rendered()

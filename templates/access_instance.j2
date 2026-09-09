@@ -16,6 +16,7 @@
 # Import some critical Python libraries.
 
 import argparse
+import atexit
 import csv
 import os
 import subprocess
@@ -131,6 +132,23 @@ windows_AdministratorPassword = ','.join(winItemAdminPw_tf)
 
 csv_fd, csvTempFile = tempfile.mkstemp(prefix='_csvTempFile_' + instance_serial_number + '_', suffix='.csv')
 os.close(csv_fd)
+
+# For a Windows build this file holds the decrypted local Administrator
+# password in plaintext. The explicit os.remove() at the bottom of this
+# script only runs on the success path, so a CTRL-C at the menu prompt --
+# or any non-numeric input, since int(input()) raises ValueError and
+# nothing catches it -- used to leave those passwords sitting in /tmp
+# indefinitely, directly contradicting the comment down there claiming the
+# file is always removed. atexit covers every ordinary interpreter exit,
+# including an unhandled exception and sys.exit().
+
+def _remove_csv_temp_file():
+    if os.path.exists(csvTempFile):
+        os.remove(csvTempFile)
+
+
+atexit.register(_remove_csv_temp_file)
+
 csv_file = open(csvTempFile, 'w')
 {% if is_windows %}
 
@@ -325,7 +343,9 @@ else:
 #
 # Always remove the temp CSV, regardless of count -- for Windows builds it
 # holds the decrypted Administrator password in plaintext and must not be
-# left behind in /tmp between runs.
+# left behind in /tmp between runs. The atexit handler registered next to
+# mkstemp() above is what actually guarantees this on the paths that do
+# not reach here; this call just removes it as early as possible.
 
-os.remove(csvTempFile)
+_remove_csv_temp_file()
 sys.exit(0)

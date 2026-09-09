@@ -177,31 +177,48 @@ def resolve_vpc_and_subnet(ec2_client: EC2Client, vpc_name: str, az: str, refer_
     else:
         vpc_information = ec2_client.describe_vpcs(Filters=[{"Name": "tag:Name", "Values": [vpc_name]}])
 
-    for vpc in vpc_information["Vpcs"]:
-        vpc_id = vpc["VpcId"]
-        try:
-            vpc_name = vpc_information["Vpcs"][0]["Tags"][0]["Value"]
-        except KeyError:
-            refer_to_docs_and_quit(
-                vpc_id
-                + " lacks a valid Name tag! This will break Terraform. Tag it and retry:\n\n"
-                + "aws --region "
-                + az[:-1]
-                + " ec2 create-tags --resources "
-                + vpc_id
-                + " --tags Key=Name,Value="
-                + vpc_id
-            )
-
-    try:
-        subnet_information = ec2_client.describe_subnets(
-            Filters=[
-                {"Name": "availabilityZone", "Values": [az]},
-                {"Name": "vpc-id", "Values": [vpc_id]},
-            ],
-        )
-    except NameError:
+    vpcs = vpc_information["Vpcs"]
+    if not vpcs:
         refer_to_docs_and_quit('"' + vpc_name + '" is an undefined VPC!')
+    if len(vpcs) > 1:
+        refer_to_docs_and_quit(
+            'More than one VPC matches "'
+            + vpc_name
+            + '" ('
+            + ", ".join(str(vpc["VpcId"]) for vpc in vpcs)
+            + "). Refusing to guess which one you meant -- give the VPCs distinct Name tags, or pass --vpc_name to select one."
+        )
+    vpc = vpcs[0]
+    vpc_id = vpc["VpcId"]
+    # Read the tag whose Key is literally "Name", not whatever happens to
+    # sort first. This used to be Tags[0], so *any* tag on the VPC could
+    # become vpc_name -- meaning anyone with ec2:CreateTags on the VPC
+    # (including the default VPC, which every build touches by default)
+    # controlled a value that gets interpolated into generated Terraform.
+    # The old loop also reassigned vpc_id per iteration while reading the
+    # name from Vpcs[0], so with more than one match it could return an id
+    # and a name belonging to different VPCs.
+    name_tag = next((str(tag["Value"]) for tag in vpc.get("Tags", []) if tag.get("Key") == "Name"), "")
+    if not name_tag:
+        refer_to_docs_and_quit(
+            str(vpc_id)
+            + " lacks a valid Name tag! This will break Terraform. Tag it and retry:\n\n"
+            + "aws --region "
+            + az[:-1]
+            + " ec2 create-tags --resources "
+            + str(vpc_id)
+            + " --tags Key=Name,Value="
+            + str(vpc_id)
+        )
+    validate_vpc_name_format(name_tag, str(vpc_id), refer_to_docs_and_quit)
+    vpc_name = name_tag
+
+    subnet_information = ec2_client.describe_subnets(
+        Filters=[
+            {"Name": "availabilityZone", "Values": [az]},
+            {"Name": "vpc-id", "Values": [vpc_id]},
+        ],
+    )
     try:
         subnet_id = subnet_information["Subnets"][0]["SubnetId"]
     except IndexError:
@@ -914,6 +931,91 @@ def validate_instance_name_and_owner_format(instance_name: str, instance_owner: 
 # only option that also covers the generated-Python sink. AWS itself only
 # constrains a key pair name to <=255 ASCII characters, so this is
 # deliberately stricter than the API is.
+
+
+# Function: validate_free_text_field() / validate_email_format()
+# Purpose: keep control characters out of the genuinely free-text fields.
+#
+# instance_owner_email, instance_owner_department and project_id are
+# deliberately not charset-restricted the way instance_name/instance_owner
+# are -- they are human text and should stay that way. But a *newline* in
+# them is not human text, it is a context break, and these values reach a
+# lot of contexts:
+#
+#   - the shipped custom_user_scripts templates interpolate
+#     instance_owner_email into a `# Author:` comment with no filter, so a
+#     newline escapes the comment. That content is embedded into
+#     instance_userdata.j2's cloud-config, still parses as valid YAML, and
+#     cloud-init runs it as root. An adversarial review demonstrated this
+#     end to end.
+#   - the toolkit's own templates do filter them (shquote/tf_shquote/
+#     hcl_escape), but none of those three escape a raw newline, so one
+#     produces `Error: Invalid multi-line string` and aborts the build.
+#   - custom_user_scripts/ is a user-owned drop-in directory. Templates
+#     there cannot be forced to apply a filter, so the only place this can
+#     be closed for them is at the source.
+#
+# Rejecting control characters costs nothing legitimate -- no real
+# department name, project id or email address contains one -- and it is
+# the only fix that covers templates this repo does not control.
+
+
+_CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def validate_free_text_field(value: str, field_name: str, refer_to_docs_and_quit: QuitFn) -> None:
+    if _CONTROL_CHARACTERS.search(value):
+        refer_to_docs_and_quit(
+            field_name + " may not contain control characters such as newlines or tabs. "
+            "These values are interpolated into generated shell scripts, Terraform config and cloud-init YAML, "
+            "where a line break means something quite different from what you probably intended."
+        )
+
+
+def validate_email_format(instance_owner_email: str, refer_to_docs_and_quit: QuitFn) -> None:
+    validate_free_text_field(instance_owner_email, "instance_owner_email", refer_to_docs_and_quit)
+    # Deliberately permissive -- this is a sanity check, not RFC 5322. It
+    # exists so an obvious typo fails here rather than at sns:Subscribe,
+    # after a security group and keypair already exist.
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", instance_owner_email):
+        refer_to_docs_and_quit('"' + instance_owner_email + '" does not look like an email address!')
+
+
+# Function: validate_vpc_name_format()
+# Purpose: vpc_name becomes a Terraform *identifier*, not a string.
+#
+# template_engine.py builds `provider = "aws." + vpc_name` and
+# DEFAULT_EC2_TEMPLATE.j2 emits it as a bare HCL identifier
+# (`provider = aws.<vpc_name>`), where no escaping filter applies or could
+# apply -- an identifier position has no quoting to escape into. The same
+# value also reaches provider_aws.j2's `alias`. So the only place this can
+# be made safe is here, at the source.
+#
+# That matters more than it looks: vpc_name is not operator input in the
+# usual sense. It is read back off the VPC's Name tag, so its real author
+# is whoever can call ec2:CreateTags on that VPC. An adversarial review
+# demonstrated a crafted value closing the resource block and appending an
+# entire extra Terraform resource; it was only prevented from applying
+# because the same value separately broke provider_aws.j2's parsing, which
+# is an accident rather than a defense.
+#
+# Terraform identifiers are letters, digits, underscores and hyphens, and
+# must not start with a digit -- anything outside that would fail to parse
+# anyway, so rejecting it here turns a confusing HCL syntax error deep in
+# `terraform apply` into an actionable message before anything is created.
+
+
+def validate_vpc_name_format(vpc_name: str, vpc_id: str, refer_to_docs_and_quit: QuitFn) -> None:
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]{0,63}", vpc_name):
+        refer_to_docs_and_quit(
+            "The Name tag on "
+            + vpc_id
+            + ' is "'
+            + vpc_name
+            + '", which cannot be used as a Terraform provider alias.\n\n'
+            + "It must start with a letter or underscore, contain only letters, numbers, underscores and hyphens, "
+            + "and be no longer than 64 characters. Retag the VPC and retry."
+        )
 
 
 def validate_ec2_keypair_format(ec2_keypair: str, refer_to_docs_and_quit: QuitFn) -> None:

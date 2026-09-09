@@ -19,6 +19,7 @@ argument shapes, and the real instance_parameters dict this file actually
 assembles against the real Jinja2 templates (not a synthetic context).
 """
 
+import dataclasses
 import os
 from unittest.mock import MagicMock
 
@@ -330,3 +331,32 @@ class TestRollbackPartialBuild:
 
         cleanup.assert_not_called()
         assert "nothing to roll back" in capsys.readouterr().out.lower()
+
+
+class TestBuildReportCarriesNoSecrets:
+    """BuildReport is returned verbatim by mcp_server.build_instance via
+    dataclasses.asdict(), so anything in it lands in an MCP client's model
+    context and in the conversation transcript -- which persist far longer
+    than console scrollback. It used to carry the Windows password table,
+    i.e. live plaintext local Administrator credentials.
+    """
+
+    def test_the_report_has_no_field_that_could_hold_a_password(self):
+        import dataclasses
+
+        field_names = {f.name for f in dataclasses.fields(make_instance.BuildReport)}
+        assert "windows_password_table" not in field_names
+        assert "windows_password_retrieval_command" in field_names
+
+    def test_a_windows_report_carries_the_command_not_the_table(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _symlink_repo_assets(tmp_path)
+        _patch_aws_and_terraform_boundary(monkeypatch)
+        # build_windows_password_table would otherwise need real AWS output.
+        monkeypatch.setattr(make_instance, "build_windows_password_table", MagicMock(return_value="SUPERSECRETPASSWORDTABLE"))
+
+        report = make_instance.run_build([*_happy_path_argv(), "--base_os=windows2022"], aux_data.refer_to_docs_and_quit)
+
+        serialized = repr(dataclasses.asdict(report))
+        assert "SUPERSECRETPASSWORDTABLE" not in serialized
+        assert report.windows_password_retrieval_command == "./access_instance.py -N testint01"

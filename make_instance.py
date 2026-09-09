@@ -79,6 +79,8 @@ from instance_builder import (
     validate_and_resize_ebs_volumes,
     validate_az_and_region,
     validate_ec2_keypair_format,
+    validate_email_format,
+    validate_free_text_field,
     validate_iam_name_prefix_format,
     validate_instance_name_and_owner_format,
     write_serial_number_file,
@@ -438,7 +440,10 @@ class BuildReport:
     count: int
     is_windows: bool
     access_command: str | None
-    windows_password_table: str | None
+    # Deliberately never populated with the password table itself -- see
+    # report_and_notify(). Kept as a field so a programmatic caller can
+    # tell a Windows build from a Linux one and knows where to look.
+    windows_password_retrieval_command: str | None
     kill_script: str
     build_ami_script: str
     sns_topic_arn: str
@@ -979,6 +984,16 @@ def report_and_notify(
         print("")
         print("Reprint this table:")
         print("./access_instance.py -N " + settings.instance_name)
+        # The table above holds *plaintext* local Administrator passwords.
+        # It is printed to the operator's console, which is the intended
+        # destination, but BuildReport is also returned verbatim by
+        # mcp_server.build_instance via dataclasses.asdict() -- so putting
+        # the table in it would drop live credentials into an MCP client's
+        # model context and into the conversation transcript, where they
+        # persist far longer than the console scrollback does. The report
+        # therefore carries the command to reprint them, never the
+        # passwords themselves.
+        windows_instance_table = None
 
     print("")
     if settings.count == 1:
@@ -1004,7 +1019,7 @@ def report_and_notify(
         count=settings.count,
         is_windows=network.is_windows,
         access_command=access_command,
-        windows_password_table=windows_instance_table,
+        windows_password_retrieval_command=("./access_instance.py -N " + settings.instance_name) if network.is_windows else None,
         kill_script=kill_script,
         build_ami_script=build_ami_script,
         sns_topic_arn=iam_sns.sns_topic_arn,
@@ -1097,6 +1112,9 @@ def run_build(argv: list[str] | None, refer_to_docs_and_quit: QuitFn, ctrlc_abor
     validate_instance_name_and_owner_format(instance_name, instance_owner, refer_to_docs_and_quit)
     validate_ec2_keypair_format(ec2_keypair, refer_to_docs_and_quit)
     validate_iam_name_prefix_format(iam_name_prefix, refer_to_docs_and_quit)
+    validate_email_format(instance_owner_email, refer_to_docs_and_quit)
+    validate_free_text_field(instance_owner_department, "instance_owner_department", refer_to_docs_and_quit)
+    validate_free_text_field(project_id, "project_id", refer_to_docs_and_quit)
 
     # Get the version of Terraform being used to build the instance(s), and
     # abort if Terraform is not installed.

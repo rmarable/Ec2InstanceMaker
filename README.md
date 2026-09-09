@@ -278,6 +278,29 @@ their own -- use `ExtendedEc2InstancePolicy.json` for that.
 `GenericEc2InstancePolicy.json` except that it grants Ec2InstanceMaker-spawned
 instances appropriate permissions to spawn children.
 
+### Naming and input rules
+
+These are hard failures, checked before any AWS resource is created.  They
+were previously undocumented, which made them surprising:
+
+| Input | Rule | Why |
+|---|---|---|
+| `--instance_name` | `[a-z][a-z0-9-]*` | Becomes a Terraform identifier, a filesystem path component, and a shell variable. |
+| `--instance_owner` | `[a-z][a-z0-9._-]*` | Note this rejects a typical ActiveDirectory username like `RMarable` or `CORP\rmarable`, despite the flag's help text. Use the lowercase local part. |
+| `--ec2_keypair` | letters, numbers, `.`, `_`, `-`; max 255 | Reaches a Python literal, a shell string, an HCL literal, and a file path. |
+| `--iam_name_prefix` | `[\w+=,.@-]`, max 64 | IAM's own charset.  `*` is rejected: it would widen the Extended policy's ARNs to most of the account. |
+| `--instance_owner_email` | must look like an address; no control characters | Reaches generated shell, Terraform, and cloud-init YAML. |
+| `--instance_owner_department`, `--project_id` | free text, but no control characters | Same contexts.  A newline in them is a context break, not text. |
+| `--ssh_allowed_ips` | IPv4, `/8` or narrower | See the security-group bullet in Features. |
+| VPC `Name` tag | `[A-Za-z_][A-Za-z0-9_-]{0,63}` | Becomes a Terraform provider alias, which is an *identifier* -- no quoting exists there to escape.  A VPC whose Name tag has a space or a dot has always broken Terraform; this now fails early with a clear message instead of emitting invalid HCL. |
+
+The VPC rule is worth a second look if you build into a shared account.
+`vpc_name` is read back off the VPC's own `Name` tag, so its author is
+whoever can call `ec2:CreateTags` on that VPC -- not necessarily you.  It
+is now read from the tag whose key is literally `Name` (it used to be
+whichever tag came first), validated as an identifier, and a VPC matching
+more than one result is refused rather than guessed at.
+
 ### Recovering from a failed build
 
 A build creates real AWS resources across several phases (security group and
@@ -976,6 +999,14 @@ approval for the mutating tools -- for example in `.claude/settings.json`:
 This snippet is not shipped in the repo, because `.claude/settings.json`
 is yours and merging into it automatically would be presumptuous -- copy
 it in if you want it.
+
+**Windows Administrator passwords are never returned over MCP.**
+`build_instance` returns the command to reprint them
+(`./access_instance.py -N <name>`), never the decrypted passwords
+themselves -- anything in the tool's return value lands in the model's
+context and in the conversation transcript, which persist far longer than
+console scrollback.  The CLI still prints the table to your terminal,
+which is the intended destination.
 
 **Tool output is untrusted input.**  `list_instances`,
 `get_instance_status` and `get_build_record` return raw EC2 tag values and

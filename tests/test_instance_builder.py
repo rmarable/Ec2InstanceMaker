@@ -349,6 +349,102 @@ class TestResolveVpcAndSubnet:
         quit_fn.assert_called_once_with("AvailabilityZone us-east-1z does not contain any valid subnets!")
 
 
+class TestVpcNameIsNotAttackerControlled:
+    """vpc_name is read back off the VPC's Name tag and then emitted as a
+    bare Terraform *identifier* (`provider = aws.<vpc_name>`), where no
+    escaping filter applies or could apply. Its real author is therefore
+    whoever can call ec2:CreateTags on that VPC -- including the default
+    VPC, which every build touches unless --vpc_name says otherwise.
+
+    An adversarial review demonstrated a crafted Name tag closing the
+    resource block and appending an entire extra Terraform resource. It
+    only failed to apply because the same value separately broke
+    provider_aws.j2's parsing, which is an accident, not a defense.
+    """
+
+    def _ec2_with_vpc(self, tags, vpc_id="vpc-abc123"):
+        ec2_client = MagicMock()
+        ec2_client.describe_vpcs.return_value = {"Vpcs": [{"VpcId": vpc_id, "Tags": tags}]}
+        ec2_client.describe_subnets.return_value = {"Subnets": [{"SubnetId": "subnet-xyz789"}]}
+        return ec2_client
+
+    def test_the_name_tag_is_read_by_key_not_by_position(self):
+        # Tags[0] used to win outright, so any tag on the VPC became
+        # vpc_name -- an attacker only needed ec2:CreateTags, and tag order
+        # is not something the VPC owner controls.
+        ec2_client = self._ec2_with_vpc([{"Key": "Environment", "Value": "prod"}, {"Key": "Name", "Value": "real_vpc"}])
+
+        _, vpc_name, _ = instance_builder.resolve_vpc_and_subnet(ec2_client, "vpc_default", "us-east-1a", _quitting_mock())
+
+        assert vpc_name == "real_vpc"
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            'x\n}\n\nresource "aws_iam_user" "pwn" {\n  name = "backdoor"\n}\n\nresource "aws_instance" "junk" {\n  provider = aws.x',
+            "x.y",
+            "x y",
+            "x;y",
+            "0starts-with-a-digit",
+            '"quoted"',
+            "${var.evil}",
+            "a" * 65,
+            "",
+        ],
+    )
+    def test_an_unusable_name_tag_is_refused_before_anything_is_created(self, payload):
+        ec2_client = self._ec2_with_vpc([{"Key": "Name", "Value": payload}])
+        quit_fn = _quitting_mock()
+
+        with pytest.raises(SystemExit):
+            instance_builder.resolve_vpc_and_subnet(ec2_client, "vpc_default", "us-east-1a", quit_fn)
+        quit_fn.assert_called_once()
+
+    @pytest.mark.parametrize("name", ["vpc_default", "prod-vpc", "_internal", "VPC1"])
+    def test_legitimate_name_tags_still_work(self, name):
+        ec2_client = self._ec2_with_vpc([{"Key": "Name", "Value": name}])
+
+        _, vpc_name, _ = instance_builder.resolve_vpc_and_subnet(ec2_client, "vpc_default", "us-east-1a", _quitting_mock())
+
+        assert vpc_name == name
+
+    def test_a_vpc_with_no_tags_at_all_does_not_traceback(self):
+        # Only KeyError was caught; an empty Tags list raised IndexError.
+        ec2_client = self._ec2_with_vpc([])
+        quit_fn = _quitting_mock()
+
+        with pytest.raises(SystemExit):
+            instance_builder.resolve_vpc_and_subnet(ec2_client, "vpc_default", "us-east-1a", quit_fn)
+        assert "Name tag" in quit_fn.call_args.args[0]
+
+    def test_ambiguous_match_is_refused_rather_than_guessed(self):
+        # The old loop reassigned vpc_id per iteration but read the name
+        # from Vpcs[0], so with two matches it could return an id and a
+        # name belonging to different VPCs.
+        ec2_client = MagicMock()
+        ec2_client.describe_vpcs.return_value = {
+            "Vpcs": [
+                {"VpcId": "vpc-AAA", "Tags": [{"Key": "Name", "Value": "first"}]},
+                {"VpcId": "vpc-BBB", "Tags": [{"Key": "Name", "Value": "second"}]},
+            ]
+        }
+        quit_fn = _quitting_mock()
+
+        with pytest.raises(SystemExit):
+            instance_builder.resolve_vpc_and_subnet(ec2_client, "shared-name", "us-east-1a", quit_fn)
+        message = quit_fn.call_args.args[0]
+        assert "vpc-AAA" in message and "vpc-BBB" in message
+
+    def test_no_matching_vpc_quits_cleanly(self):
+        ec2_client = MagicMock()
+        ec2_client.describe_vpcs.return_value = {"Vpcs": []}
+        quit_fn = _quitting_mock()
+
+        with pytest.raises(SystemExit):
+            instance_builder.resolve_vpc_and_subnet(ec2_client, "nope", "us-east-1a", quit_fn)
+        assert "undefined VPC" in quit_fn.call_args.args[0]
+
+
 class TestResolveSshAllowedIps:
     def test_undefined_resolves_to_the_vpc_cidr(self):
         ec2_client = MagicMock()

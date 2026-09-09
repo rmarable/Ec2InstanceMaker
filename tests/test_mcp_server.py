@@ -154,7 +154,7 @@ def _build_report(**overrides):
         "count": 1,
         "is_windows": False,
         "access_command": "./access_instance.py -N dev01",
-        "windows_password_table": None,
+        "windows_password_retrieval_command": None,
         "kill_script": "./kill-instance.dev01.sh",
         "build_ami_script": "./build-ami.dev01.sh",
         "sns_topic_arn": "arn:aws:sns:us-east-1:123456789012:Ec2_Instance_SNS_Alerts_dev01",
