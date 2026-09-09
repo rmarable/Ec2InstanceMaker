@@ -11,6 +11,7 @@
 # Load the required Python libraries.
 
 import argparse
+import dataclasses
 import functools
 import os
 import sys
@@ -40,6 +41,7 @@ from aux_data import (
     refer_to_docs_and_quit,
 )
 from instance_builder import (
+    InstanceParameters,
     abort_if_vars_file_exists,
     apply_terraform,
     build_security_group_tags,
@@ -529,75 +531,75 @@ def main(argv: list[str] | None = None) -> NoReturn:
 
     sns_datestamp, sns_timestamp = generate_sns_timestamps()
 
-    # Define the instance_parameters dictionary for populating the
-    # vars_file.
+    # Assemble instance_parameters (an InstanceParameters dataclass instance)
+    # for populating the vars_file and rendering the Jinja2 templates.
 
-    instance_parameters = {
-        "architecture": architecture,
-        "awscli_preinstalled": awscli_preinstalled,
-        "az": az,
-        "aws_ami": aws_ami,
-        "aws_account_id": aws_account_id,
-        "base_os": base_os,
-        "is_windows": is_windows,
-        "package_manager": package_manager,
-        "count": count,
-        "custom_user_prelogin_scripts": custom_user_prelogin_scripts,
-        "custom_user_postboot_scripts": custom_user_postboot_scripts,
-        "debug_mode": debug_mode,
-        "ebs_encryption": ebs_encryption,
-        "ebs_optimized": ebs_optimized,
-        "ebs_root_volume_size": ebs_root_volume_size,
-        "ebs_root_volume_type": ebs_root_volume_type,
-        "ebs_root_volume_iops": ebs_root_volume_iops,
-        "ebs_device_volume_size": ebs_device_volume_size,
-        "ebs_device_volume_type": ebs_device_volume_type,
-        "ebs_device_volume_iops": ebs_device_volume_iops,
-        "instance_type": instance_type,
-        "ec2_keypair": ec2_keypair,
-        "ec2_user": ec2_user,
-        "ec2_user_home": ec2_user_home,
-        "ec2_iam_instance_policy": ec2_iam_instance_policy,
-        "ec2_iam_instance_profile": ec2_iam_instance_profile,
-        "ec2_iam_instance_role": ec2_iam_instance_role,
-        "enable_placement_group": enable_placement_group,
-        "hyperthreading": hyperthreading,
-        "iam_name_prefix": iam_name_prefix,
-        "instance_data_dir": instance_data_dir_abs,
-        "instance_owner": instance_owner,
-        "instance_owner_email": instance_owner_email,
-        "instance_owner_department": instance_owner_department,
-        "instance_name": instance_name,
-        "request_type": request_type,
-        "instance_serial_number": instance_serial_number,
-        "instance_serial_number_file": instance_serial_number_file,
-        "cloudwatch_log_group": cloudwatch_log_group,
-        "enable_cloudwatch_logs": enable_cloudwatch_logs,
-        "log_retention_days": log_retention_days,
-        "placement_group_strategy": placement_group_strategy,
-        "preserve_ami": preserve_ami,
-        "preserve_cloudwatch_logs": preserve_cloudwatch_logs,
-        "prod_level": prod_level,
-        "project_id": project_id,
-        "preserve_iam_role": preserve_iam_role,
-        "public_ip": public_ip,
-        "region": region,
-        "security_group_name": security_group_name,
-        "spot_price": spot_price,
-        "ssh_allowed_ips": ssh_allowed_ips,
-        "vpc_security_group_ids": vpc_security_group_ids,
-        "sns_topic_arn": sns_topic_arn,
-        "sns_datestamp": sns_datestamp,
-        "sns_timestamp": sns_timestamp,
-        "subnet_id": subnet_id,
-        "turbot_account": turbot_account,
-        "vars_file_path": vars_file_path,
-        "vpc_id": vpc_id,
-        "vpc_name": vpc_name,
-        "DEPLOYMENT_DATE": DEPLOYMENT_DATE,
-        "DEPLOYMENT_DATE_TAG": DEPLOYMENT_DATE_TAG,
-        "TERRAFORM_VERSION": TERRAFORM_VERSION,
-    }
+    instance_parameters = InstanceParameters(
+        architecture=architecture,
+        awscli_preinstalled=awscli_preinstalled,
+        az=az,
+        aws_ami=aws_ami,
+        aws_account_id=aws_account_id,
+        base_os=base_os,
+        is_windows=is_windows,
+        package_manager=package_manager,
+        count=count,
+        custom_user_prelogin_scripts=custom_user_prelogin_scripts,
+        custom_user_postboot_scripts=custom_user_postboot_scripts,
+        debug_mode=debug_mode,
+        ebs_encryption=ebs_encryption,
+        ebs_optimized=ebs_optimized,
+        ebs_root_volume_size=ebs_root_volume_size,
+        ebs_root_volume_type=ebs_root_volume_type,
+        ebs_root_volume_iops=ebs_root_volume_iops,
+        ebs_device_volume_size=ebs_device_volume_size,
+        ebs_device_volume_type=ebs_device_volume_type,
+        ebs_device_volume_iops=ebs_device_volume_iops,
+        instance_type=instance_type,
+        ec2_keypair=ec2_keypair,
+        ec2_user=ec2_user,
+        ec2_user_home=ec2_user_home,
+        ec2_iam_instance_policy=ec2_iam_instance_policy,
+        ec2_iam_instance_profile=ec2_iam_instance_profile,
+        ec2_iam_instance_role=ec2_iam_instance_role,
+        enable_placement_group=enable_placement_group,
+        hyperthreading=hyperthreading,
+        iam_name_prefix=iam_name_prefix,
+        instance_data_dir=instance_data_dir_abs,
+        instance_owner=instance_owner,
+        instance_owner_email=instance_owner_email,
+        instance_owner_department=instance_owner_department,
+        instance_name=instance_name,
+        request_type=request_type,
+        instance_serial_number=instance_serial_number,
+        instance_serial_number_file=instance_serial_number_file,
+        cloudwatch_log_group=cloudwatch_log_group,
+        enable_cloudwatch_logs=enable_cloudwatch_logs,
+        log_retention_days=log_retention_days,
+        placement_group_strategy=placement_group_strategy,
+        preserve_ami=preserve_ami,
+        preserve_cloudwatch_logs=preserve_cloudwatch_logs,
+        prod_level=prod_level,
+        project_id=project_id,
+        preserve_iam_role=preserve_iam_role,
+        public_ip=public_ip,
+        region=region,
+        security_group_name=security_group_name,
+        spot_price=spot_price,
+        ssh_allowed_ips=ssh_allowed_ips,
+        vpc_security_group_ids=vpc_security_group_ids,
+        sns_topic_arn=sns_topic_arn,
+        sns_datestamp=sns_datestamp,
+        sns_timestamp=sns_timestamp,
+        subnet_id=subnet_id,
+        turbot_account=turbot_account,
+        vars_file_path=vars_file_path,
+        vpc_id=vpc_id,
+        vpc_name=vpc_name,
+        DEPLOYMENT_DATE=DEPLOYMENT_DATE,
+        DEPLOYMENT_DATE_TAG=DEPLOYMENT_DATE_TAG,
+        TERRAFORM_VERSION=TERRAFORM_VERSION,
+    )
 
     # Print the current values of all defined instance_parameters to the
     # console when debug_mode is enabled.
@@ -766,7 +768,7 @@ kill_instance_script: kill_instance.{instance_name}.sh
 
     # Write the instance(s) vars_file to disk.
 
-    write_vars_file(vars_file_path, vars_file_main_part, instance_parameters)
+    write_vars_file(vars_file_path, vars_file_main_part, dataclasses.asdict(instance_parameters))
 
     print("")
     print("Saved " + instance_name + " build template: " + vars_file_path)
@@ -779,7 +781,7 @@ kill_instance_script: kill_instance.{instance_name}.sh
     else:
         print("Generating templates for instance family " + instance_name + "...")
 
-    render_instance_templates(instance_parameters, cwd, instance_data_dir_abs)
+    render_instance_templates(dataclasses.asdict(instance_parameters), cwd, instance_data_dir_abs)
 
     with open(instance_serial_number_file, "a") as fh:
         print("Rendered instance templates into: " + instance_data_dir_abs, file=fh)

@@ -640,6 +640,89 @@ def setup_iam(
     return role_name, policy_name, profile_name, preserve_iam_role
 
 
+# Class: InstanceParameters
+# Purpose: the full set of values make_instance.py assembles from its build
+# flow and hands to write_vars_file()/render_instance_templates() -- was a
+# bare 58-key dict literal built by hand in make_instance.py, with no
+# static check that every key a template or the vars_file format string
+# expects was actually supplied (a missing one fails much later, inside
+# template_engine.py's StrictUndefined render or a KeyError from
+# .format(), far from where the dict was actually assembled). A dataclass
+# catches a missing/misspelled field at construction instead, in
+# make_instance.py itself. write_vars_file()/render_instance_templates()
+# both stay dict[str, Any]-typed (they're general-purpose, used nowhere
+# else with a typed structure) -- make_instance.py bridges via
+# dataclasses.asdict() at each call site instead.
+
+
+@dataclass
+class InstanceParameters:
+    architecture: str
+    awscli_preinstalled: bool | None
+    az: str
+    aws_ami: str
+    aws_account_id: str
+    base_os: str
+    is_windows: bool
+    package_manager: str | None
+    count: int
+    custom_user_prelogin_scripts: list[str]
+    custom_user_postboot_scripts: list[str]
+    debug_mode: BoolStr
+    ebs_encryption: BoolStr
+    ebs_optimized: BoolStr
+    ebs_root_volume_size: int
+    ebs_root_volume_type: str
+    ebs_root_volume_iops: int
+    ebs_device_volume_size: int
+    ebs_device_volume_type: str
+    ebs_device_volume_iops: int
+    instance_type: str
+    ec2_keypair: str
+    ec2_user: str
+    ec2_user_home: str
+    ec2_iam_instance_policy: str
+    ec2_iam_instance_profile: str
+    ec2_iam_instance_role: str
+    enable_placement_group: BoolStr
+    hyperthreading: BoolStr
+    iam_name_prefix: str
+    instance_data_dir: str
+    instance_owner: str
+    instance_owner_email: str
+    instance_owner_department: str
+    instance_name: str
+    request_type: Literal["ondemand", "spot"]
+    instance_serial_number: str
+    instance_serial_number_file: str
+    cloudwatch_log_group: str
+    enable_cloudwatch_logs: BoolStr
+    log_retention_days: int
+    placement_group_strategy: str
+    preserve_ami: BoolStr
+    preserve_cloudwatch_logs: BoolStr
+    prod_level: Literal["dev", "test", "stage", "prod"]
+    project_id: str
+    preserve_iam_role: BoolStr
+    public_ip: BoolStr
+    region: str
+    security_group_name: str
+    spot_price: str | float
+    ssh_allowed_ips: str
+    vpc_security_group_ids: str
+    sns_topic_arn: str
+    sns_datestamp: str
+    sns_timestamp: str
+    subnet_id: str
+    turbot_account: str
+    vars_file_path: str
+    vpc_id: str
+    vpc_name: str
+    DEPLOYMENT_DATE: str
+    DEPLOYMENT_DATE_TAG: str
+    TERRAFORM_VERSION: str
+
+
 # Function: write_vars_file()
 # Purpose: render vars_file_template with instance_parameters and write it
 # to vars_file_path -- the human-readable per-instance audit record.
