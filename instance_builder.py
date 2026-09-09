@@ -283,9 +283,13 @@ def setup_keypair(ec2_client: EC2Client, ec2_keypair: str, secret_key_file: str,
     except ClientError as e:
         if e.response["Error"]["Code"] == "InvalidKeyPair.NotFound":
             new_ec2_keypair = ec2_client.create_key_pair(KeyName=ec2_keypair)
-            with open(secret_key_file, "w") as fh:
+            # Open with mode 0o600 from creation (os.open, not open()+chmod)
+            # so the private key material is never briefly world/group-
+            # readable under a permissive umask between being written and
+            # being locked down.
+            fd = os.open(secret_key_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w") as fh:
                 print(new_ec2_keypair["KeyMaterial"], file=fh)
-            os.chmod(secret_key_file, 0o600)
             print("Created EC2 keypair: " + ec2_keypair)
         else:
             # Regression-preventing fix, same class as the IAM-creation

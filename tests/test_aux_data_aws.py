@@ -152,6 +152,17 @@ class TestGetAmiInfo:
         arch_filter = next(f for f in filters if f["Name"] == "architecture")
         assert arch_filter["Values"] == ["arm64"]
 
+    def test_aws_api_error_quits_instead_of_propagating_raw(self):
+        # Regression test: get_ami_info() used to have no error handling at
+        # all -- a real AWS API problem (throttling, AccessDenied) propagated
+        # as a raw, unhandled ClientError/traceback instead of the clean
+        # operator-facing message get_instance_type_info() already gives for
+        # the same class of failure.
+        ec2_client = MagicMock()
+        ec2_client.describe_images.side_effect = _client_error("RequestLimitExceeded")
+        with pytest.raises(SystemExit):
+            aux_data.get_ami_info(ec2_client, "al2023", "x86_64")
+
 
 class TestCheckCustomAmi:
     def test_found_returns_ami_id(self):
@@ -171,6 +182,12 @@ class TestCheckCustomAmi:
         ec2_client.describe_images.return_value = {"Images": []}
         aux_data.check_custom_ami(ec2_client, "ami-x", "123456789012", "x86_64")
         assert _describe_images_call_kwargs(ec2_client)["Owners"] == ["123456789012"]
+
+    def test_aws_api_error_quits_instead_of_propagating_raw(self):
+        ec2_client = MagicMock()
+        ec2_client.describe_images.side_effect = _client_error("AccessDeniedException")
+        with pytest.raises(SystemExit):
+            aux_data.check_custom_ami(ec2_client, "ami-x", "123456789012", "x86_64")
 
 
 class TestCtrlCAbortIamNaming:

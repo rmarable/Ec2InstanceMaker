@@ -162,15 +162,24 @@ def get_instance_type_info(ec2client: EC2Client, instance_type: str) -> dict[str
 
 
 def check_custom_ami(ec2client: EC2Client, custom_ami: str, aws_account_id: str, architecture: str) -> str:
-    ami_information = ec2client.describe_images(
-        Owners=[aws_account_id],
-        Filters=[
-            {"Name": "architecture", "Values": [architecture]},
-            {"Name": "image-id", "Values": [custom_ami]},
-            {"Name": "state", "Values": ["available"]},
-            {"Name": "virtualization-type", "Values": ["hvm"]},
-        ],
-    )
+    from botocore.exceptions import ClientError
+
+    try:
+        ami_information = ec2client.describe_images(
+            Owners=[aws_account_id],
+            Filters=[
+                {"Name": "architecture", "Values": [architecture]},
+                {"Name": "image-id", "Values": [custom_ami]},
+                {"Name": "state", "Values": ["available"]},
+                {"Name": "virtualization-type", "Values": ["hvm"]},
+            ],
+        )
+    except ClientError as e:
+        # Same reasoning as get_instance_type_info() above: a real AWS API
+        # problem (throttling, AccessDenied) here used to propagate as a
+        # raw, unhandled botocore exception instead of a clean operator-
+        # facing message.
+        refer_to_docs_and_quit("AWS API error while checking custom_ami " + custom_ami + ": " + str(e))
     amis = sorted(ami_information["Images"], key=lambda x: x["CreationDate"], reverse=True)
     try:
         aws_ami = amis[0]["ImageId"]
@@ -372,15 +381,24 @@ def get_ami_info(ec2client: EC2Client, base_os: str, architecture: str) -> str:
         error_msg = '"' + base_os + '" is not a recognized base_os!'
         refer_to_docs_and_quit(error_msg)
     owner, name_pattern = _AMI_CATALOG[base_os]
-    ami_information = ec2client.describe_images(
-        Owners=[owner],
-        Filters=[
-            {"Name": "name", "Values": [name_pattern]},
-            {"Name": "architecture", "Values": [architecture]},
-            {"Name": "root-device-type", "Values": ["ebs"]},
-            {"Name": "virtualization-type", "Values": ["hvm"]},
-        ],
-    )
+    from botocore.exceptions import ClientError
+
+    try:
+        ami_information = ec2client.describe_images(
+            Owners=[owner],
+            Filters=[
+                {"Name": "name", "Values": [name_pattern]},
+                {"Name": "architecture", "Values": [architecture]},
+                {"Name": "root-device-type", "Values": ["ebs"]},
+                {"Name": "virtualization-type", "Values": ["hvm"]},
+            ],
+        )
+    except ClientError as e:
+        # Same reasoning as get_instance_type_info()/check_custom_ami()
+        # above: a real AWS API problem here used to propagate as a raw,
+        # unhandled botocore exception instead of a clean operator-facing
+        # message.
+        refer_to_docs_and_quit("AWS API error while looking up an AMI for base_os " + base_os + ": " + str(e))
     amis = sorted(ami_information["Images"], key=lambda x: x["CreationDate"], reverse=True)
     return amis[0]["ImageId"]
 

@@ -457,6 +457,28 @@ class TestSetupKeypair:
         assert oct(secret_key_file.stat().st_mode)[-3:] == "600"
         quit_fn.assert_not_called()
 
+    def test_pem_is_never_created_more_permissive_than_0600_even_under_a_permissive_umask(self, tmp_path):
+        # Regression test: the .pem used to be written via plain open()
+        # then chmod'd to 0600 afterward -- a real window (however brief)
+        # where the private key material was as permissive as the
+        # process umask allowed. Setting umask to 0 (the most permissive
+        # possible) and still getting 0600 proves the file is created
+        # with the restrictive mode from the start (os.open(..., 0o600)),
+        # not chmod'd after the fact.
+        secret_key_file = tmp_path / "dev01-key.pem"
+        ec2_client = MagicMock()
+        ec2_client.describe_key_pairs.side_effect = _client_error("InvalidKeyPair.NotFound")
+        ec2_client.create_key_pair.return_value = {"KeyMaterial": "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----"}
+        quit_fn = MagicMock(side_effect=SystemExit(1))
+
+        old_umask = os.umask(0)
+        try:
+            instance_builder.setup_keypair(ec2_client, "dev01-key", str(secret_key_file), "us-east-1", "false", quit_fn)
+        finally:
+            os.umask(old_umask)
+
+        assert oct(secret_key_file.stat().st_mode)[-3:] == "600"
+
     def test_unexpected_client_error_quits_instead_of_falling_through(self, tmp_path):
         # Regression test: this used to silently swallow any ClientError
         # other than InvalidKeyPair.NotFound, falling through to a
