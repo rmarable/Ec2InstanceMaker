@@ -158,9 +158,12 @@ passwords in an easy-to-parse table dumped to the console, plus an SSM
 port-forwarding tunnel for RDP (`localhost:13389`) instead of requiring
 3389 reachable from anywhere.
 
-* Never exposes SSH/RDP to `0.0.0.0/0` -- the security group's ingress
+* Never exposes SSH/RDP to the internet -- the security group's ingress
 rule is always scoped by `--ssh_allowed_ips` (defaults to the instance's
-own VPC CIDR; an explicit `0.0.0.0/0` is refused outright).
+own VPC CIDR).  Any range broader than a `/8` is refused outright, which
+covers `0.0.0.0/0` and its several other spellings (`0.0.0.0/0.0.0.0`,
+`1.2.3.4/0`) as well as the `0.0.0.0/1` + `128.0.0.0/1` pair that would
+otherwise cover the whole internet in two rules.
 
 * Every instance is tagged `ManagedBy: Ec2InstanceMaker`, so tooling (this
 toolkit's own `manage_instance.py` included) can safely identify and act
@@ -780,9 +783,11 @@ Exiting...
 
 ## Instance Customization
 
-The basic post-installation shell script performs a systems package update and
-inserts a 45-second keep-alive interval to prevent SSH logouts from affecting
-any ongoing interactive instance activity.
+The basic post-installation shell script performs a system package update
+and writes a 45-second `ServerAliveInterval` into the instance's own
+`~/.ssh/config`.  Note that this affects SSH connections made *outbound
+from* the instance; it has no bearing on your own session, since
+`access_instance.py` connects over SSM Session Manager rather than SSH.
 
 The instance userdata template disables Intel HyperThreading if `--hyperthreading=false`.
 

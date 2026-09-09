@@ -137,6 +137,32 @@ CI installs it the same way (`.github/workflows/lint.yml`).
   template, re-run `scripts/lint_templates.py` across all 14 `CONTEXTS`
   scenarios and keep it that way — don't reintroduce misalignment.
 
+## Which document owns what
+
+This file and `README.md` cover a lot of the same ground, and an
+adversarial review found they had already drifted apart on
+`custom_user_scripts` (two of the three descriptions still claimed the
+post-boot hook ran via Terraform's SSH `remote-exec` provisioner as
+`ec2_user`; it actually runs via `aws ssm send-command` as root). Keep the
+split below so that doesn't recur:
+
+- **`README.md` owns operator-facing material**: what every flag does,
+  worked examples, install and client-registration steps, console output,
+  troubleshooting. If a change alters what an operator types or sees, it
+  belongs there.
+- **This file owns rationale and internals**: why the code is shaped the
+  way it is, which invariants must hold, what was tried and rejected.
+  If a change alters how the code is structured, it belongs here.
+- **`custom_user_scripts/README.md` owns the two customization hooks** in
+  full — what runs when, with which privileges, and which variables are
+  available. The other two files summarize and link to it rather than
+  restating it.
+
+Stating the same *fact* in both files is fine when both audiences need it
+(that access goes through SSM, say). Restating the same *procedure* is
+not — that is what drifted. When in doubt, put the procedure in
+`README.md` and link.
+
 ## Architecture
 
 **`make_instance.py`** is the orchestrator: `parse_args(argv=None)` builds
@@ -588,17 +614,13 @@ boundary mocked. Registered for Claude Code via the project-scoped
 by `tests/test_mcp_server.py`; brought into `pyproject.toml`'s
 `[tool.mypy]` scope like every other top-level script.
 
-Setup: `pip install -r requirements-mcp.txt` into `.venv` (separate from
-`requirements.txt` — only needed to run the server). `.mcp.json` is
-read automatically by any Claude Code session started from the repo
-root; no registration step. Verify with `/mcp` inside that session —
-`ec2instancemaker` should list all 8 tools. To register it for use
-outside this checkout: `claude mcp add ec2instancemaker
-$(pwd)/.venv/bin/python3 $(pwd)/mcp_server.py` (run from the repo root).
-A session started before
-`.mcp.json` existed, or before `requirements-mcp.txt` was installed,
-will not have the server — Claude Code loads MCP servers at startup
-only.
+Setup, client registration (`.mcp.json`, `claude mcp add`, the Claude
+Desktop connector) and the browser-only claude.ai limitation are all
+operator-facing: **README.md's "MCP Server" section is the single source
+of truth for them** — don't restate them here, they drifted once already.
+Note only that `requirements-mcp.txt` is separate from
+`requirements.txt` because it's needed to *run* the server, not to use
+the CLI toolkit.
 
 Untrusted-data warning: `list_instances`/`get_instance_status` return raw
 EC2 tag values (`Name`, `OperatingSystem`, `InstanceOwner`), and
@@ -653,25 +675,23 @@ against an already-locked `instance_name` fails fast via
 instance_data_dir/vars_files state mutations — much lower corruption
 risk) or by the CLI's read-only `-S`/`-l` actions.
 
-Claude Desktop app: Settings → Connectors → Add connector → Local
-command. Command: `/path/to/Ec2InstanceMaker/.venv/bin/python3`.
-Arguments: `/path/to/Ec2InstanceMaker/mcp_server.py`. Unlike `.mcp.json`,
-a Local command connector has no cwd concept — it just runs
-command+args — so `mcp_server.py`'s `if __name__ == "__main__":` block
-`os.chdir()`s to its own file's directory before calling `mcp.run()`,
-making every relative path here (`vars_files/<name>.yml`, etc.) resolve
-against the repo root regardless of the connector's launch cwd. A no-op
-for Claude Code, which already runs it from the repo root.
+Why `mcp_server.py`'s `if __name__ == "__main__":` block `os.chdir()`s to
+its own file's directory before calling `mcp.run()`: a Claude Desktop
+"Local command" connector has no cwd concept — unlike `.mcp.json`, it
+just runs command+args — so without the chdir every relative path in
+this module (`vars_files/<name>.yml`, `instance_data/<name>/`, the
+`templates/` loader root) would resolve against whatever cwd the
+connector happened to launch with. A no-op for Claude Code, which
+already runs it from the repo root. Don't remove it.
 
-Browser-only claude.ai (no desktop app) cannot use this server at all —
-it only supports Remote connectors (Streamable HTTP + OAuth 2.1, server
-reachable over the public internet from Anthropic's IP ranges), and
-`mcp_server.py` only implements stdio transport. Turning it into a
-Remote connector is a separate, much larger effort: real hosting, TLS,
-OAuth, and — since it would no longer run as the local user — a
-non-local AWS credential story (an IAM role on whatever compute runs it)
-for tools that create/destroy real, billable resources. Not attempted
-here.
+`mcp_server.py` implements stdio transport only, which is why
+browser-only claude.ai can't reach it (Remote connectors need Streamable
+HTTP + OAuth 2.1 over the public internet). Before treating that as a
+gap worth closing: a Remote connector means real hosting, TLS, OAuth,
+and — since it would no longer run as the local user — an entirely
+different AWS credential story (an IAM role on whatever compute runs it)
+for tools that create and destroy real, billable resources. Deliberately
+not attempted.
 
 ## Working conventions specific to this repo
 
