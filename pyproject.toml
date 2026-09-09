@@ -31,7 +31,7 @@ python_version = "3.12"
 # checked as-is with no annotations of its own beyond parse_args()/main()'s
 # own signatures. access_instance.py is now fully typed (converted from a
 # flat script into dependency-injected functions, same as manage_instance.py).
-files = ["access_instance.py", "aux_data.py", "instance_builder.py", "make_instance.py", "manage_instance.py", "template_engine.py"]
+files = ["access_instance.py", "aux_data.py", "instance_builder.py", "make_instance.py", "manage_instance.py", "scripts/lint_templates.py", "template_engine.py"]
 # boto3/botocore ARE stubbed (boto3-stubs[ec2,iam,sns,sts,logs] --
 # requirements-test.txt, a dev-only dependency; real importable runtime
 # modules, not stub-only, so EC2Client/IAMClient/etc. are used directly as

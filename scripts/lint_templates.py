@@ -22,6 +22,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
+from typing import Any
 
 import yaml
 
@@ -30,7 +32,7 @@ sys.path.insert(0, REPO_ROOT)
 
 from template_engine import TEMPLATE_MAP, _build_render_context, render_instance_templates  # noqa: E402
 
-CONTEXTS = {
+CONTEXTS: dict[str, dict[str, Any]] = {
     "linux_ondemand": {
         "az": "us-east-1a",
         "aws_ami": "ami-0123456789abcdef0",
@@ -785,7 +787,7 @@ CONTEXTS = {
 }
 
 
-def lint_shell(path):
+def lint_shell(path: str) -> tuple[bool, str]:
     result = subprocess.run(["shellcheck", "--severity=error", path], capture_output=True, text=True)
     return result.returncode == 0, result.stdout + result.stderr
 
@@ -793,10 +795,10 @@ def lint_shell(path):
 # instance_userdata.j2 renders #cloud-config (cloud-init YAML), not a real
 # shell script, despite the .sh extension convention -- shellcheck would
 # just misparse it.
-SKIP_LINT = {"instance_userdata_script"}
+SKIP_LINT: set[str] = {"instance_userdata_script"}
 
 
-def lint_python(path):
+def lint_python(path: str) -> tuple[bool, str]:
     # Generated files compose conditionally per Jinja branch (e.g.
     # access_instance.j2 only uses `csv`/`os` inside its `count > 1`
     # blocks), so a full style/unused-import pass is permanently noisy
@@ -819,16 +821,16 @@ def lint_python(path):
     return result.returncode == 0, result.stdout + result.stderr
 
 
-SUFFIX_LINTERS = {
+SUFFIX_LINTERS: dict[str, Callable[[str], tuple[bool, str]]] = {
     ".sh": lint_shell,
     ".py": lint_python,
 }
 
 
-def lint_terraform_dir(tf_dir):
+def lint_terraform_dir(tf_dir: str) -> list[tuple[str, str]]:
     """terraform fmt/validate need the whole rendered instance_data dir at
     once (provider_aws.tf + <name>.tf reference each other)."""
-    failures = []
+    failures: list[tuple[str, str]] = []
 
     fmt = subprocess.run(["terraform", "fmt", "-check", "-diff", "-no-color"], cwd=tf_dir, capture_output=True, text=True)
     if fmt.returncode != 0:
@@ -859,13 +861,13 @@ def lint_terraform_dir(tf_dir):
     return failures
 
 
-def main():
+def main() -> int:
     missing = [tool for tool in ("shellcheck", "terraform") if shutil.which(tool) is None]
     if missing:
         print(f"ERROR: required tool(s) not on PATH: {', '.join(missing)}")
         return 1
 
-    all_failures = []
+    all_failures: list[tuple[str, str, str]] = []
 
     for scenario_name, instance_parameters in CONTEXTS.items():
         with tempfile.TemporaryDirectory() as scratch_root:

@@ -72,13 +72,17 @@ repos:
         pass_filenames: false
 
       - id: mypy
-        name: Type-check access_instance.py, aux_data.py, instance_builder.py, make_instance.py, manage_instance.py, template_engine.py
+        name: Type-check access_instance.py, aux_data.py, instance_builder.py, make_instance.py, manage_instance.py, scripts/lint_templates.py, template_engine.py
         description: >
           make_instance.py's own body has no annotations of its own beyond
           parse_args()/main()'s signatures (untested-at-the-function-level
           orchestration code; see CLAUDE.md), but mypy still infers most of
           its ~80 local variables correctly from the real type hints on
           every function it calls, so it's included and checked as-is.
+          scripts/lint_templates.py is dev tooling (not part of the
+          runtime toolkit) but is fully typed -- its own functions are
+          small and narrow, and it already imports the fully-typed
+          template_engine.py, so it costs almost nothing to include.
           pass_filenames is false and mypy is invoked bare (no file args)
           so it always checks its own `files` list in pyproject.toml in
           full, regardless of which of these actually changed -- same
@@ -86,7 +90,7 @@ repos:
         entry: mypy
         language: system
         pass_filenames: false
-        files: ^(access_instance\.py|aux_data\.py|instance_builder\.py|make_instance\.py|manage_instance\.py|template_engine\.py)$
+        files: ^(access_instance\.py|aux_data\.py|instance_builder\.py|make_instance\.py|manage_instance\.py|scripts/lint_templates\.py|template_engine\.py)$
 
       - id: render-and-lint-templates
         name: Render templates/*.j2 and lint the output (shellcheck/ruff/terraform)
