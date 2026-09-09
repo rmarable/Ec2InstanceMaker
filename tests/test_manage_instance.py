@@ -33,6 +33,21 @@ def _paginate_call(client):
     return client.get_paginator.return_value.paginate
 
 
+class TestTagValue:
+    def test_returns_matching_tag_value(self):
+        instance = {"Tags": [{"Key": "Name", "Value": "dev01"}, {"Key": "OperatingSystem", "Value": "al2023"}]}
+        assert manage_instance.tag_value(instance, "Name") == "dev01"
+        assert manage_instance.tag_value(instance, "OperatingSystem") == "al2023"
+
+    def test_missing_tag_returns_default(self):
+        instance = {"Tags": [{"Key": "Name", "Value": "dev01"}]}
+        assert manage_instance.tag_value(instance, "InstanceOwner") == "?"
+        assert manage_instance.tag_value(instance, "InstanceOwner", default="unknown") == "unknown"
+
+    def test_no_tags_key_at_all_returns_default(self):
+        assert manage_instance.tag_value({}, "Name") == "?"
+
+
 class TestResolveRegion:
     def test_explicit_region_wins_without_reading_vars_file(self):
         quit_fn = _quitting_mock()

@@ -115,11 +115,12 @@ CI installs it the same way (`.github/workflows/lint.yml`).
   `access_instance.j2` only uses `csv` inside its `count > 1` block and
   `jq` inside its `'windows' in base_os` block, so a full unused-import
   pass would be permanently noisy), a `bandit -c pyproject.toml -ll` pass
-  on `.py` (the pre-commit bandit hook only ever scans the 4 hand-written
-  top-level `.py` files, never generated code -- this closes that blind
-  spot, since `shell=True` + interpolated data is most likely to show up
-  in what a template renders, not in `make_instance.py`/`aux_data.py`
-  themselves), and `terraform init -backend=false` + `validate` on the
+  on `.py` (the pre-commit bandit hook has no `files:` restriction of its
+  own, so it scans every `.py` file in the repo including `tests/` — but
+  never *generated* code, since that only exists on disk after a build;
+  this closes that blind spot, since `shell=True` + interpolated data is
+  most likely to show up in what a template renders, not in
+  `make_instance.py`/`aux_data.py` themselves), and `terraform init -backend=false` + `validate` on the
   `.tf` output.
   `instance_userdata.j2` is skipped for shell linting — it renders
   `#cloud-config` (cloud-init YAML), not bash, despite the `.sh` naming

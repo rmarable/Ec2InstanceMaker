@@ -3,14 +3,14 @@
 ################################################################################
 # Name:         mcp_server.py
 # Author:       Rodney Marable <rodney.marable@gmail.com>
-# Purpose:	Expose read-only Ec2InstanceMaker lookups (instance listing,
-# 		status, and the local build-time record) as MCP tools, so an
-# 		MCP client (e.g. Claude Code) can query what's built and
-# 		what's running without a human running manage_instance.py
-# 		by hand. Deliberately excludes anything that creates,
-# 		modifies, or destroys AWS resources -- see CLAUDE.md for the
-# 		read-only-first scope decision and why build/destroy tools
-# 		are a separate, not-yet-built follow-up.
+# Purpose:	Expose Ec2InstanceMaker as MCP tools: instance listing/status/
+# 		build-record lookups (read-only), plus build_instance/
+# 		destroy_instance/start_instance/stop_instance/reboot_instance
+# 		(read-write, each gated behind an explicit confirm=True
+# 		argument), so an MCP client (e.g. Claude Code) can query and
+# 		drive builds without a human running the CLI scripts by
+# 		hand. See CLAUDE.md's mcp_server.py section for the full
+# 		tool list and the reasoning behind each one.
 ################################################################################
 
 import dataclasses

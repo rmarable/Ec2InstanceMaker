@@ -888,11 +888,9 @@ If you observe this error while attempting to build an EC2 instance, please
 follow the guidelines provided in the message output to subscribe to the OS
 channel through the AWS Marketplace.
 
-* Ec2InstanceMaker supports EBS encryption but does not yet provide a mechanism
-for building and attaching multiple EBS volumes to an EC2 instance during the
-installation process, which would subsequently be encrypted when
-`--enable_ebs_encryption=true`.  This feature will be provided in a future
-release.
+* Ec2InstanceMaker supports attaching a secondary EBS volume during the build
+(`--ebs_device_volume_size`/`--ebs_device_volume_type`/`--ebs_device_volume_iops`),
+which is encrypted along with the root volume when `--ebs_encryption=true`.
 
 * Encryption of root volumes during the instance installation process is now
 supported by Terraform.  When the instance is finished building, build a new encrypted AMI with the included `build-ami` script using the symlink in the top-level SRC tree.
