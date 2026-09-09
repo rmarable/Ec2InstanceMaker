@@ -9,6 +9,6 @@
 ################################################################################
 
 provider "aws" {
-  alias  = "{{ vpc_name }}"
+  alias  = "{{ vpc_name | hcl_escape }}"
   region = "{{ region }}"
 }

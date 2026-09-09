@@ -83,10 +83,10 @@ resource "aws_spot_instance_request" "{{ instance_name }}" {
     OperatingSystem         = "{{ base_os }}"
     InstanceSerialNumber    = "{{ instance_serial_number }}"
     InstanceOwner           = "{{ instance_owner }}"
-    InstanceOwnerEmail      = "{{ instance_owner_email }}"
-    InstanceOwnerDepartment = "{{ instance_owner_department }}"
+    InstanceOwnerEmail      = "{{ instance_owner_email | hcl_escape }}"
+    InstanceOwnerDepartment = "{{ instance_owner_department | hcl_escape }}"
 {% if 'UNDEFINED' not in project_id %}
-    ProjectID               = "{{ project_id }}"
+    ProjectID               = "{{ project_id | hcl_escape }}"
 {% endif %}
     DEPLOYMENT_DATE         = "{{ DEPLOYMENT_DATE_TAG }}"
   }
@@ -104,10 +104,10 @@ resource "aws_spot_instance_request" "{{ instance_name }}" {
 {% endif %}
     InstanceSerialNumber    = "{{ instance_serial_number }}"
     InstanceOwner           = "{{ instance_owner }}"
-    InstanceOwnerEmail      = "{{ instance_owner_email }}"
-    InstanceOwnerDepartment = "{{ instance_owner_department }}"
+    InstanceOwnerEmail      = "{{ instance_owner_email | hcl_escape }}"
+    InstanceOwnerDepartment = "{{ instance_owner_department | hcl_escape }}"
 {% if 'UNDEFINED' not in project_id %}
-    ProjectID               = "{{ project_id }}"
+    ProjectID               = "{{ project_id | hcl_escape }}"
 {% endif %}
     DEPLOYMENT_DATE         = "{{ DEPLOYMENT_DATE_TAG }}"
     EBSEncryption           = "{{ ebs_encryption | bool | lower }}"

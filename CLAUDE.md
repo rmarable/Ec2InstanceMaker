@@ -322,6 +322,25 @@ supported natively by Jinja2. When editing a template, keep using only
 these two non-native constructs (or extend the shims) rather than reaching
 for other Ansible-only filters/tests — they won't be available.
 
+Three more filters exist purely for safely interpolating free-text
+operator input (`instance_owner_email`/`instance_owner_department`/
+`project_id`/`vpc_name` — none of these are restricted to a safe charset
+the way `instance_name`/`instance_owner` are) into generated output:
+`shquote` (a value going straight into a *generated shell script*),
+`tf_shquote` (a value going into a Terraform `local-exec` `command`
+string, which needs a second escaping pass so HCL's own parser doesn't
+mangle it before the shell ever sees it), and `hcl_escape` (a value
+going into a *plain* HCL double-quoted string literal — a tag value, not
+a shell command). `hcl_escape` exists because an adversarial review
+found and proved a real injection: `DEFAULT_EC2_TEMPLATE.j2`'s
+`tags`/`volume_tags` blocks interpolated `instance_owner_email`/
+`instance_owner_department`/`project_id` with no filter at all, so a
+crafted value closed the HCL string early and injected an entire extra
+Terraform resource block. Any new free-text field that reaches a
+template needs one of these three filters, chosen by which context it
+lands in — see `tests/test_template_engine_filters.py` for what each one
+actually has to survive.
+
 **`templates/*.j2`** — the Terraform/shell/Python templates themselves. Key
 ones:
 - `DEFAULT_EC2_TEMPLATE.j2` — the Terraform EC2 resource definition.

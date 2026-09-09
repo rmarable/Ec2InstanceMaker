@@ -127,6 +127,27 @@ def _tf_shquote_filter(value: Any) -> str:
     return shell_quoted.replace("\\", "\\\\").replace('"', '\\"')
 
 
+def _hcl_escape_filter(value: Any) -> str:
+    # For interpolating free-text operator input (instance_owner_email/
+    # instance_owner_department/project_id -- none of these are
+    # restricted to a safe charset the way instance_name/instance_owner
+    # are) directly into a *plain HCL double-quoted string literal* (a
+    # tag value, not a shell command -- see shquote/tf_shquote above for
+    # that case, which these three fields also separately need wherever
+    # they're interpolated into a local-exec `command` string). Escapes
+    # the two characters HCL's own string-literal grammar treats
+    # specially -- backslash and double-quote, which would otherwise let
+    # a crafted value close the string early and inject arbitrary
+    # HCL/Terraform config (proven live during an adversarial review:
+    # an unescaped instance_owner_email broke out of a `tags = {...}`
+    # block and added a whole extra resource) -- and HCL's "${"
+    # interpolation sequence, neutralized via HCL's own "$${" escape so
+    # a value can't reach Terraform functions or other resources'
+    # attributes either.
+    escaped = str(value).replace("\\", "\\\\").replace('"', '\\"')
+    return escaped.replace("${", "$${")
+
+
 def _make_environment(local_workingdir: str) -> Environment:
     # autoescape is intentionally off: output is Terraform/shell/Python/JSON,
     # not HTML, and HTML-escaping quotes/angle-brackets would corrupt it.
@@ -144,6 +165,7 @@ def _make_environment(local_workingdir: str) -> Environment:
     env.filters["bool"] = _bool_filter
     env.filters["shquote"] = _shquote_filter
     env.filters["tf_shquote"] = _tf_shquote_filter
+    env.filters["hcl_escape"] = _hcl_escape_filter
     return env
 
 

@@ -213,6 +213,45 @@ class TestSsmProvisionOutputPersistence:
         assert "StandardErrorContent" in save_fn
 
 
+class TestHclInjectionRegression:
+    """Regression tests for a real, live-exploited HCL/Terraform injection
+    found during an adversarial review: instance_owner_email/
+    instance_owner_department/project_id were interpolated raw into
+    DEFAULT_EC2_TEMPLATE.j2's tags/volume_tags blocks with no escaping
+    filter at all (unlike instance_name/instance_owner, which are
+    regex-validated, and unlike this same template's local-exec `command`
+    strings, which already correctly apply shquote/tf_shquote). A crafted
+    value containing an embedded `"` closed the HCL string early and
+    injected an entirely separate resource block that Terraform would
+    apply for real. Fixed via template_engine.py's hcl_escape filter.
+    """
+
+    PAYLOAD = 'tester"\n  }\n}\nresource "aws_iam_role" "pwned" {\n  name = "pwned'
+
+    def test_instance_owner_email_cannot_break_out_of_tags_block(self):
+        rendered = render({"instance_owner_email": self.PAYLOAD})["DEFAULT_EC2_TEMPLATE.j2"]
+        assert 'resource "aws_iam_role" "pwned"' not in rendered
+        assert 'InstanceOwnerEmail      = "tester\\"' in rendered
+
+    def test_instance_owner_department_cannot_break_out_of_tags_block(self):
+        rendered = render({"instance_owner_department": self.PAYLOAD})["DEFAULT_EC2_TEMPLATE.j2"]
+        assert 'resource "aws_iam_role" "pwned"' not in rendered
+        assert 'InstanceOwnerDepartment = "tester\\"' in rendered
+
+    def test_project_id_cannot_break_out_of_tags_block(self):
+        rendered = render({"project_id": self.PAYLOAD})["DEFAULT_EC2_TEMPLATE.j2"]
+        assert 'resource "aws_iam_role" "pwned"' not in rendered
+        assert 'ProjectID               = "tester\\"' in rendered
+
+    def test_hcl_interpolation_sequence_is_neutralized(self):
+        rendered = render({"instance_owner_email": "${data.aws_caller_identity.current.account_id}"})["DEFAULT_EC2_TEMPLATE.j2"]
+        assert 'InstanceOwnerEmail      = "$${data.aws_caller_identity.current.account_id}"' in rendered
+
+    def test_vpc_name_in_provider_aws_is_also_escaped(self):
+        rendered = render({"vpc_name": 'x" }\nresource "null_resource" "pwned" {\n  triggers = { x = "y'})["provider_aws.j2"]
+        assert 'resource "null_resource" "pwned"' not in rendered
+
+
 class TestManagedByTag:
     """manage_instance.py identifies which EC2 instances this toolkit is
     allowed to start/stop/reboot/terminate by filtering on the ManagedBy
