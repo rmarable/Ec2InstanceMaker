@@ -59,10 +59,15 @@ or validation rules instead of re-deriving them from `make_instance.py`.
 ## Linting and CI
 
 ```bash
-$ pip install -r requirements-test.txt
+$ pip install -r requirements-test.txt -r requirements-mcp.txt
 $ pre-commit install          # one-time, wires the git commit hook
 $ pre-commit run --all-files  # run everything on demand
 ```
+
+`requirements-mcp.txt` (just `mcp`) is needed here because `tests/`/mypy
+cover `mcp_server.py` too — see "Architecture" below — even though it's
+not a `requirements.txt` runtime dependency of the CLI toolkit itself.
+CI installs it the same way (`.github/workflows/lint.yml`).
 
 `.pre-commit-config.yaml` is the single source of truth for what counts as
 "clean" — the same config runs locally (on `git commit`) and in CI
@@ -427,6 +432,37 @@ this one *is* unit tested (`tests/test_manage_instance.py`, a plain
 `import manage_instance`) — its logic lives in standalone,
 dependency-injected functions gated behind
 `if __name__ == "__main__": main()`.
+
+**`mcp_server.py`** exposes read-only lookups as MCP tools (via `mcp`'s
+`MCPServer`, `requirements-mcp.txt` — an optional dependency, not part of
+`requirements.txt`, since it's only needed to actually run the server, not
+to use the CLI toolkit) so an MCP client like Claude Code can query what's
+built/running without a human running `manage_instance.py` by hand:
+`list_instances(region)` and `get_instance_status(instance_name, region=None)`
+call `manage_instance.py`'s already-tested `list_all_managed_instances()`/
+`find_managed_instances()`/`resolve_region()` directly (no subprocess),
+and `get_build_record(instance_name)` reads `./vars_files/<name>.yml`
+straight off disk (no AWS call at all). This is deliberately read-only —
+no tool here creates, modifies, or destroys anything; build/destroy tools
+are an intentionally separate, not-yet-built follow-up, since letting an
+LLM trigger a real `make_instance.py`/`kill-instance.<name>.sh` run needs
+its own confirmation-gating design, not just Claude Code's own permission
+prompts. Two things make reusing `manage_instance.py`'s functions here
+straightforward: they already take `refer_to_docs_and_quit` as an
+injected `Callable[[str], NoReturn]` rather than calling `sys.exit()`
+directly, so `mcp_server.py` swaps in `_mcp_quit()` (raises `RuntimeError`
+instead of exiting — a long-running server process can't have a lookup
+failure kill it), and neither function touches `subprocess` in the first
+place (that only shows up in `manage_instance.py`'s `terminate_via_kill_script()`/
+`main()`, which nothing here imports). Each `@mcp.tool()`-decorated
+function is a thin wrapper (constructs a real `boto3.client("ec2", ...)`
+and delegates) around a plain, separately-tested `_list_instances()`/
+`_get_instance_status()` — same dependency-injection pattern as
+`tests/test_manage_instance.py`, without exposing an `ec2_client`
+parameter in the tool's own JSON schema. Registered for Claude Code via
+the project-scoped `.mcp.json` (stdio transport, `.venv/bin/python3
+mcp_server.py`). Covered by `tests/test_mcp_server.py`; brought into
+`pyproject.toml`'s `[tool.mypy]` scope like every other top-level script.
 
 ## Working conventions specific to this repo
 
