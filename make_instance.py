@@ -15,6 +15,7 @@ import functools
 import os
 import sys
 from math import pi
+from typing import NoReturn
 
 import boto3
 
@@ -75,7 +76,7 @@ from instance_builder import (
 from template_engine import render_instance_templates
 
 
-def parse_args(argv=None):
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="make_instance.py: Command-line interface to build EC2 instances")
 
     # Configure parser arguments for the required variables.
@@ -190,7 +191,7 @@ def parse_args(argv=None):
     return parser.parse_args(argv)
 
 
-def main(argv=None):
+def main(argv: list[str] | None = None) -> NoReturn:
     # Create variables from the optional instance parameter values provided
     # from the command line. Recording argv (falling back to sys.argv only
     # when the caller didn't provide one, e.g. the real `if __name__ ==

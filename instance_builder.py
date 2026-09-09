@@ -33,7 +33,7 @@ from botocore.exceptions import ClientError
 from mypy_boto3_ec2.client import EC2Client
 from mypy_boto3_ec2.literals import InstanceTypeType
 from mypy_boto3_ec2.service_resource import EC2ServiceResource, SecurityGroup
-from mypy_boto3_ec2.type_defs import FilterTypeDef
+from mypy_boto3_ec2.type_defs import FilterTypeDef, TagTypeDef
 from mypy_boto3_iam.client import IAMClient
 from mypy_boto3_logs.client import CloudWatchLogsClient
 from mypy_boto3_sns.client import SNSClient
@@ -429,8 +429,8 @@ def build_security_group_tags(
     instance_owner_department: str,
     deployment_date_tag: str,
     project_id: str,
-) -> list[dict[str, str]]:
-    tags = [
+) -> list[TagTypeDef]:
+    tags: list[TagTypeDef] = [
         {"Key": "Name", "Value": security_group_name},
         {"Key": "Purpose", "Value": "EC2 security group for " + instance_name},
         {"Key": "Ec2InstanceBuilderTool", "Value": "boto3"},
@@ -752,7 +752,7 @@ def validate_instance_name_and_owner_format(instance_name: str, instance_owner: 
 # for the original code's `if not TERRAFORM_VERSION:` check to notice.
 
 
-def get_terraform_version(refer_to_docs_and_quit: QuitFn, run: Callable[..., Any] | None = None) -> str | None:
+def get_terraform_version(refer_to_docs_and_quit: QuitFn, run: Callable[..., Any] | None = None) -> str:
     import subprocess
 
     if run is None:
@@ -761,12 +761,10 @@ def get_terraform_version(refer_to_docs_and_quit: QuitFn, run: Callable[..., Any
         result = run(["terraform", "-version"], capture_output=True, text=True)
     except FileNotFoundError:
         refer_to_docs_and_quit("Terraform is missing! Please visit: https://www.terraform.io/downloads")
-        return None
     first_line = result.stdout.splitlines()[0] if result.stdout else ""
     parts = first_line.split()
     if len(parts) < 2:
         refer_to_docs_and_quit("Terraform is missing! Please visit: https://www.terraform.io/downloads")
-        return None
     return parts[1]
 
 
@@ -936,7 +934,7 @@ def resolve_placement_group_strategy(
     instance_type: str,
     placement_group_strategy: str,
     instance_type_info: dict[str, Any],
-    ec2_placement_group_check: Callable[[str, str, list[str], str], None],
+    ec2_placement_group_check: Callable[[str, str, list[str], BoolStr], None],
     refer_to_docs_and_quit: QuitFn,
     debug_mode: BoolStr,
     p_val: Callable[[str, str], None],
