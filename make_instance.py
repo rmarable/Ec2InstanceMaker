@@ -969,7 +969,7 @@ def main(argv: list[str] | None = None) -> NoReturn:
     p_val("ebs_root_volume_type", debug_mode)
     p_val("ebs_device_volume_type", debug_mode)
     p_val("request_type", debug_mode)
-    p_val("prod_level", prod_level)
+    p_val("prod_level", debug_mode)
     log_retention_days_check(log_retention_days, debug_mode)
 
     # Raise an error if instance_name or instance_owner contain uppercase
