@@ -29,9 +29,9 @@ python_version = "3.12"
 # mypy still infers most of its ~80 local variables correctly from the
 # real type hints on every function it calls -- so it's included here too,
 # checked as-is with no annotations of its own beyond parse_args()/main()'s
-# own signatures. access_instance.py has no functions at all yet (a flat
-# script), so it stays out until that changes.
-files = ["aux_data.py", "instance_builder.py", "make_instance.py", "manage_instance.py", "template_engine.py"]
+# own signatures. access_instance.py is now fully typed (converted from a
+# flat script into dependency-injected functions, same as manage_instance.py).
+files = ["access_instance.py", "aux_data.py", "instance_builder.py", "make_instance.py", "manage_instance.py", "template_engine.py"]
 # boto3/botocore ARE stubbed (boto3-stubs[ec2,iam,sns,sts,logs] --
 # requirements-test.txt, a dev-only dependency; real importable runtime
 # modules, not stub-only, so EC2Client/IAMClient/etc. are used directly as
