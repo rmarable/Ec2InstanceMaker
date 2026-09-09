@@ -453,14 +453,29 @@ dependency-injected functions gated behind
 `MCPServer`, `requirements-mcp.txt` — an optional dependency, not part of
 `requirements.txt`, since it's only needed to actually run the server, not
 to use the CLI toolkit) so an MCP client like Claude Code can query and
-drive builds without a human running the CLI scripts by hand. Five tools,
-two read-only and two read-write:
+drive builds without a human running the CLI scripts by hand. Eight
+tools, three read-only and five read-write:
 - `list_instances(region)` / `get_instance_status(instance_name,
   region=None)` call `manage_instance.py`'s already-tested
   `list_all_managed_instances()`/`find_managed_instances()`/
   `resolve_region()` directly (no subprocess), and `get_build_record(
   instance_name)` reads `./vars_files/<name>.yml` straight off disk (no
   AWS call at all).
+- `start_instance`/`stop_instance`/`reboot_instance(instance_name,
+  confirm, region=None)` share `_change_power_state()`, which calls
+  `find_managed_instances()` then `manage_instance.check_spot_lifecycle_
+  conflict()` (already tested, already takes `refer_to_docs_and_quit` as
+  a parameter — zero `manage_instance.py` changes needed) before
+  `ec2_client.start_instances()`/`stop_instances()`/`reboot_instances()`
+  — direct `if`/`elif` per action, not a dispatch dict, same reasoning as
+  `manage_instance.py main()`: the three methods' boto3-stubs keyword
+  shapes don't unify under one `Callable` type. `check_spot_lifecycle_
+  conflict()` blocks start/stop against one-time Spot Instances (reboot
+  is unaffected). All three require `confirm=True`, same gate as
+  `build_instance`/`destroy_instance` — lower blast radius than those two
+  (no resource created or destroyed, fully reversible) but kept
+  consistent rather than making some mutating tools safe-by-default and
+  others not.
 - `build_instance(...)` mirrors `make_instance.py`'s `parse_args()` flags
   as typed keyword arguments (`Literal` types for every `choices=[...]`
   flag, so MCP clients get a real enum-constrained JSON schema, not an
@@ -486,9 +501,13 @@ two read-only and two read-write:
 Two things made reusing `manage_instance.py`'s/`make_instance.py`'s
 functions here straightforward: they take `refer_to_docs_and_quit` as an
 injected `Callable[[str], NoReturn]` rather than calling `sys.exit()`
-directly, so `mcp_server.py` swaps in `_mcp_quit()` (raises `RuntimeError`
-instead of exiting — a long-running server process can't have a lookup or
-validation failure kill it), and none of the read-only functions touch
+directly, so `mcp_server.py` swaps in `_mcp_quit()` (raises
+`mcp.server.mcpserver.exceptions.ToolError` instead of exiting — a
+long-running server process can't have a lookup or validation failure
+kill it; `ToolError` specifically, not a plain exception, because this
+mcp SDK version treats any other exception type as an unexpected crash
+and masks its message from the client — confirmed via a real stdio
+smoke test), and none of the read-only functions touch
 `subprocess` at all (only `terminate_via_kill_script()` does, deliberately,
 since the actual teardown logic lives in generated shell, not reusable
 Python). Each read-only `@mcp.tool()`-decorated function is a thin wrapper
@@ -510,7 +529,7 @@ Setup: `pip install -r requirements-mcp.txt` into `.venv` (separate from
 `requirements.txt` — only needed to run the server). `.mcp.json` is
 read automatically by any Claude Code session started from the repo
 root; no registration step. Verify with `/mcp` inside that session —
-`ec2instancemaker` should list all 5 tools. To register it for use
+`ec2instancemaker` should list all 8 tools. To register it for use
 outside this checkout: `claude mcp add ec2instancemaker
 /path/to/Ec2InstanceMaker/.venv/bin/python3
 /path/to/Ec2InstanceMaker/mcp_server.py`. A session started before

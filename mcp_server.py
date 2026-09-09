@@ -26,7 +26,7 @@ from mypy_boto3_ec2.client import EC2Client
 from mypy_boto3_ec2.type_defs import InstanceTypeDef
 
 from make_instance import BoolStr, run_build
-from manage_instance import find_managed_instances, list_all_managed_instances, resolve_region, tag_value, terminate_via_kill_script
+from manage_instance import check_spot_lifecycle_conflict, find_managed_instances, list_all_managed_instances, resolve_region, tag_value, terminate_via_kill_script
 
 mcp = MCPServer("ec2instancemaker")
 
@@ -267,6 +267,69 @@ def build_instance(
     ]
     report = run_build(argv, _mcp_quit, ctrlc_abort_seconds=0)
     return dataclasses.asdict(report)
+
+
+# Function: _change_power_state()
+# Purpose: the actual, unit-testable logic behind start_instance/
+# stop_instance/reboot_instance -- kept separate from the @mcp.tool()-
+# decorated functions for the same reason _list_instances()/
+# _get_instance_status() are. check_spot_lifecycle_conflict() (already
+# tested, already takes refer_to_docs_and_quit as a parameter -- zero
+# manage_instance.py changes needed) blocks start/stop against one-time
+# Spot Instances before any EC2 API call happens. Direct if/elif per
+# action, not a dispatch dict, matching manage_instance.py main()'s own
+# reasoning: start_instances()/stop_instances()/reboot_instances() have
+# different boto3-stubs keyword-argument shapes mypy can't unify under one
+# Callable type.
+
+_PowerAction = Literal["start", "stop", "reboot"]
+
+
+def _change_power_state(ec2_client: EC2Client, instance_name: str, region: str, action: _PowerAction) -> dict[str, Any]:
+    instances = find_managed_instances(ec2_client, instance_name, region, _mcp_quit)
+    check_spot_lifecycle_conflict(instances, action, _mcp_quit)
+    instance_ids = [instance["InstanceId"] for instance in instances]
+    if action == "start":
+        ec2_client.start_instances(InstanceIds=instance_ids)
+    elif action == "stop":
+        ec2_client.stop_instances(InstanceIds=instance_ids)
+    else:
+        ec2_client.reboot_instances(InstanceIds=instance_ids)
+    return {"instance_name": instance_name, "action": action, "instance_ids": instance_ids}
+
+
+@mcp.tool()
+def start_instance(instance_name: str, confirm: bool, region: str | None = None) -> dict[str, Any]:
+    """Start a previously stopped Ec2InstanceMaker-managed instance or
+    family. Blocked against one-time Spot Instances -- AWS does not allow
+    restarting a stopped Spot Instance; use destroy_instance and
+    build_instance instead. Requires confirm=True."""
+    if not confirm:
+        raise ToolError('Set confirm=True to actually start "' + instance_name + '".')
+    resolved_region = resolve_region(instance_name, region, _mcp_quit)
+    return _change_power_state(boto3.client("ec2", region_name=resolved_region), instance_name, resolved_region, "start")
+
+
+@mcp.tool()
+def stop_instance(instance_name: str, confirm: bool, region: str | None = None) -> dict[str, Any]:
+    """Stop a running Ec2InstanceMaker-managed instance or family. Blocked
+    against one-time Spot Instances -- AWS does not allow restarting a
+    stopped Spot Instance; use destroy_instance instead. Requires
+    confirm=True."""
+    if not confirm:
+        raise ToolError('Set confirm=True to actually stop "' + instance_name + '".')
+    resolved_region = resolve_region(instance_name, region, _mcp_quit)
+    return _change_power_state(boto3.client("ec2", region_name=resolved_region), instance_name, resolved_region, "stop")
+
+
+@mcp.tool()
+def reboot_instance(instance_name: str, confirm: bool, region: str | None = None) -> dict[str, Any]:
+    """Reboot an Ec2InstanceMaker-managed instance or family. Safe for
+    Spot Instances, unlike start/stop. Requires confirm=True."""
+    if not confirm:
+        raise ToolError('Set confirm=True to actually reboot "' + instance_name + '".')
+    resolved_region = resolve_region(instance_name, region, _mcp_quit)
+    return _change_power_state(boto3.client("ec2", region_name=resolved_region), instance_name, resolved_region, "reboot")
 
 
 @mcp.tool()

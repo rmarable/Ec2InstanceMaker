@@ -810,6 +810,34 @@ To modify this behavior, the instance(s) must be built by setting `preserve_ami=
 
 This is *not* a recommended best practice and should only be enabled when testing.
 
+## MCP Server
+
+Ec2InstanceMaker ships an MCP server, `mcp_server.py`, exposing 8 tools:
+`list_instances`, `get_instance_status`, `get_build_record`,
+`start_instance`, `stop_instance`, `reboot_instance`, `build_instance`,
+`destroy_instance`.
+
+Install: `pip install -r requirements-mcp.txt` into `.venv`.
+
+Claude Code: the checked-in `.mcp.json` registers the server
+automatically for any session started from the repo root. Verify with
+`/mcp` -- `ec2instancemaker` should list all 8 tools. A session started
+before `.mcp.json` existed, or before `requirements-mcp.txt` was
+installed, won't have it; Claude Code loads MCP servers at startup only.
+
+To register it outside this checkout:
+```
+$ claude mcp add ec2instancemaker /path/to/Ec2InstanceMaker/.venv/bin/python3 /path/to/Ec2InstanceMaker/mcp_server.py
+```
+
+`start_instance`/`stop_instance`/`reboot_instance`/`build_instance`/
+`destroy_instance` all require `confirm=True`. `build_instance`/
+`destroy_instance` create or delete real, billable AWS resources -- same
+blast radius as `make_instance.py`/`kill-instance.<name>.sh`.
+`start_instance`/`stop_instance` are blocked against one-time Spot
+Instances (AWS does not allow restarting one). See CLAUDE.md for
+implementation detail.
+
 ## Troubleshooting
 
 * Python version 3.12 or greater is required by this software.  Additionally,

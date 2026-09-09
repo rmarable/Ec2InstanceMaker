@@ -217,6 +217,88 @@ class TestDestroyInstance:
         assert result == {"instance_name": "dev01", "kill_script_returncode": 0}
 
 
+class TestChangePowerState:
+    def test_start_calls_start_instances(self):
+        client = _ec2_client([ONDEMAND_INSTANCE])
+        result = mcp_server._change_power_state(client, "dev01", "us-east-1", "start")
+        client.start_instances.assert_called_once_with(InstanceIds=["i-ondemand01"])
+        assert result == {"instance_name": "dev01", "action": "start", "instance_ids": ["i-ondemand01"]}
+
+    def test_stop_calls_stop_instances(self):
+        client = _ec2_client([ONDEMAND_INSTANCE])
+        mcp_server._change_power_state(client, "dev01", "us-east-1", "stop")
+        client.stop_instances.assert_called_once_with(InstanceIds=["i-ondemand01"])
+
+    def test_reboot_calls_reboot_instances(self):
+        client = _ec2_client([ONDEMAND_INSTANCE])
+        mcp_server._change_power_state(client, "dev01", "us-east-1", "reboot")
+        client.reboot_instances.assert_called_once_with(InstanceIds=["i-ondemand01"])
+
+    def test_start_against_spot_instance_raises_without_calling_ec2(self):
+        client = _ec2_client([SPOT_INSTANCE])
+        with pytest.raises(ToolError):
+            mcp_server._change_power_state(client, "dev01", "us-east-1", "start")
+        client.start_instances.assert_not_called()
+
+    def test_stop_against_spot_instance_raises_without_calling_ec2(self):
+        client = _ec2_client([SPOT_INSTANCE])
+        with pytest.raises(ToolError):
+            mcp_server._change_power_state(client, "dev01", "us-east-1", "stop")
+        client.stop_instances.assert_not_called()
+
+    def test_reboot_against_spot_instance_is_fine(self):
+        client = _ec2_client([SPOT_INSTANCE])
+        mcp_server._change_power_state(client, "dev01", "us-east-1", "reboot")
+        client.reboot_instances.assert_called_once_with(InstanceIds=["i-spot01"])
+
+    def test_no_matching_instances_raises(self):
+        client = _ec2_client([])
+        with pytest.raises(ToolError):
+            mcp_server._change_power_state(client, "dev01", "us-east-1", "start")
+
+
+class TestPowerStateTools:
+    def test_start_instance_confirm_false_raises_without_aws_call(self):
+        with patch("mcp_server.boto3.client") as mock_boto3_client, pytest.raises(ToolError, match="confirm=True"):
+            mcp_server.start_instance("dev01", confirm=False)
+        mock_boto3_client.assert_not_called()
+
+    def test_stop_instance_confirm_false_raises_without_aws_call(self):
+        with patch("mcp_server.boto3.client") as mock_boto3_client, pytest.raises(ToolError, match="confirm=True"):
+            mcp_server.stop_instance("dev01", confirm=False)
+        mock_boto3_client.assert_not_called()
+
+    def test_reboot_instance_confirm_false_raises_without_aws_call(self):
+        with patch("mcp_server.boto3.client") as mock_boto3_client, pytest.raises(ToolError, match="confirm=True"):
+            mcp_server.reboot_instance("dev01", confirm=False)
+        mock_boto3_client.assert_not_called()
+
+    def test_start_instance_confirm_true_resolves_region_and_constructs_client(self):
+        with (
+            patch("os.path.exists", return_value=True),
+            patch("builtins.open", mock_open(read_data="region: us-east-2\n")),
+            patch("mcp_server.boto3.client") as mock_boto3_client,
+        ):
+            mock_boto3_client.return_value = _ec2_client([ONDEMAND_INSTANCE])
+            result = mcp_server.start_instance("dev01", confirm=True, region=None)
+        mock_boto3_client.assert_called_once_with("ec2", region_name="us-east-2")
+        assert result["action"] == "start"
+
+    def test_stop_instance_confirm_true_uses_explicit_region(self):
+        with patch("mcp_server.boto3.client") as mock_boto3_client:
+            mock_boto3_client.return_value = _ec2_client([ONDEMAND_INSTANCE])
+            result = mcp_server.stop_instance("dev01", confirm=True, region="us-west-2")
+        mock_boto3_client.assert_called_once_with("ec2", region_name="us-west-2")
+        assert result["action"] == "stop"
+
+    def test_reboot_instance_confirm_true_uses_explicit_region(self):
+        with patch("mcp_server.boto3.client") as mock_boto3_client:
+            mock_boto3_client.return_value = _ec2_client([ONDEMAND_INSTANCE])
+            result = mcp_server.reboot_instance("dev01", confirm=True, region="us-west-2")
+        mock_boto3_client.assert_called_once_with("ec2", region_name="us-west-2")
+        assert result["action"] == "reboot"
+
+
 def _mock_aws_clients():
     sns_client = MagicMock()
     sns_client.create_topic.return_value = {"TopicArn": "arn:aws:sns:us-east-2:123456789012:Ec2_Instance_SNS_Alerts_mcpdev01"}
