@@ -9,16 +9,17 @@
 # destinations, and symlinks kill-instance.<name>.sh / build-ami.<name>.sh
 # back into the repo root exactly as the old Ansible playbook did.
 #
-# Two Ansible-only constructs are used by templates/*.j2 and are shimmed
+# One Ansible-only construct is used by templates/*.j2 and is shimmed
 # below so the template files themselves did not need to change:
-#   - lookup('pipe', <shell command>) -- used to stamp a build-date comment
 #   - the `bool` Jinja2 filter -- used (chained with the builtin `lower`
 #     filter) to normalize "true"/"false" strings for Terraform output
+#
+# There used to be a second, lookup('pipe', <shell command>), which shelled
+# out at render time. It is gone -- see the note in _make_environment().
 ################################################################################
 
 import os
 import shlex
-import subprocess
 from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
@@ -77,16 +78,6 @@ def render_postboot_scripts(names: list[str], env: Environment, context: dict[st
         os.chmod(dest_path, 0o755)  # nosec B103 - generated scripts must be executable, matches every other generated script
         filenames.append(filename)
     return filenames
-
-
-def _lookup(plugin: str, arg: str) -> str:
-    # arg is always a literal baked into templates/*.j2 source (e.g. the
-    # 'date "+%B %-d, %Y"' build-date stamp), never runtime/operator input,
-    # and shelling out is this shim's entire purpose (replicating Ansible's
-    # lookup('pipe', ...)).
-    if plugin == "pipe":
-        return subprocess.check_output(arg, shell=True, universal_newlines=True).strip()  # nosec B602
-    raise NotImplementedError(f'lookup plugin "{plugin}" is not supported')
 
 
 def _bool_filter(value: Any) -> bool:
@@ -179,7 +170,19 @@ def _make_environment(local_workingdir: str) -> Environment:
         keep_trailing_newline=True,
         undefined=StrictUndefined,
     )  # nosec B701
-    env.globals["lookup"] = _lookup
+    # NOTE: there is deliberately no `lookup` global here any more. It used
+    # to replicate Ansible's lookup('pipe', ...) via
+    # subprocess.check_output(arg, shell=True), and every one of its six
+    # call sites passed the same literal `date "+%B %-d, %Y"` to stamp a
+    # build date into a comment header. That made arbitrary shell execution
+    # reachable at *render* time -- before Terraform runs and before the
+    # CTRL-C window -- from any Jinja template on the loader path, and the
+    # loader path includes custom_user_scripts/, which is documented as the
+    # user-owned drop-in directory. A template someone shared could run
+    # commands on the operator's workstation just by being rendered. The
+    # date now comes from the DEPLOYMENT_DATE context variable
+    # (time.strftime("%B %-d, %Y"), byte-identical output), so nothing in
+    # the render path shells out at all.
     env.filters["bool"] = _bool_filter
     env.filters["shquote"] = _shquote_filter
     env.filters["tf_shquote"] = _tf_shquote_filter

@@ -19,7 +19,10 @@ scheme that happens to produce a different-but-still-broken result.
 
 import subprocess
 
-from template_engine import _bool_filter, _hcl_escape_filter, _shquote_filter, _tf_shquote_filter
+import jinja2
+import pytest
+
+from template_engine import _bool_filter, _hcl_escape_filter, _make_environment, _shquote_filter, _tf_shquote_filter
 
 
 class TestShquoteFilter:
@@ -169,3 +172,32 @@ class TestHclEscapeFilter:
 
     def test_non_string_input_is_stringified(self):
         assert _hcl_escape_filter(42) == "42"
+
+
+class TestNoShellExecutionInTheRenderPath:
+    """The Jinja environment used to register a `lookup` global backed by
+    subprocess.check_output(arg, shell=True). Its only purpose was stamping
+    a build-date comment, but it made arbitrary shell execution reachable at
+    *render* time -- before Terraform runs and before the CTRL-C window --
+    from any template on the loader path. That path includes
+    custom_user_scripts/, the documented user-owned drop-in directory, so a
+    shared template could run commands on the operator's workstation just by
+    being rendered.
+    """
+
+    def test_lookup_global_is_not_registered(self):
+        assert "lookup" not in _make_environment(".").globals
+
+    def test_a_template_calling_lookup_fails_instead_of_executing(self, tmp_path):
+        env = _make_environment(".")
+        marker = tmp_path / "pwned_render_time"
+        template = env.from_string("{{ lookup('pipe','touch " + str(marker) + "') }}")
+        # 'lookup' is simply not a name in the environment any more.
+        with pytest.raises(jinja2.UndefinedError):
+            template.render()
+        assert not marker.exists()
+
+    def test_template_engine_does_not_import_subprocess(self):
+        import template_engine
+
+        assert not hasattr(template_engine, "subprocess")

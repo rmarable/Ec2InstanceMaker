@@ -275,6 +275,32 @@ their own -- use `ExtendedEc2InstancePolicy.json` for that.
 `GenericEc2InstancePolicy.json` except that it grants Ec2InstanceMaker-spawned
 instances appropriate permissions to spawn children.
 
+### Recovering from a failed build
+
+A build creates real AWS resources across several phases (security group and
+keypair, then IAM role/policy/profile, SNS topic and CloudWatch log group,
+then the instance itself).  If a build fails partway, those earlier
+resources stay behind.
+
+By default nothing is torn down automatically, so you can inspect what
+happened.  Re-running the build is refused while a stale
+`vars_files/<name>.yml` is present, and the error points you at the
+generated teardown script:
+
+```
+$ ./kill-instance.<instance_name>.sh
+$ ./make_instance.py ...          # same command as before
+```
+
+Do **not** just delete the vars_file and rebuild.  A rebuild generates a new
+`instance_serial_number`, so it creates everything under new names and
+overwrites `kill-instance.<name>.sh` — leaving the previous attempt's
+security group, IAM role, SNS topic and log group running, billable, and
+unreachable by any generated script.
+
+Use `--rollback_on_failure=true` to have a failed build tear itself down
+automatically instead.
+
 ### A note on what these policies actually grant
 
 These are convenience templates, not least-privilege policies.  Read the JSON

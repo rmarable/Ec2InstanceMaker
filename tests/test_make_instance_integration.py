@@ -24,6 +24,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import aux_data
 import make_instance
 from instance_builder import AwsClients
 
@@ -236,3 +237,96 @@ class TestMainConcurrencyGuard:
         with pytest.raises(SystemExit):
             make_instance.main(_happy_path_argv("TestInt01"))
         assert not (tmp_path / "active_instances").exists()
+
+
+class TestRollbackOnFailure:
+    """--rollback_on_failure=true tears down whatever a failed build created.
+
+    Without it (the default), a build that dies after phase 2 leaves a
+    security group, keypair, IAM role/policy/profile, SNS topic and
+    CloudWatch log group behind with no automated cleanup at all -- and
+    the duplicate-build guard then refuses the retry.
+    """
+
+    def _setup(self, tmp_path, monkeypatch, failure):
+        monkeypatch.chdir(tmp_path)
+        _symlink_repo_assets(tmp_path)
+        _patch_aws_and_terraform_boundary(monkeypatch)
+        rollback = MagicMock()
+        monkeypatch.setattr(make_instance, "rollback_partial_build", rollback)
+        monkeypatch.setattr(make_instance, "render_and_apply", MagicMock(side_effect=failure))
+        return rollback
+
+    def test_disabled_by_default_no_rollback_attempted(self, tmp_path, monkeypatch):
+        rollback = self._setup(tmp_path, monkeypatch, RuntimeError("terraform blew up"))
+
+        with pytest.raises(RuntimeError):
+            make_instance.run_build(_happy_path_argv(), aux_data.refer_to_docs_and_quit)
+
+        rollback.assert_not_called()
+
+    def test_enabled_rolls_back_then_reraises(self, tmp_path, monkeypatch):
+        rollback = self._setup(tmp_path, monkeypatch, RuntimeError("terraform blew up"))
+
+        with pytest.raises(RuntimeError):
+            make_instance.run_build([*_happy_path_argv(), "--rollback_on_failure=true"], aux_data.refer_to_docs_and_quit)
+
+        rollback.assert_called_once()
+
+    def test_rollback_also_runs_on_sys_exit(self, tmp_path, monkeypatch):
+        # refer_to_docs_and_quit() raises SystemExit, which is a
+        # BaseException, not an Exception -- catching only Exception would
+        # miss every validation failure, i.e. the common case.
+        rollback = self._setup(tmp_path, monkeypatch, SystemExit(1))
+
+        with pytest.raises(SystemExit):
+            make_instance.run_build([*_happy_path_argv(), "--rollback_on_failure=true"], aux_data.refer_to_docs_and_quit)
+
+        rollback.assert_called_once()
+
+
+class TestRollbackPartialBuild:
+    """The rollback itself, as opposed to the wiring tested above."""
+
+    def _settings(self):
+        settings = MagicMock()
+        settings.instance_name = "testint01"
+        settings.enable_cloudwatch_logs = "true"
+        return settings
+
+    def test_prefers_the_generated_kill_script_when_one_exists(self, tmp_path, monkeypatch):
+        # The kill script also runs `terraform destroy`, so it is the more
+        # complete teardown whenever the build got far enough to render it.
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "kill-instance.testint01.sh").write_text("#!/bin/bash\n")
+        run = MagicMock(return_value=MagicMock(returncode=0))
+        monkeypatch.setattr(make_instance.subprocess, "run", run)
+        cleanup = MagicMock()
+        monkeypatch.setattr(make_instance, "cleanup_partial_build", cleanup)
+
+        make_instance.rollback_partial_build(self._settings(), MagicMock(), MagicMock(), MagicMock(), "./instance_data/testint01/")
+
+        assert run.call_args.args[0] == ["bash", "./kill-instance.testint01.sh"]
+        cleanup.assert_not_called()
+
+    def test_falls_back_to_direct_cleanup_before_templates_were_rendered(self, tmp_path, monkeypatch):
+        # A failure inside phase 2 or 3 still leaves a security group,
+        # keypair, IAM role/policy/profile, SNS topic and log group behind,
+        # but no kill script has been generated yet.
+        monkeypatch.chdir(tmp_path)
+        cleanup = MagicMock(return_value=[])
+        monkeypatch.setattr(make_instance, "cleanup_partial_build", cleanup)
+
+        make_instance.rollback_partial_build(self._settings(), MagicMock(), MagicMock(), MagicMock(), "./instance_data/testint01/")
+
+        cleanup.assert_called_once()
+
+    def test_nothing_created_yet_is_a_no_op(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.chdir(tmp_path)
+        cleanup = MagicMock()
+        monkeypatch.setattr(make_instance, "cleanup_partial_build", cleanup)
+
+        make_instance.rollback_partial_build(self._settings(), MagicMock(), None, None, "./instance_data/testint01/")
+
+        cleanup.assert_not_called()
+        assert "nothing to roll back" in capsys.readouterr().out.lower()

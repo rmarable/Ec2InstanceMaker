@@ -14,6 +14,7 @@ import argparse
 import dataclasses
 import functools
 import os
+import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -28,6 +29,7 @@ from aux_data import (
     add_inbound_security_group_rule,
     base_os_instance_check,
     check_custom_ami,
+    cleanup_partial_build,
     ctrlC_Abort,
     ebs_encryption_check,
     ec2_placement_group_check,
@@ -41,6 +43,7 @@ from aux_data import (
     p_val,
     print_TextHeader,
     refer_to_docs_and_quit,
+    report_cleanup_failures,
 )
 from instance_builder import (
     AwsClients,
@@ -208,6 +211,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--preserve_cloudwatch_logs",
         choices=["true", "false"],
         help="Preserve the CloudWatch Logs group when the instance(s) are terminated (default = false)",
+        required=False,
+        default="false",
+    )
+    parser.add_argument(
+        "--rollback_on_failure",
+        choices=["true", "false"],
+        help="Automatically tear down anything this build created if any phase fails (default = false)",
         required=False,
         default="false",
     )
@@ -1041,6 +1051,7 @@ def run_build(argv: list[str] | None, refer_to_docs_and_quit: QuitFn, ctrlc_abor
     ebs_device_volume_size = args.ebs_device_volume_size
     ebs_device_volume_type = args.ebs_device_volume_type
     ec2_keypair = args.ec2_keypair
+    rollback_on_failure = args.rollback_on_failure
     enable_placement_group = args.enable_placement_group
     hyperthreading = args.hyperthreading
     iam_json_policy = args.iam_json_policy
@@ -1122,7 +1133,8 @@ def run_build(argv: list[str] | None, refer_to_docs_and_quit: QuitFn, ctrlc_abor
     # concurrent destroy_instance/terminate_via_kill_script from racing
     # against this build's own instance_data_dir/vars_file state.
     with instance_lock(instance_name, refer_to_docs_and_quit):
-        abort_if_vars_file_exists(vars_file_path, recorded_argv)
+        instance_data_dir = "./instance_data/" + instance_name + "/"
+        abort_if_vars_file_exists(vars_file_path, recorded_argv, instance_name, instance_data_dir)
         if debug_mode == "true":
             print_TextHeader(instance_name, "Validating", 80)
         else:
@@ -1133,7 +1145,6 @@ def run_build(argv: list[str] | None, refer_to_docs_and_quit: QuitFn, ctrlc_abor
         # if they don't already exist, and generate a unique
         # instance_serial_number for the instance(s).
 
-        instance_data_dir = "./instance_data/" + instance_name + "/"
         ensure_state_directories(instance_data_dir)
 
         serial_number_info = generate_instance_serial_number(instance_name)
@@ -1202,52 +1213,174 @@ def run_build(argv: list[str] | None, refer_to_docs_and_quit: QuitFn, ctrlc_abor
         # clean, friendly abort instead of a raw traceback from something
         # further down the line.
 
-        network = resolve_network_and_compute(settings, aws_clients, ebs, spot_buffer, placement_group_strategy, refer_to_docs_and_quit)
+        # Phases 2-5 create real AWS resources, and nothing below rolls them
+        # back on its own. With --rollback_on_failure=true, any failure --
+        # including a refer_to_docs_and_quit()/SystemExit and a CTRL-C
+        # outside the abort window -- tears down whatever had been created
+        # before re-raising. Default is false, so a failed build still
+        # leaves everything in place for inspection, and
+        # abort_if_vars_file_exists() points at the kill script on the next
+        # attempt.
+        vpc: VpcSecurityAndKeypairResolution | None = None
+        iam_sns: IamSnsAndLoggingResolution | None = None
+        try:
+            network = resolve_network_and_compute(settings, aws_clients, ebs, spot_buffer, placement_group_strategy, refer_to_docs_and_quit)
 
-        # Phase 2: VPC/subnet, ssh_allowed_ips, security group, ec2_user home
-        # directory, AMI, keypair.
+            # Phase 2: VPC/subnet, ssh_allowed_ips, security group, ec2_user home
+            # directory, AMI, keypair.
 
-        vpc = resolve_vpc_security_and_keypair(settings, aws_clients, network, vpc_name, security_group, ssh_allowed_ips, custom_ami, ec2_keypair, refer_to_docs_and_quit)
+            vpc = resolve_vpc_security_and_keypair(settings, aws_clients, network, vpc_name, security_group, ssh_allowed_ips, custom_ami, ec2_keypair, refer_to_docs_and_quit)
 
-        # Phase 3: CloudWatch log group, IAM role/policy/profile setup, Turbot
-        # environment variables, SNS topic creation/subscribe/timestamps.
+            # Phase 3: CloudWatch log group, IAM role/policy/profile setup, Turbot
+            # environment variables, SNS topic creation/subscribe/timestamps.
 
-        iam_sns = provision_iam_sns_and_logging(settings, aws_clients, iam_role, iam_json_policy, refer_to_docs_and_quit)
+            iam_sns = provision_iam_sns_and_logging(settings, aws_clients, iam_role, iam_json_policy, refer_to_docs_and_quit)
 
-        options = BuildOptions(
-            preserve_ami=preserve_ami,
-            preserve_cloudwatch_logs=preserve_cloudwatch_logs,
-            hyperthreading=hyperthreading,
-            prod_level=prod_level,
-            project_id=project_id,
-            public_ip=public_ip,
-        )
+            return _run_remaining_phases(
+                settings,
+                aws_clients,
+                network,
+                vpc,
+                iam_sns,
+                ebs,
+                cwd,
+                instance_data_dir_abs,
+                custom_user_prelogin_scripts,
+                custom_user_postboot_scripts,
+                refer_to_docs_and_quit,
+                ctrlc_abort_seconds,
+                preserve_ami,
+                preserve_cloudwatch_logs,
+                hyperthreading,
+                prod_level,
+                project_id,
+                public_ip,
+            )
+        except BaseException:
+            if rollback_on_failure == "true":
+                rollback_partial_build(settings, aws_clients, vpc, iam_sns, instance_data_dir)
+            raise
 
-        # Phase 4: assemble InstanceParameters, print the --debug_mode dump,
-        # write the vars_file, render the Jinja2 templates, run the CTRL-C-abort
-        # safety window, apply Terraform, and tag the security group.
 
-        render_and_apply(
-            settings,
-            aws_clients,
-            network,
-            vpc,
-            iam_sns,
-            options,
-            ebs,
-            cwd,
-            instance_data_dir_abs,
-            custom_user_prelogin_scripts,
-            custom_user_postboot_scripts,
-            refer_to_docs_and_quit,
-            ctrlc_abort_seconds,
-        )
+# Function: rollback_partial_build()
+# Purpose: with --rollback_on_failure=true, tear down whatever a failed
+# build managed to create before the failure.
+#
+# Lives here rather than in instance_builder.py for two reasons: it needs
+# aux_data.cleanup_partial_build(), which instance_builder.py must not
+# import (see resolve_ami() there), and keeping it in make_instance.py's
+# own namespace means tests can monkeypatch it the same way they already
+# monkeypatch the phase functions.
+#
+# vpc and iam_sns are None when the build died before that phase returned,
+# which is exactly the case this has to handle: a failure inside phase 2
+# still leaves a security group and a keypair behind. When the build got
+# far enough to render templates, the generated kill script is the more
+# complete teardown (it also runs `terraform destroy`), so prefer it.
 
-        # Phase 5: post-apply console guidance, Windows password table if
-        # applicable, and the build-completion SNS notification. Terminal --
-        # every path through run_build() ends here.
 
-        return report_and_notify(settings, aws_clients, network, vpc, iam_sns, refer_to_docs_and_quit)
+def rollback_partial_build(
+    settings: BuildSettings,
+    aws_clients: AwsClients,
+    vpc: VpcSecurityAndKeypairResolution | None,
+    iam_sns: IamSnsAndLoggingResolution | None,
+    instance_data_dir: str,
+) -> None:
+    print("")
+    print("  ROLLBACK  ".center(80, "*"))
+    print("--rollback_on_failure=true: tearing down what this build created...")
+    print("")
+    kill_script = "./kill-instance." + settings.instance_name + ".sh"
+    if os.path.isfile(kill_script):
+        print("Running " + kill_script + " ...")
+        result = subprocess.run(["bash", kill_script], check=False)  # nosec B603 B607
+        if result.returncode == 0:
+            print("Rollback complete.")
+        else:
+            print("*** " + kill_script + " exited " + str(result.returncode) + " -- some resources may remain.")
+            print("Re-run it once the underlying problem is resolved.")
+        return
+    if vpc is None and iam_sns is None:
+        print("Nothing had been created yet -- nothing to roll back.")
+        return
+    cleanup_failures = cleanup_partial_build(
+        aws_clients.ec2_client,
+        aws_clients.iam,
+        aws_clients.sns_client,
+        aws_clients.logs_client,
+        vpc.security_group_name if vpc else "",
+        vpc.vpc_security_group_ids if vpc else "",
+        vpc.preserve_security_group if vpc else "true",
+        vpc.ec2_keypair if vpc else "",
+        (instance_data_dir + vpc.ec2_keypair + ".pem") if vpc else "",
+        iam_sns.ec2_iam_instance_role if iam_sns else "",
+        iam_sns.ec2_iam_instance_policy if iam_sns else "",
+        iam_sns.ec2_iam_instance_profile if iam_sns else "",
+        iam_sns.preserve_iam_role if iam_sns else "true",
+        iam_sns.sns_topic_arn if iam_sns else "",
+        iam_sns.cloudwatch_log_group if iam_sns else "",
+        settings.enable_cloudwatch_logs if iam_sns else "false",
+        "false",
+    )
+    report_cleanup_failures(cleanup_failures, settings.instance_name)
+    if not cleanup_failures:
+        print("Rollback complete.")
+
+
+def _run_remaining_phases(
+    settings: BuildSettings,
+    aws_clients: AwsClients,
+    network: NetworkAndComputeResolution,
+    vpc: VpcSecurityAndKeypairResolution,
+    iam_sns: IamSnsAndLoggingResolution,
+    ebs: EbsRequest,
+    cwd: str,
+    instance_data_dir_abs: str,
+    custom_user_prelogin_scripts: list[str],
+    custom_user_postboot_scripts: list[str],
+    refer_to_docs_and_quit: QuitFn,
+    ctrlc_abort_seconds: int | None,
+    preserve_ami: BoolStr,
+    preserve_cloudwatch_logs: BoolStr,
+    hyperthreading: BoolStr,
+    prod_level: Literal["dev", "test", "stage", "prod"],
+    project_id: str,
+    public_ip: BoolStr,
+) -> BuildReport:
+    options = BuildOptions(
+        preserve_ami=preserve_ami,
+        preserve_cloudwatch_logs=preserve_cloudwatch_logs,
+        hyperthreading=hyperthreading,
+        prod_level=prod_level,
+        project_id=project_id,
+        public_ip=public_ip,
+    )
+
+    # Phase 4: assemble InstanceParameters, print the --debug_mode dump,
+    # write the vars_file, render the Jinja2 templates, run the CTRL-C-abort
+    # safety window, apply Terraform, and tag the security group.
+
+    render_and_apply(
+        settings,
+        aws_clients,
+        network,
+        vpc,
+        iam_sns,
+        options,
+        ebs,
+        cwd,
+        instance_data_dir_abs,
+        custom_user_prelogin_scripts,
+        custom_user_postboot_scripts,
+        refer_to_docs_and_quit,
+        ctrlc_abort_seconds,
+    )
+
+    # Phase 5: post-apply console guidance, Windows password table if
+    # applicable, and the build-completion SNS notification. Terminal --
+    # every path through run_build() ends here.
+
+    return report_and_notify(settings, aws_clients, network, vpc, iam_sns, refer_to_docs_and_quit)
 
 
 def main(argv: list[str] | None = None) -> NoReturn:

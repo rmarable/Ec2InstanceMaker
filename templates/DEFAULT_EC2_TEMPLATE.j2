@@ -3,7 +3,7 @@
 # Author:	Rodney Marable <rodney.marable@gmail.com>
 # Created On:	June 3, 2019
 # Last Changed:	September 25, 2019
-# Deployed On:	{{ lookup('pipe','date "+%B %-d, %Y"') }}
+# Deployed On:	{{ DEPLOYMENT_DATE }}
 {% if count > 1 %}
 # Purpose:	Terraform template for instance family {{ instance_name }}
 {% else %}

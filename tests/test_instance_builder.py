@@ -1285,17 +1285,52 @@ class TestEnsureStateDirectories:
         instance_builder.ensure_state_directories("./instance_data/dev01/")  # should not raise
 
 
+class TestAbortIfVarsFileExistsGuidance:
+    """The guard used to unconditionally advise `rm <vars_file>` and rerun.
+    That is the most expensive advice in the toolkit: a rerun mints a new
+    instance_serial_number, so it creates a fresh security group, keypair,
+    IAM role/policy/profile, SNS topic and log group under new names, and
+    re-renders kill-instance.<name>.sh over the old one. The previous
+    attempt's resources then exist in AWS with nothing on disk referencing
+    them -- still running, still billable, unreachable by any generated
+    script.
+    """
+
+    def _run(self, tmp_path, monkeypatch, make_kill_script):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "vars_files").mkdir()
+        (tmp_path / "vars_files" / "dev01.yml").write_text("x")
+        if make_kill_script:
+            (tmp_path / "kill-instance.dev01.sh").write_text("#!/bin/bash\n")
+        with pytest.raises(SystemExit):
+            instance_builder.abort_if_vars_file_exists("./vars_files/dev01.yml", ["make_instance.py", "-N", "dev01"], "dev01", "./instance_data/dev01/")
+
+    def test_points_at_the_kill_script_when_one_exists(self, tmp_path, monkeypatch, capsys):
+        self._run(tmp_path, monkeypatch, make_kill_script=True)
+        out = capsys.readouterr().out
+        assert "./kill-instance.dev01.sh" in out
+        assert "Do NOT just delete" in out
+        # The dangerous advice must not be what the operator is told to do.
+        assert "rm ./vars_files/dev01.yml" not in out
+
+    def test_falls_back_to_rm_when_no_teardown_script_was_generated(self, tmp_path, monkeypatch, capsys):
+        self._run(tmp_path, monkeypatch, make_kill_script=False)
+        out = capsys.readouterr().out
+        assert "rm ./vars_files/dev01.yml" in out
+        assert "nothing" in out.lower()
+
+
 class TestAbortIfVarsFileExists:
     def test_no_op_when_file_does_not_exist(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        instance_builder.abort_if_vars_file_exists("./vars_files/dev01.yml", ["make_instance.py"])
+        instance_builder.abort_if_vars_file_exists("./vars_files/dev01.yml", ["make_instance.py"], "dev01", "./instance_data/dev01/")
 
     def test_quits_when_file_exists(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         (tmp_path / "vars_files").mkdir()
         (tmp_path / "vars_files" / "dev01.yml").write_text("existing")
         with pytest.raises(SystemExit):
-            instance_builder.abort_if_vars_file_exists("./vars_files/dev01.yml", ["make_instance.py", "-N", "dev01"])
+            instance_builder.abort_if_vars_file_exists("./vars_files/dev01.yml", ["make_instance.py", "-N", "dev01"], "dev01", "./instance_data/dev01/")
 
 
 class TestInstanceLock:

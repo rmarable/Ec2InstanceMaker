@@ -75,6 +75,14 @@ def resolve_region(instance_name: str, region: str | None, refer_to_docs_and_qui
 # create, even if its Name happens to collide with something else.
 
 
+def _name_belongs_to(instance: InstanceTypeDef, instance_name: str) -> bool:
+    name_tag = next((t["Value"] for t in instance.get("Tags", []) if t["Key"] == "Name"), "")
+    if name_tag == instance_name:
+        return True
+    prefix = instance_name + "-"
+    return name_tag.startswith(prefix) and name_tag[len(prefix) :].isdigit()
+
+
 def find_managed_instances(ec2_client: EC2Client, instance_name: str, region: str, refer_to_docs_and_quit: QuitFn) -> list[InstanceTypeDef]:
     filters: list[FilterTypeDef] = [
         {"Name": "tag:Name", "Values": [instance_name, instance_name + "-*"]},
@@ -86,6 +94,19 @@ def find_managed_instances(ec2_client: EC2Client, instance_name: str, region: st
         instances = [instance for page in pages for reservation in page["Reservations"] for instance in reservation["Instances"]]
     except (ClientError, EndpointConnectionError) as e:
         refer_to_docs_and_quit("AWS API error while looking up " + instance_name + " in " + region + ": " + str(e))
+
+    # The "<name>-*" filter above is needed because family members are
+    # tagged "<name>-${count.index}" -- but EC2's tag filter only does
+    # trailing-wildcard matching, and instance_name legitimately contains
+    # hyphens, so "web" also matches "web-prod-critical" and every member
+    # of *its* family. Both are Ec2InstanceMaker-managed, so the ManagedBy
+    # filter does not separate them either. A stop/terminate aimed at one
+    # instance could therefore hit an unrelated production family.
+    #
+    # Family members are always "<name>-<integer>", so narrowing the
+    # server-side result to exactly that shape (or the bare name) keeps
+    # family support while making an unrelated-name collision impossible.
+    instances = [instance for instance in instances if _name_belongs_to(instance, instance_name)]
 
     if not instances:
         refer_to_docs_and_quit('No Ec2InstanceMaker-managed instance(s) named "' + instance_name + '" were found in ' + region + "!")

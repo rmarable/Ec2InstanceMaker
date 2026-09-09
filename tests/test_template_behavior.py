@@ -64,6 +64,7 @@ BASE_CONTEXT = {
     "project_id": "UNDEFINED",
     "preserve_iam_role": "false",
     "preserve_security_group": "false",
+    "DEPLOYMENT_DATE": "September 9, 2026",
     "security_group_name": "ec2instancemaker_sg_12345_us-east-1",
     "public_ip": "true",
     "region": "us-east-1",

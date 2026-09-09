@@ -95,8 +95,10 @@ class TestFindManagedInstances:
         quit_fn.assert_not_called()
 
     def test_paginates_across_multiple_pages(self):
-        page_one = [{"InstanceId": "i-abc123"}]
-        page_two = [{"InstanceId": "i-def456"}]
+        # Real describe_instances results always carry the Name tag, since
+        # the tag:Name filter is what selected them.
+        page_one = [{"InstanceId": "i-abc123", "Tags": [{"Key": "Name", "Value": "dev01-0"}]}]
+        page_two = [{"InstanceId": "i-def456", "Tags": [{"Key": "Name", "Value": "dev01-1"}]}]
         client = _ec2_client(None, pages=[{"Reservations": [{"Instances": page_one}]}, {"Reservations": [{"Instances": page_two}]}])
         quit_fn = _quitting_mock()
 
@@ -104,6 +106,36 @@ class TestFindManagedInstances:
 
         assert result == page_one + page_two
         quit_fn.assert_not_called()
+
+    def test_an_unrelated_family_sharing_the_name_prefix_is_excluded(self):
+        # EC2's tag filter only does trailing-wildcard matching, and
+        # instance_name legitimately contains hyphens, so the "<name>-*"
+        # filter needed for family members ("<name>-${count.index}") also
+        # matches a separately-built "web-prod-critical". Both are
+        # Ec2InstanceMaker-managed, so the ManagedBy filter does not
+        # separate them -- a stop or terminate aimed at "web" could take
+        # out an unrelated production family.
+        returned = [
+            {"InstanceId": "i-self", "Tags": [{"Key": "Name", "Value": "web"}]},
+            {"InstanceId": "i-family", "Tags": [{"Key": "Name", "Value": "web-1"}]},
+            {"InstanceId": "i-unrelated", "Tags": [{"Key": "Name", "Value": "web-prod-critical"}]},
+            {"InstanceId": "i-unrelated2", "Tags": [{"Key": "Name", "Value": "web-prod-critical-0"}]},
+        ]
+        client = _ec2_client(returned)
+        quit_fn = _quitting_mock()
+
+        result = manage_instance.find_managed_instances(client, "web", "us-east-1", quit_fn)
+
+        assert [i["InstanceId"] for i in result] == ["i-self", "i-family"]
+        quit_fn.assert_not_called()
+
+    def test_only_prefix_collisions_are_dropped_not_the_whole_family(self):
+        returned = [{"InstanceId": f"i-{n}", "Tags": [{"Key": "Name", "Value": f"dev01-{n}"}]} for n in range(3)]
+        client = _ec2_client(returned)
+
+        result = manage_instance.find_managed_instances(client, "dev01", "us-east-1", _quitting_mock())
+
+        assert len(result) == 3
 
     def test_no_matches_quits(self):
         client = _ec2_client([])

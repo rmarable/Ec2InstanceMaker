@@ -198,6 +198,121 @@ def check_custom_ami(ec2client: EC2Client, custom_ami: str, aws_account_id: str,
 # roles, policies, and instance profiles
 
 
+def cleanup_partial_build(
+    ec2client: EC2Client,
+    iam: IAMClient,
+    sns_client: SNSClient,
+    logs_client: CloudWatchLogsClient,
+    security_group_name: str,
+    vpc_security_group_ids: str,
+    preserve_security_group: BoolStr,
+    ec2_keypair: str,
+    secret_key_file: str,
+    iam_instance_role: str,
+    iam_instance_policy: str,
+    iam_instance_profile: str,
+    preserve_iam_role: BoolStr,
+    sns_topic_arn: str,
+    cloudwatch_log_group: str,
+    enable_cloudwatch_logs: BoolStr,
+    preserve_cloudwatch_logs: BoolStr,
+) -> list[str]:
+    """Best-effort deletion of everything a partial build created, returning
+    the descriptions of anything that could NOT be deleted.
+
+    Every step is attempted even if an earlier one fails, and every failure
+    is reported. This was previously inline in ctrlC_Abort() and caught
+    ClientError but printed something only when the code was the "already
+    gone" one -- any other code (AccessDenied, DeleteConflict, Throttling,
+    DependencyViolation) fell off the end of the handler with no message and
+    no re-raise, so an abort claimed to have cleaned up while the security
+    group, keypair, role, policy and instance profile were all still there.
+
+    It is shared by the CTRL-C abort window and by make_instance.py's
+    --rollback_on_failure path, which needs exactly the same cleanup for a
+    build that died before any kill script was rendered.
+    """
+    import os
+
+    from botocore.exceptions import ClientError
+
+    cleanup_failures: list[str] = []
+
+    def attempt(action: Callable[[], object], description: str, already_gone_codes: set[str]) -> None:
+        try:
+            action()
+            print("Deleted: " + description)
+        except ClientError as e:
+            error_code = e.response["Error"]["Code"]
+            if error_code in already_gone_codes:
+                print("Nothing to delete: " + description)
+            else:
+                print("*** FAILED to delete " + description + " -- " + error_code)
+                cleanup_failures.append(description)
+
+    if preserve_iam_role == "true":
+        print("Preserved EC2 IAM instance policy: " + iam_instance_policy)
+        print("Preserved EC2 IAM instance profile: " + iam_instance_profile)
+        print("Preserved EC2 IAM instance role: " + iam_instance_role)
+    else:
+        # Ordering matters: IAM refuses to delete a role that still has an
+        # inline policy or is still referenced by an instance profile.
+        iam_cleanup_steps: list[tuple[Callable[[], object], str]] = [
+            (
+                lambda: iam.remove_role_from_instance_profile(InstanceProfileName=iam_instance_profile, RoleName=iam_instance_role),
+                "IAM role " + iam_instance_role + " from instance profile " + iam_instance_profile,
+            ),
+            (lambda: iam.delete_instance_profile(InstanceProfileName=iam_instance_profile), "IAM EC2 instance profile " + iam_instance_profile),
+            (lambda: iam.delete_role_policy(RoleName=iam_instance_role, PolicyName=iam_instance_policy), "IAM EC2 policy " + iam_instance_policy),
+            (lambda: iam.delete_role(RoleName=iam_instance_role), "IAM EC2 role " + iam_instance_role),
+        ]
+        for action, description in iam_cleanup_steps:
+            attempt(action, description, {"NoSuchEntity"})
+    print("")
+    if preserve_security_group == "true":
+        print("Preserved pre-existing EC2 security group: " + security_group_name)
+    else:
+        attempt(
+            lambda: ec2client.delete_security_group(GroupId=vpc_security_group_ids),
+            "EC2 security group " + security_group_name,
+            {"InvalidGroup.NotFound"},
+        )
+    attempt(lambda: ec2client.delete_key_pair(KeyName=ec2_keypair), "EC2 keypair " + ec2_keypair, {"InvalidKeyPair.NotFound"})
+    if os.path.exists(secret_key_file):
+        os.remove(secret_key_file)
+        print("Removed: " + secret_key_file)
+    # The SNS topic and the CloudWatch Logs group are both created in the
+    # phase immediately before the abort window, and neither was cleaned up
+    # here at all -- so every aborted build leaked an SNS topic (plus a
+    # pending email subscription confirmation) and a retention-configured
+    # log group.
+    if sns_topic_arn:
+        attempt(lambda: sns_client.delete_topic(TopicArn=sns_topic_arn), "SNS topic " + sns_topic_arn, {"NotFound", "ResourceNotFoundException"})
+    if enable_cloudwatch_logs == "true":
+        if preserve_cloudwatch_logs == "false":
+            attempt(
+                lambda: logs_client.delete_log_group(logGroupName=cloudwatch_log_group),
+                "CloudWatch Logs group " + cloudwatch_log_group,
+                {"ResourceNotFoundException"},
+            )
+        else:
+            print("Preserved CloudWatch Logs group: " + cloudwatch_log_group)
+    return cleanup_failures
+
+
+def report_cleanup_failures(cleanup_failures: list[str], instance_name: str) -> None:
+    if not cleanup_failures:
+        return
+    print("")
+    print("*** WARNING ***")
+    print(str(len(cleanup_failures)) + " resource(s) could NOT be deleted:")
+    for description in cleanup_failures:
+        print("\t" + description)
+    print("")
+    print("These may still exist in AWS and may still be incurring charges.")
+    print("Run ./kill-instance." + instance_name + ".sh to retry, or delete them by hand.")
+
+
 def ctrlC_Abort(
     sleep_time: int,
     line_length: int,
@@ -226,8 +341,6 @@ def ctrlC_Abort(
     import sys
     import time
 
-    from botocore.exceptions import ClientError
-
     secret_key_file = instance_data_dir + ec2_keypair + ".pem"
     print("")
     print("".center(line_length, "#"))
@@ -238,90 +351,31 @@ def ctrlC_Abort(
     try:
         time.sleep(sleep_time)
     except KeyboardInterrupt:
-        # Every deletion below is attempted even if an earlier one fails,
-        # and every failure is *reported*. This previously caught
-        # ClientError and printed something only when the error code was
-        # the "already gone" one -- any other code (AccessDenied,
-        # DeleteConflict, Throttling, DependencyViolation) fell off the
-        # end of the handler silently, so the abort printed "Aborting..."
-        # and exited 1 while the security group, keypair, role, policy and
-        # instance profile were all still there. An abort that half-works
-        # and says nothing is worse than one that fails loudly.
-        cleanup_failures: list[str] = []
-
-        def attempt(action: Callable[[], object], description: str, already_gone_codes: set[str]) -> None:
-            try:
-                action()
-                print("Deleted: " + description)
-            except ClientError as e:
-                error_code = e.response["Error"]["Code"]
-                if error_code in already_gone_codes:
-                    print("Nothing to delete: " + description)
-                else:
-                    print("*** FAILED to delete " + description + " -- " + error_code)
-                    cleanup_failures.append(description)
-
         for state_file in (instance_serial_number_file, vars_file_path):
             if os.path.exists(state_file):
                 os.remove(state_file)
                 print("Removed: " + state_file)
         print("")
-        if preserve_iam_role == "true":
-            print("Preserved EC2 IAM instance policy: " + iam_instance_policy)
-            print("Preserved EC2 IAM instance profile: " + iam_instance_profile)
-            print("Preserved EC2 IAM instance role: " + iam_instance_role)
-        else:
-            # Ordering matters: IAM refuses to delete a role that still has
-            # an inline policy or is still referenced by an instance profile.
-            iam_cleanup_steps: list[tuple[Callable[[], object], str]] = [
-                (
-                    lambda: iam.remove_role_from_instance_profile(InstanceProfileName=iam_instance_profile, RoleName=iam_instance_role),
-                    "IAM role " + iam_instance_role + " from instance profile " + iam_instance_profile,
-                ),
-                (lambda: iam.delete_instance_profile(InstanceProfileName=iam_instance_profile), "IAM EC2 instance profile " + iam_instance_profile),
-                (lambda: iam.delete_role_policy(RoleName=iam_instance_role, PolicyName=iam_instance_policy), "IAM EC2 policy " + iam_instance_policy),
-                (lambda: iam.delete_role(RoleName=iam_instance_role), "IAM EC2 role " + iam_instance_role),
-            ]
-            for action, description in iam_cleanup_steps:
-                attempt(action, description, {"NoSuchEntity"})
-        print("")
-        if preserve_security_group == "true":
-            print("Preserved pre-existing EC2 security group: " + security_group_name)
-        else:
-            attempt(
-                lambda: ec2client.delete_security_group(GroupId=vpc_security_group_ids),
-                "EC2 security group " + security_group_name,
-                {"InvalidGroup.NotFound"},
-            )
-        attempt(lambda: ec2client.delete_key_pair(KeyName=ec2_keypair), "EC2 keypair " + ec2_keypair, {"InvalidKeyPair.NotFound"})
-        if os.path.exists(secret_key_file):
-            os.remove(secret_key_file)
-            print("Removed: " + secret_key_file)
-        # The SNS topic and the CloudWatch Logs group are both created in
-        # the phase immediately before this abort window, and neither was
-        # cleaned up here at all -- so every aborted build left an SNS
-        # topic (plus a pending email subscription confirmation) and a
-        # retention-configured log group behind.
-        if sns_topic_arn:
-            attempt(lambda: sns_client.delete_topic(TopicArn=sns_topic_arn), "SNS topic " + sns_topic_arn, {"NotFound", "ResourceNotFoundException"})
-        if enable_cloudwatch_logs == "true":
-            if preserve_cloudwatch_logs == "false":
-                attempt(
-                    lambda: logs_client.delete_log_group(logGroupName=cloudwatch_log_group),
-                    "CloudWatch Logs group " + cloudwatch_log_group,
-                    {"ResourceNotFoundException"},
-                )
-            else:
-                print("Preserved CloudWatch Logs group: " + cloudwatch_log_group)
-        if cleanup_failures:
-            print("")
-            print("*** WARNING ***")
-            print(str(len(cleanup_failures)) + " resource(s) could NOT be deleted:")
-            for description in cleanup_failures:
-                print("\t" + description)
-            print("")
-            print("These may still exist in AWS and may still be incurring charges.")
-            print("Run ./kill-instance." + instance_name + ".sh to retry, or delete them by hand.")
+        cleanup_failures = cleanup_partial_build(
+            ec2client,
+            iam,
+            sns_client,
+            logs_client,
+            security_group_name,
+            vpc_security_group_ids,
+            preserve_security_group,
+            ec2_keypair,
+            secret_key_file,
+            iam_instance_role,
+            iam_instance_policy,
+            iam_instance_profile,
+            preserve_iam_role,
+            sns_topic_arn,
+            cloudwatch_log_group,
+            enable_cloudwatch_logs,
+            preserve_cloudwatch_logs,
+        )
+        report_cleanup_failures(cleanup_failures, instance_name)
         print("")
         print("Aborting...")
         sys.exit(1)

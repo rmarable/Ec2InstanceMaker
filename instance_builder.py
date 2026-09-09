@@ -1066,17 +1066,40 @@ def instance_lock(instance_name: str, refer_to_docs_and_quit: QuitFn) -> Iterato
 # predates that helper and shouldn't be wrapped in its generic boilerplate.
 
 
-def abort_if_vars_file_exists(vars_file_path: str, argv: list[str]) -> None:
+def abort_if_vars_file_exists(vars_file_path: str, argv: list[str], instance_name: str, instance_data_dir: str) -> None:
     if not os.path.isfile(vars_file_path):
         return
+    kill_script = "./kill-instance." + instance_name + ".sh"
     print("")
     print("  WARNING  ".center(80, "*"))
     print(("  Found an existing " + vars_file_path + " ").center(80, "-"))
     print("")
-    print("Please delete this file and retry the build:")
-    print("")
-    print("rm " + vars_file_path)
-    print(" ".join(argv))
+    # This used to unconditionally advise "rm <vars_file>" and rerun, which
+    # is the single most expensive piece of advice in the toolkit: a rerun
+    # mints a *new* instance_serial_number, so it creates a new security
+    # group, keypair, IAM role/policy/profile, SNS topic and log group under
+    # new names -- and re-renders kill-instance.<name>.sh over the old one,
+    # which referenced the previous attempt's. Those earlier resources then
+    # exist in AWS with nothing on disk referencing them: no generated
+    # script can find them, and they keep costing money.
+    if os.path.exists(kill_script) or os.path.isdir(instance_data_dir):
+        print('A previous build of "' + instance_name + '" left resources behind.')
+        print("Tear those down first, then retry:")
+        print("")
+        print("\t" + kill_script)
+        print("\t" + " ".join(argv))
+        print("")
+        print("Do NOT just delete " + vars_file_path + " and rebuild. The rebuild")
+        print("generates a new instance_serial_number and overwrites " + kill_script + ",")
+        print("which leaves the previous attempt's security group, IAM role, SNS topic")
+        print("and CloudWatch log group with nothing tracking them -- still running,")
+        print("still billable, and no longer reachable by any generated script.")
+    else:
+        print("No teardown script was generated for this build, so there is nothing")
+        print("to tear down. Remove the stale vars_file and retry:")
+        print("")
+        print("\trm " + vars_file_path)
+        print("\t" + " ".join(argv))
     print("")
     print("Aborting...")
     sys.exit(1)
