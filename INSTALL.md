@@ -76,13 +76,13 @@ $ pip install -r requirements.txt
 $ cd ~
 ```
 
-* (Optional) MCP server (`mcp_server.py`) support: `pip install -r requirements-mcp.txt`. Setup and usage: CLAUDE.md.
+* (Optional) MCP server (`mcp_server.py`) support: `pip install -r requirements-mcp.txt`. Setup and usage: see "MCP Server" in README.md.
 
 * You are now ready to build EC2 instances on OSX.  Please consult README.md and EXAMPLE_USE_CASES.md for more detailed information on leveraging this toolkit.
 
 ## Creating an Installation Environment on Linux (local or EC2)
 
-The linux-ec2-setup.sh script can be used to set up the Ec2InstanceMaker operating environment on EC2 instances, virtual machines, or physical servers running CentOS, Amazon Linux, or Ubuntu.  Instances created with Ec2InstanceMaker can also be used to spawn additional children.
+The linux-ec2-setup.sh script can be used to set up the Ec2InstanceMaker operating environment on EC2 instances, virtual machines, or physical servers running any RHEL-family (RHEL, Rocky, AlmaLinux, Amazon Linux) or Debian-family (Ubuntu, Debian) Linux distribution -- it detects the family via /etc/os-release's ID_LIKE field.  Instances created with Ec2InstanceMaker can also be used to spawn additional children.
 
 After building a fresh EC2 instance, clone the repository to a local $SRC_DIR run the installer:
 ```
@@ -126,19 +126,19 @@ $ ./make_instance.py -A us-east-1c -N dev01 -O rmarable -E rodney.marable@gmail.
 
 ### Example: Building a Single Windows Instance
 
-This example builds a single t2a.micro development instance called "dev001"
+This example builds a single t3a.micro development instance called "dev001"
 running Windows Server 2019 with a 30 GB gp2 EBS root volume using the default
 IAM role which grants "general" S3 and EC2 permissions in us-west-2b.  The
 instance is owned by the computational chemistry team ("compchem") and is not
 used by any active project:
 ```
-$ ./make_instance.py -A us-west-2b -N dev001 -O rmarable -E rodney.marable@gmail.com -B windows2019 --instance_owner_department=compchem
+$ ./make_instance.py -A us-west-2b -N dev001 -O rmarable -E rodney.marable@gmail.com -B windows2019 -T t3a.micro --instance_owner_department=compchem
 ```
 
 Again, building this same instance using Spot (which can achieve up to 90%
 savings over ondemand pricing):
 ```
-$ ./make_instance.py -A us-west-2b -N dev001 -O rmarable -E rodney.marable@gmail.com -B windows2019 --instance_owner_department=compchem --request_type=spot
+$ ./make_instance.py -A us-west-2b -N dev001 -O rmarable -E rodney.marable@gmail.com -B windows2019 -T t3a.micro --instance_owner_department=compchem --request_type=spot
 ```
 
 ### Example: Building Multiple Spot Instances
@@ -147,12 +147,12 @@ This example builds a family of five t3.micro test instances called "fam01"
 running Ubuntu 24.04 LTS, each with a 10 GB gp2 EBS root volume using the
 default IAM role in eu-central-1a.  These instances are owned by the HPC team:
 ```
-$ ./make_instance.py -A eu-central-1a -N fam01 -B ubuntu2404 -O rmarable -E rodney.marable@gmail.com --ebs_root_volume_size=10 --instance_owner_department=hpc --request_type=spot --instance_type=t3.micro -C 5
+$ ./make_instance.py -A eu-central-1a -N fam01 -B ubuntu2404 -O rmarable -E rodney.marable@gmail.com --ebs_root_volume_size=10 --instance_owner_department=hpc --instance_type=t3.micro -C 5
 ```
 
 Building the same instance family using Spot:
 ```
-$ ./make_instance.py -A eu-central-1a -N fam01 -B ubuntu2404 -O rmarable -E rodney.marable@gmail.com --ebs_root_volume_size=10 --instance_owner_department=hpc --request_type=spot --instance_type=t3.micro -C 5 --request_type=spot
+$ ./make_instance.py -A eu-central-1a -N fam01 -B ubuntu2404 -O rmarable -E rodney.marable@gmail.com --ebs_root_volume_size=10 --instance_owner_department=hpc --request_type=spot --instance_type=t3.micro -C 5
 ```
 
 Building this instance family using Spot and Windows:
