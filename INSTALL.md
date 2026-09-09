@@ -76,14 +76,7 @@ $ pip install -r requirements.txt
 $ cd ~
 ```
 
-* (Optional) If you want to drive Ec2InstanceMaker through Claude Code or
-another MCP client instead of (or alongside) the command line, install the
-MCP server's dependency too -- see "MCP Server" in README.md:
-```
-$ cd ~/src/Ec2InstanceMaker
-$ pip install -r requirements-mcp.txt
-$ cd ~
-```
+* (Optional) MCP server (`mcp_server.py`) support: `pip install -r requirements-mcp.txt`. Setup and usage: CLAUDE.md.
 
 * You are now ready to build EC2 instances on OSX.  Please consult README.md and EXAMPLE_USE_CASES.md for more detailed information on leveraging this toolkit.
 

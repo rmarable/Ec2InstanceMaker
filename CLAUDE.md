@@ -506,6 +506,18 @@ boundary mocked. Registered for Claude Code via the project-scoped
 by `tests/test_mcp_server.py`; brought into `pyproject.toml`'s
 `[tool.mypy]` scope like every other top-level script.
 
+Setup: `pip install -r requirements-mcp.txt` into `.venv` (separate from
+`requirements.txt` — only needed to run the server). `.mcp.json` is
+read automatically by any Claude Code session started from the repo
+root; no registration step. Verify with `/mcp` inside that session —
+`ec2instancemaker` should list all 5 tools. To register it for use
+outside this checkout: `claude mcp add ec2instancemaker
+/path/to/Ec2InstanceMaker/.venv/bin/python3
+/path/to/Ec2InstanceMaker/mcp_server.py`. A session started before
+`.mcp.json` existed, or before `requirements-mcp.txt` was installed,
+will not have the server — Claude Code loads MCP servers at startup
+only.
+
 ## Working conventions specific to this repo
 
 - **Be pythonic.** When it comes to Python, be like Jake The Snake: keep
