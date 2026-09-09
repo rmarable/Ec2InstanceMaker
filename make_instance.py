@@ -15,8 +15,9 @@ import dataclasses
 import functools
 import os
 import sys
+from dataclasses import dataclass
 from math import pi
-from typing import NoReturn
+from typing import Literal, NoReturn
 
 import boto3
 
@@ -41,6 +42,7 @@ from aux_data import (
     refer_to_docs_and_quit,
 )
 from instance_builder import (
+    AwsClients,
     InstanceParameters,
     abort_if_vars_file_exists,
     apply_terraform,
@@ -76,6 +78,12 @@ from instance_builder import (
     write_vars_file,
 )
 from template_engine import render_instance_templates
+
+# Type alias used throughout this module's signatures -- same duplicated
+# convention as instance_builder.py/aux_data.py/manage_instance.py/
+# access_instance.py (see the comment there for why it's not shared via
+# import).
+BoolStr = Literal["true", "false"]
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -259,6 +267,647 @@ def print_debug_parameters(params: InstanceParameters) -> None:
     print("TERRAFORM_VERSION = " + params.TERRAFORM_VERSION)
 
 
+################################################################################
+# main()'s build flow, phased.
+#
+# main() used to be one ~650-line linear sequence threading ~50 local
+# variables through every step. Every AWS/Terraform-touching function it
+# calls already lives in instance_builder.py/aux_data.py, fully typed and
+# independently tested (tests/test_instance_builder.py) -- what was left to
+# clean up here was main()'s own orchestration: too many independent
+# variables in play at once to read as a sequence of named steps.
+#
+# The 5 phase functions below stay in make_instance.py itself (NOT
+# instance_builder.py) -- this is required, not a style choice:
+# tests/test_make_instance_integration.py monkeypatches individual
+# AWS-touching functions via monkeypatch.setattr(make_instance,
+# "resolve_vpc_and_subnet", ...), which only intercepts calls made via
+# attribute lookup on this module's own namespace. A phase function calling
+# resolve_vpc_and_subnet(...) from inside instance_builder.py would bypass
+# that patched attribute entirely and silently stop being covered by the
+# existing tests.
+#
+# BuildSettings bundles every value that's established once from argparse
+# (or derived once, early) and never reassigned afterward -- the "who,
+# where, what" of one build, threaded unchanged through all 5 phases.
+# EbsRequest/BuildOptions bundle smaller, related CLI-input clusters the
+# same way. Each phase's own *_Resolution dataclass carries only the new
+# values that phase actually resolves via AWS calls (or leaves reassigned,
+# e.g. placement_group_strategy) -- passed whole to the next phase that
+# needs them, instead of unpacked field-by-field.
+################################################################################
+
+
+@dataclass
+class BuildSettings:
+    instance_name: str
+    instance_serial_number: str
+    instance_serial_number_file: str
+    instance_data_dir: str
+    vars_file_path: str
+    region: str
+    az: str
+    debug_mode: BoolStr
+    instance_owner: str
+    instance_owner_email: str
+    instance_owner_department: str
+    instance_type: str
+    base_os: str
+    count: int
+    request_type: Literal["ondemand", "spot"]
+    enable_placement_group: BoolStr
+    enable_cloudwatch_logs: BoolStr
+    log_retention_days: int
+    iam_name_prefix: str
+    turbot_account: str
+    DEPLOYMENT_DATE: str
+    DEPLOYMENT_DATE_TAG: str
+    TERRAFORM_VERSION: str
+
+
+@dataclass
+class EbsRequest:
+    encryption: BoolStr
+    optimized: BoolStr
+    root_volume_size: int
+    root_volume_type: str
+    root_volume_iops: int
+    device_volume_size: int
+    device_volume_type: str
+    device_volume_iops: int
+
+
+@dataclass
+class BuildOptions:
+    preserve_ami: BoolStr
+    preserve_cloudwatch_logs: BoolStr
+    hyperthreading: BoolStr
+    prod_level: Literal["dev", "test", "stage", "prod"]
+    project_id: str
+    public_ip: BoolStr
+
+
+@dataclass
+class NetworkAndComputeResolution:
+    architecture: str
+    is_windows: bool
+    package_manager: str | None
+    awscli_preinstalled: bool | None
+    ec2_user: str
+    ebs_optimized: BoolStr
+    ebs_root_volume_size: int
+    ebs_device_volume_size: int
+    spot_price: str | float
+    placement_group_strategy: str
+
+
+@dataclass
+class VpcSecurityAndKeypairResolution:
+    aws_account_id: str
+    vpc_id: str
+    vpc_name: str
+    subnet_id: str
+    ssh_allowed_ips: str
+    security_group_name: str
+    vpc_security_group_ids: str
+    ec2_user_home: str
+    aws_ami: str
+    ec2_keypair: str
+
+
+@dataclass
+class IamSnsAndLoggingResolution:
+    cloudwatch_log_group: str
+    ec2_iam_instance_role: str
+    ec2_iam_instance_policy: str
+    ec2_iam_instance_profile: str
+    preserve_iam_role: BoolStr
+    sns_topic_arn: str
+    sns_datestamp: str
+    sns_timestamp: str
+
+
+# Function: resolve_network_and_compute()
+# Purpose: phase 1 -- AZ/region validation, instance_type_info, base_os
+# checks/family, EBS optimize/encrypt/resize, spot pricing, placement
+# group strategy.
+
+
+def resolve_network_and_compute(
+    settings: BuildSettings,
+    aws_clients: AwsClients,
+    ebs: EbsRequest,
+    spot_buffer: float,
+    placement_group_strategy: str,
+) -> NetworkAndComputeResolution:
+    ec2_client = aws_clients.ec2_client
+    debug_mode = settings.debug_mode
+
+    validate_az_and_region(ec2_client, settings.az, illegal_az_msg)
+    p_val("region", debug_mode)
+    p_val("az", debug_mode)
+
+    instance_type_info = get_instance_type_info(ec2_client, settings.instance_type)
+    if instance_type_info is None:
+        p_fail(settings.instance_type, "instance_type", "missing_element")
+    architecture = instance_type_info["architecture"]
+    print("")
+    print("Selected EC2 instance type: " + settings.instance_type + " (" + architecture + ")")
+
+    print("")
+    print("Selected base operating system: " + settings.base_os)
+    base_os_instance_check(settings.base_os, settings.instance_type, architecture, debug_mode)
+
+    base_os_family = get_base_os_family(settings.base_os)
+    is_windows = base_os_family["is_windows"]
+    package_manager = base_os_family["package_manager"]
+    awscli_preinstalled = base_os_family["awscli_preinstalled"]
+    ec2_user = base_os_family["ec2_user"]
+
+    ebs_optimized = resolve_ebs_optimized_support(ebs.optimized, settings.instance_type, instance_type_info["ebs_optimized_support"], settings.instance_name)
+    p_val("ebs_optimized", debug_mode)
+
+    if ebs.encryption == "true":
+        ebs_encryption_check(settings.instance_type, instance_type_info["ebs_encryption_support"], settings.instance_name, debug_mode)
+
+    ebs_root_volume_size, ebs_device_volume_size = validate_and_resize_ebs_volumes(
+        ebs.root_volume_size,
+        ebs.device_volume_size,
+        ebs.root_volume_type,
+        ebs.device_volume_type,
+        ebs.root_volume_iops,
+        ebs.device_volume_iops,
+        is_windows,
+        refer_to_docs_and_quit,
+    )
+
+    # The buffered spot_buffer this returns alongside spot_price was never
+    # consumed again after this point in the original code either (it's not
+    # an InstanceParameters field) -- discarded here too, not a behavior
+    # change.
+    spot_price, _ = resolve_request_type_pricing(
+        settings.request_type, ec2_client, settings.instance_type, is_windows, settings.az, spot_buffer, debug_mode, fetch_spot_price_raw, compute_buffered_spot_price, p_val
+    )
+    print("")
+
+    placement_group_strategy = resolve_placement_group_strategy(
+        settings.enable_placement_group,
+        settings.count,
+        settings.instance_type,
+        placement_group_strategy,
+        instance_type_info,
+        ec2_placement_group_check,
+        refer_to_docs_and_quit,
+        debug_mode,
+        p_val,
+    )
+
+    return NetworkAndComputeResolution(
+        architecture=architecture,
+        is_windows=is_windows,
+        package_manager=package_manager,
+        awscli_preinstalled=awscli_preinstalled,
+        ec2_user=ec2_user,
+        ebs_optimized=ebs_optimized,
+        ebs_root_volume_size=ebs_root_volume_size,
+        ebs_device_volume_size=ebs_device_volume_size,
+        spot_price=spot_price,
+        placement_group_strategy=placement_group_strategy,
+    )
+
+
+# Function: resolve_vpc_security_and_keypair()
+# Purpose: phase 2 -- VPC/subnet, ssh_allowed_ips, security group, ec2_user
+# home directory, AMI, keypair.
+
+
+def resolve_vpc_security_and_keypair(
+    settings: BuildSettings,
+    aws_clients: AwsClients,
+    network: NetworkAndComputeResolution,
+    vpc_name: str,
+    security_group: str,
+    ssh_allowed_ips: str,
+    custom_ami: str,
+    ec2_keypair: str,
+) -> VpcSecurityAndKeypairResolution:
+    ec2_client = aws_clients.ec2_client
+    ec2 = aws_clients.ec2
+    debug_mode = settings.debug_mode
+
+    aws_account_id = aws_clients.stsclient.get_caller_identity()["Account"]
+
+    vpc_id, vpc_name, subnet_id = resolve_vpc_and_subnet(ec2_client, vpc_name, settings.az, refer_to_docs_and_quit)
+    p_val("vpc_name", debug_mode)
+    p_val("subnet_id", debug_mode)
+
+    ssh_allowed_ips = resolve_ssh_allowed_ips(ec2_client, vpc_id, ssh_allowed_ips, refer_to_docs_and_quit)
+    p_val("ssh_allowed_ips", debug_mode)
+
+    security_group_name, vpc_security_group_ids = resolve_security_group(
+        ec2, settings.region, security_group, settings.instance_serial_number, vpc_id, network.is_windows, ssh_allowed_ips, add_inbound_security_group_rule
+    )
+    p_val("security_group", debug_mode)
+    p_val("vpc_security_group_ids", debug_mode)
+
+    ec2_user_home = "/home/" + network.ec2_user
+    p_val("ec2_user", debug_mode)
+    p_val("ec2_user_home", debug_mode)
+
+    aws_ami = resolve_ami(
+        custom_ami,
+        settings.base_os,
+        network.architecture,
+        aws_account_id,
+        functools.partial(get_ami_info, ec2_client),
+        functools.partial(check_custom_ami, ec2_client),
+        refer_to_docs_and_quit,
+    )
+    p_val("aws_ami", debug_mode)
+
+    if ec2_keypair == "ec2_keypair_default":
+        ec2_keypair = settings.instance_serial_number + "_" + settings.region
+
+    secret_key_file = settings.instance_data_dir + ec2_keypair + ".pem"
+    setup_keypair(ec2_client, ec2_keypair, secret_key_file, settings.region, debug_mode, refer_to_docs_and_quit)
+    p_val("ec2_keypair", debug_mode)
+
+    return VpcSecurityAndKeypairResolution(
+        aws_account_id=aws_account_id,
+        vpc_id=vpc_id,
+        vpc_name=vpc_name,
+        subnet_id=subnet_id,
+        ssh_allowed_ips=ssh_allowed_ips,
+        security_group_name=security_group_name,
+        vpc_security_group_ids=vpc_security_group_ids,
+        ec2_user_home=ec2_user_home,
+        aws_ami=aws_ami,
+        ec2_keypair=ec2_keypair,
+    )
+
+
+# Function: provision_iam_sns_and_logging()
+# Purpose: phase 3 -- CloudWatch log group, IAM role/policy/profile setup,
+# Turbot environment variables, SNS topic creation/subscribe/timestamps.
+
+
+def provision_iam_sns_and_logging(
+    settings: BuildSettings,
+    aws_clients: AwsClients,
+    iam_role: str,
+    iam_json_policy: str,
+) -> IamSnsAndLoggingResolution:
+    debug_mode = settings.debug_mode
+
+    cloudwatch_log_group = "/ec2instancemaker/" + settings.instance_name
+    if settings.enable_cloudwatch_logs == "true":
+        setup_cloudwatch_logging(aws_clients.logs_client, cloudwatch_log_group, settings.log_retention_days, refer_to_docs_and_quit)
+
+    ec2_iam_instance_role, ec2_iam_instance_policy, ec2_iam_instance_profile, preserve_iam_role = setup_iam(
+        aws_clients.iam,
+        iam_role,
+        settings.iam_name_prefix,
+        iam_json_policy,
+        settings.instance_data_dir,
+        settings.instance_serial_number,
+        debug_mode,
+        refer_to_docs_and_quit,
+        modify_iam_policy_document,
+    )
+    if debug_mode == "true":
+        print("")
+        p_val("ec2_iam_instance_role", debug_mode)
+        p_val("ec2_iam_instance_profile", debug_mode)
+
+    if settings.turbot_account != "DISABLED":
+        turbot_profile = "turbot__" + settings.turbot_account + "__" + settings.instance_owner
+        os.environ["AWS_PROFILE"] = turbot_profile
+        os.environ["AWS_DEFAULT_REGION"] = settings.region
+        boto3.setup_default_session(profile_name=turbot_profile)
+
+    sns_topic_name, sns_topic_arn = create_sns_topic_and_subscribe(aws_clients.sns_client, settings.instance_serial_number, settings.instance_owner_email)
+    if debug_mode == "true":
+        print("")
+        print("Subscribed " + settings.instance_owner_email + " to SNS topic: " + sns_topic_name)
+        print("")
+    p_val("sns_topic_name", debug_mode)
+
+    sns_datestamp, sns_timestamp = generate_sns_timestamps()
+
+    return IamSnsAndLoggingResolution(
+        cloudwatch_log_group=cloudwatch_log_group,
+        ec2_iam_instance_role=ec2_iam_instance_role,
+        ec2_iam_instance_policy=ec2_iam_instance_policy,
+        ec2_iam_instance_profile=ec2_iam_instance_profile,
+        preserve_iam_role=preserve_iam_role,
+        sns_topic_arn=sns_topic_arn,
+        sns_datestamp=sns_datestamp,
+        sns_timestamp=sns_timestamp,
+    )
+
+
+# Function: render_and_apply()
+# Purpose: phase 4 -- assemble InstanceParameters, print the --debug_mode
+# dump, write the vars_file, render the Jinja2 templates, run the
+# CTRL-C-abort safety window, apply Terraform, and tag the security group.
+
+
+def render_and_apply(
+    settings: BuildSettings,
+    aws_clients: AwsClients,
+    network: NetworkAndComputeResolution,
+    vpc: VpcSecurityAndKeypairResolution,
+    iam_sns: IamSnsAndLoggingResolution,
+    options: BuildOptions,
+    ebs: EbsRequest,
+    cwd: str,
+    instance_data_dir_abs: str,
+    custom_user_prelogin_scripts: list[str],
+    custom_user_postboot_scripts: list[str],
+) -> None:
+    debug_mode = settings.debug_mode
+
+    instance_parameters = InstanceParameters(
+        architecture=network.architecture,
+        awscli_preinstalled=network.awscli_preinstalled,
+        az=settings.az,
+        aws_ami=vpc.aws_ami,
+        aws_account_id=vpc.aws_account_id,
+        base_os=settings.base_os,
+        is_windows=network.is_windows,
+        package_manager=network.package_manager,
+        count=settings.count,
+        custom_user_prelogin_scripts=custom_user_prelogin_scripts,
+        custom_user_postboot_scripts=custom_user_postboot_scripts,
+        debug_mode=debug_mode,
+        ebs_encryption=ebs.encryption,
+        ebs_optimized=network.ebs_optimized,
+        ebs_root_volume_size=network.ebs_root_volume_size,
+        ebs_root_volume_type=ebs.root_volume_type,
+        ebs_root_volume_iops=ebs.root_volume_iops,
+        ebs_device_volume_size=network.ebs_device_volume_size,
+        ebs_device_volume_type=ebs.device_volume_type,
+        ebs_device_volume_iops=ebs.device_volume_iops,
+        instance_type=settings.instance_type,
+        ec2_keypair=vpc.ec2_keypair,
+        ec2_user=network.ec2_user,
+        ec2_user_home=vpc.ec2_user_home,
+        ec2_iam_instance_policy=iam_sns.ec2_iam_instance_policy,
+        ec2_iam_instance_profile=iam_sns.ec2_iam_instance_profile,
+        ec2_iam_instance_role=iam_sns.ec2_iam_instance_role,
+        enable_placement_group=settings.enable_placement_group,
+        hyperthreading=options.hyperthreading,
+        iam_name_prefix=settings.iam_name_prefix,
+        instance_data_dir=instance_data_dir_abs,
+        instance_owner=settings.instance_owner,
+        instance_owner_email=settings.instance_owner_email,
+        instance_owner_department=settings.instance_owner_department,
+        instance_name=settings.instance_name,
+        request_type=settings.request_type,
+        instance_serial_number=settings.instance_serial_number,
+        instance_serial_number_file=settings.instance_serial_number_file,
+        cloudwatch_log_group=iam_sns.cloudwatch_log_group,
+        enable_cloudwatch_logs=settings.enable_cloudwatch_logs,
+        log_retention_days=settings.log_retention_days,
+        placement_group_strategy=network.placement_group_strategy,
+        preserve_ami=options.preserve_ami,
+        preserve_cloudwatch_logs=options.preserve_cloudwatch_logs,
+        prod_level=options.prod_level,
+        project_id=options.project_id,
+        preserve_iam_role=iam_sns.preserve_iam_role,
+        public_ip=options.public_ip,
+        region=settings.region,
+        security_group_name=vpc.security_group_name,
+        spot_price=network.spot_price,
+        ssh_allowed_ips=vpc.ssh_allowed_ips,
+        vpc_security_group_ids=vpc.vpc_security_group_ids,
+        sns_topic_arn=iam_sns.sns_topic_arn,
+        sns_datestamp=iam_sns.sns_datestamp,
+        sns_timestamp=iam_sns.sns_timestamp,
+        subnet_id=vpc.subnet_id,
+        turbot_account=settings.turbot_account,
+        vars_file_path=settings.vars_file_path,
+        vpc_id=vpc.vpc_id,
+        vpc_name=vpc.vpc_name,
+        DEPLOYMENT_DATE=settings.DEPLOYMENT_DATE,
+        DEPLOYMENT_DATE_TAG=settings.DEPLOYMENT_DATE_TAG,
+        TERRAFORM_VERSION=settings.TERRAFORM_VERSION,
+    )
+
+    if debug_mode == "true":
+        print_debug_parameters(instance_parameters)
+
+    vars_file_main_part = """\
+################################################################################
+# Name:    	{instance_name}.yml
+# Author:  	Rodney Marable <rodney.marable@gmail.com>
+# Created On:   June 3, 2019
+# Last Changed: July 17, 2019
+# Deployed On:  {DEPLOYMENT_DATE}
+# Purpose: 	Build template auto-generated by Ec2InstanceMaker
+################################################################################
+
+# Build tool information
+
+debug_mode: {debug_mode}
+vars_file_path: {vars_file_path}
+DEPLOYMENT_DATE: {DEPLOYMENT_DATE}
+DEPLOYMENT_DATE_TAG: {DEPLOYMENT_DATE_TAG}
+
+# SNS topic
+
+sns_arn: {sns_topic_arn}
+
+# IAM parameters
+
+ec2_iam_instance_policy: {ec2_iam_instance_policy}
+ec2_iam_instance_profile: {ec2_iam_instance_profile}
+ec2_iam_instance_role: {ec2_iam_instance_role}
+preserve_iam_role: {preserve_iam_role}
+
+# EC2 instance parameters
+
+aws_ami: {aws_ami}
+preserve_ami: {preserve_ami}
+cloudwatch_log_group: {cloudwatch_log_group}
+enable_cloudwatch_logs: {enable_cloudwatch_logs}
+log_retention_days: {log_retention_days}
+preserve_cloudwatch_logs: {preserve_cloudwatch_logs}
+base_os: {base_os}
+count: {count}
+instance_type: {instance_type}
+architecture: {architecture}
+ec2_keypair: {ec2_keypair}
+ec2_user: {ec2_user}
+ec2_user_home: /home/{ec2_user}
+ec2_user_src: {ec2_user_home}/src
+custom_user_prelogin_scripts: {custom_user_prelogin_scripts}
+custom_user_postboot_scripts: {custom_user_postboot_scripts}
+hyperthreading: {hyperthreading}
+instance_data_dir: {instance_data_dir}
+instance_userdata_script: instance_userdata.{instance_name}.sh
+instance_name: {instance_name}
+instance_owner: {instance_owner}
+instance_owner_department: {instance_owner_department}
+instance_owner_email: {instance_owner_email}
+request_type: {request_type}
+instance_serial_number: {instance_serial_number}
+instance_serial_number_file: {instance_serial_number_file}
+prod_level: {prod_level}
+project_id: {project_id}
+spot_price: {spot_price}
+ssh_keypair_file: {ec2_keypair}.pem
+ssh_known_hosts: ~/.ssh/known_hosts
+
+# EBS parameters
+
+ebs_encryption: {ebs_encryption}
+ebs_optimized: {ebs_optimized}
+ebs_root_volume_size: {ebs_root_volume_size}
+ebs_root_volume_type: {ebs_root_volume_type}
+ebs_root_volume_iops: {ebs_root_volume_iops}
+
+ebs_device_volume_size: {ebs_device_volume_size}
+ebs_device_volume_type: {ebs_device_volume_type}
+ebs_device_volume_iops: {ebs_device_volume_iops}
+
+# AWS networking
+
+az: {az}
+enable_placement_group: {enable_placement_group}
+placement_group_strategy: {placement_group_strategy}
+public_ip: {public_ip}
+region: {region}
+security_group_name: {security_group_name}
+ssh_allowed_ips: {ssh_allowed_ips}
+subnet_id: {subnet_id}
+vpc_id: {vpc_id}
+vpc_name: {vpc_name}
+vpc_security_group_ids: {vpc_security_group_ids}
+
+# Terraform
+
+terraform_version: {TERRAFORM_VERSION}
+provider: aws.{vpc_name}
+provider_tf_dest: provider_aws.tf
+tf_ec2_instance_dest: {instance_name}.tf
+
+# Generated file names (all written into instance_data_dir above)
+
+access_instance_dest: access_instance.{instance_name}.py
+build_instance_script: build_instance.{instance_name}.sh
+build_ami_script: build_ami.{instance_name}.sh
+kill_instance_script: kill_instance.{instance_name}.sh
+"""
+
+    write_vars_file(settings.vars_file_path, vars_file_main_part, dataclasses.asdict(instance_parameters))
+
+    print("")
+    print("Saved " + settings.instance_name + " build template: " + settings.vars_file_path)
+    print("")
+
+    if settings.count == 1:
+        print("Generating templates for instance " + settings.instance_name + "...")
+    else:
+        print("Generating templates for instance family " + settings.instance_name + "...")
+
+    render_instance_templates(dataclasses.asdict(instance_parameters), cwd, instance_data_dir_abs)
+
+    with open(settings.instance_serial_number_file, "a") as fh:
+        print("Rendered instance templates into: " + instance_data_dir_abs, file=fh)
+
+    ctrlC_Abort(
+        30 if debug_mode == "true" else 5,
+        80,
+        settings.vars_file_path,
+        settings.instance_data_dir,
+        settings.instance_serial_number_file,
+        aws_clients.ec2_client,
+        aws_clients.iam,
+        vpc.security_group_name,
+        vpc.vpc_security_group_ids,
+        iam_sns.ec2_iam_instance_role,
+        iam_sns.ec2_iam_instance_policy,
+        iam_sns.ec2_iam_instance_profile,
+        iam_sns.preserve_iam_role,
+        vpc.ec2_keypair,
+    )
+
+    print("Invoking Terraform to build " + settings.instance_name + "...")
+    apply_terraform(settings.instance_data_dir, debug_mode, refer_to_docs_and_quit)
+
+    security_group_tags = build_security_group_tags(
+        vpc.security_group_name,
+        settings.instance_name,
+        settings.instance_serial_number,
+        settings.instance_owner,
+        settings.instance_owner_email,
+        settings.instance_owner_department,
+        settings.DEPLOYMENT_DATE_TAG,
+        options.project_id,
+    )
+    aws_clients.ec2_client.create_tags(Resources=[vpc.vpc_security_group_ids], Tags=security_group_tags)
+
+
+# Function: report_and_notify()
+# Purpose: phase 5 -- print post-apply console guidance (access/kill/AMI
+# commands), decrypt and print the Windows password table if applicable,
+# and publish the build-completion SNS notification. Terminal: every path
+# through main() ends here, so this is NoReturn like main() itself.
+
+
+def report_and_notify(
+    settings: BuildSettings,
+    aws_clients: AwsClients,
+    network: NetworkAndComputeResolution,
+    vpc: VpcSecurityAndKeypairResolution,
+    iam_sns: IamSnsAndLoggingResolution,
+) -> NoReturn:
+    print("")
+    print("".center(80, "="))
+    print("")
+
+    if not network.is_windows:
+        if settings.count == 1:
+            print("Access the new " + settings.base_os + " instance via SSM Session Manager:")
+            print("./access_instance.py -N " + settings.instance_name)
+        else:
+            print("Access the " + str(settings.count) + " members of the " + settings.base_os + " instance family via SSM Session Manager:")
+            print("./access_instance.py -N " + settings.instance_name)
+
+    if network.is_windows:
+        windows_instance_table = build_windows_password_table(
+            settings.instance_data_dir, vpc.ec2_keypair, functools.partial(fetch_windows_instance_details, refer_to_docs_and_quit=refer_to_docs_and_quit), decrypt_windows_admin_passwords
+        )
+        if settings.count == 1:
+            print("Access the new instance via Windows Remote Desktop with this information:")
+        else:
+            print("Access the new instance family members with Windows Remote Desktop:")
+        print("")
+        print(windows_instance_table)
+        print("")
+        print("Reprint this table:")
+        print("./access_instance.py -N " + settings.instance_name)
+
+    print("")
+    if settings.count == 1:
+        print("Delete the instance:")
+    else:
+        print("Delete the instance family:")
+    print("./kill-instance." + settings.instance_name + ".sh")
+
+    print("")
+    print("Build an AMI from the new instance:")
+    print("./build-ami." + settings.instance_name + ".sh")
+
+    sns_message_body, sns_instance_subject = build_sns_message(settings.count, settings.instance_name, settings.instance_type, settings.request_type, iam_sns.sns_datestamp, iam_sns.sns_timestamp)
+    publish_sns_notification(aws_clients.sns_client, iam_sns.sns_topic_arn, sns_message_body, sns_instance_subject)
+
+    print("")
+    print("Exiting...")
+    sys.exit(0)
+
+
 def main(argv: list[str] | None = None) -> NoReturn:
     # Create variables from the optional instance parameter values provided
     # from the command line. Recording argv (falling back to sys.argv only
@@ -384,518 +1033,90 @@ def main(argv: list[str] | None = None) -> NoReturn:
     # Create the AWS clients needed for the rest of the build.
 
     aws_clients = create_aws_clients(region, boto3.client, boto3.resource)
-    ec2_client = aws_clients.ec2_client
-    ec2 = aws_clients.ec2
-    iam = aws_clients.iam
-    sns_client = aws_clients.sns_client
-    logs_client = aws_clients.logs_client
 
-    # Perform error checking on the selected AWS Region and Availability
-    # Zone. Abort if a non-existent Availability Zone was chosen. This must
-    # happen before any other AWS API call (e.g. get_instance_type_info()
-    # below) that doesn't itself handle a bad region/AZ cleanly --
-    # describe_availability_zones is the first call to hit a bogus region
-    # with a recognizable, catchable error (ValueError/EndpointConnectionError),
-    # and gives a clean, friendly abort instead of a raw traceback from
-    # something further down the line.
+    # settings bundles every value established once above (or straight from
+    # argparse) that's never reassigned again -- threaded unchanged through
+    # every phase below instead of unpacked into a dozen individual
+    # parameters per phase call.
 
-    validate_az_and_region(ec2_client, az, illegal_az_msg)
-    p_val("region", debug_mode)
-    p_val("az", debug_mode)
-
-    # Check to ensure the selected EC2 instance_type is valid and determine
-    # its supported CPU architecture, EBS optimization/encryption support,
-    # and placement group strategies directly from the AWS API. This also
-    # implicitly determines whether the instance_type is x86_64 or
-    # Graviton/ARM64 -- no separate --architecture flag is needed, since
-    # instance_type already fully implies it.
-
-    instance_type_info = get_instance_type_info(ec2_client, instance_type)
-    if instance_type_info is None:
-        p_fail(instance_type, "instance_type", "missing_element")
-    architecture = instance_type_info["architecture"]
-    print("")
-    print("Selected EC2 instance type: " + instance_type + " (" + architecture + ")")
-
-    # Verify that the selected EC2 instance_type is supported by base_os.
-
-    print("")
-    print("Selected base operating system: " + base_os)
-    base_os_instance_check(base_os, instance_type, architecture, debug_mode)
-
-    # Look up base_os's family classification once -- is_windows,
-    # package_manager, and awscli_preinstalled are threaded through
-    # instance_parameters below so templates can read them too, instead of
-    # re-deriving the same substring logic independently in Jinja.
-
-    base_os_family = get_base_os_family(base_os)
-    is_windows = base_os_family["is_windows"]
-    package_manager = base_os_family["package_manager"]
-    awscli_preinstalled = base_os_family["awscli_preinstalled"]
-
-    # Create (or reuse) the CloudWatch Logs group the CloudWatch Agent on the
-    # instance(s) will ship logs to, and set its retention policy -- done
-    # here, before Terraform ever runs, so the group has the right retention
-    # policy before the agent starts writing to it. Skipped entirely if
-    # --enable_cloudwatch_logs=false -- no point creating a log group
-    # nothing will ever ship to.
-
-    cloudwatch_log_group = "/ec2instancemaker/" + instance_name
-    if enable_cloudwatch_logs == "true":
-        setup_cloudwatch_logging(logs_client, cloudwatch_log_group, log_retention_days, refer_to_docs_and_quit)
-
-    # Provide a mechanism to ensure ebs_optimized is appropriately set for
-    # the EC2 instance(s) being deployed.
-
-    ebs_optimized = resolve_ebs_optimized_support(ebs_optimized, instance_type, instance_type_info["ebs_optimized_support"], instance_name)
-    p_val("ebs_optimized", debug_mode)
-
-    # Verify that the selected EC2 instance_type supports encrypted EBS
-    # volumes.
-
-    if ebs_encryption == "true":
-        ebs_encryption_check(instance_type, instance_type_info["ebs_encryption_support"], instance_name, debug_mode)
-
-    # Enforce the 16 TB EBS size ceiling, bump undersized root/device
-    # volumes to AWS's recommended 30 GB minimum for Windows Server, and
-    # validate provisioned-IOPS bounds when ebs_root_volume_type == "io1".
-
-    ebs_root_volume_size, ebs_device_volume_size = validate_and_resize_ebs_volumes(
-        ebs_root_volume_size,
-        ebs_device_volume_size,
-        ebs_root_volume_type,
-        ebs_device_volume_type,
-        ebs_root_volume_iops,
-        ebs_device_volume_iops,
-        is_windows,
-        refer_to_docs_and_quit,
-    )
-
-    # Print a friendly reminder that spot is cheaper than ondemand to the
-    # console if ondemand instances were chosen. If using spot instances,
-    # add spot_price to spot_buffer to protect against market fluctuations:
-    #
-    # spot_price = spot_price * spot_buffer, rounded off to 8 decimal places.
-    # Default value of spot_buffer = 1/pi
-    #
-    # Current AWS spot instance prices: https://aws.amazon.com/ec2/spot/pricing/
-
-    spot_price, spot_buffer = resolve_request_type_pricing(request_type, ec2_client, instance_type, is_windows, az, spot_buffer, debug_mode, fetch_spot_price_raw, compute_buffered_spot_price, p_val)
-    print("")
-
-    # Determine if the instance(s) should be placed in an EC2 placement
-    # group. Abort if the user attempts to put a single instance in a
-    # placement group. Partition spread groups are not yet supported by
-    # Terraform for some reason.
-
-    placement_group_strategy = resolve_placement_group_strategy(
-        enable_placement_group, count, instance_type, placement_group_strategy, instance_type_info, ec2_placement_group_check, refer_to_docs_and_quit, debug_mode, p_val
-    )
-
-    # Parse the AWS Account ID.
-
-    aws_account_id = aws_clients.stsclient.get_caller_identity()["Account"]
-
-    # Determine subnet_id, vpc_id, and vpc_name from the selected AWS Region
-    # and Availability Zone. Return an error if this value is missing.
-    #
-    # Parse the vpc_id using vpc_name.
-    # If vpc_name was not supplied on the command line, use the default VPC.
-
-    vpc_id, vpc_name, subnet_id = resolve_vpc_and_subnet(ec2_client, vpc_name, az, refer_to_docs_and_quit)
-    p_val("vpc_name", debug_mode)
-    p_val("subnet_id", debug_mode)
-
-    # Resolve the CIDR block allowed to reach the instance's SSH/RDP port.
-    # Defaults to the instance's own VPC CIDR; 0.0.0.0/0 is refused outright.
-
-    ssh_allowed_ips = resolve_ssh_allowed_ips(ec2_client, vpc_id, ssh_allowed_ips, refer_to_docs_and_quit)
-    p_val("ssh_allowed_ips", debug_mode)
-
-    # If the user fails to supply a valid security_group, create a new
-    # default EC2 security group that permits only inbound SSH (Linux) or
-    # RDP (Windows) traffic to access the instance(s), scoped to
-    # ssh_allowed_ips.
-
-    security_group_name, vpc_security_group_ids = resolve_security_group(ec2, region, security_group, instance_serial_number, vpc_id, is_windows, ssh_allowed_ips, add_inbound_security_group_rule)
-    p_val("security_group", debug_mode)
-    p_val("vpc_security_group_ids", debug_mode)
-
-    # Configure the ec2_user account and home directory path to match
-    # base_os. Illegal options have already been screened by the argument
-    # parser so it's okay to move straight to parameter validation.
-
-    ec2_user = base_os_family["ec2_user"]
-    ec2_user_home = "/home/" + ec2_user
-    p_val("ec2_user", debug_mode)
-    p_val("ec2_user_home", debug_mode)
-
-    # Parse aws_ami from base_os and region if custom_ami was not provided.
-    # If custom_ami was supplied, verify its existence.
-
-    aws_ami = resolve_ami(
-        custom_ami,
-        base_os,
-        architecture,
-        aws_account_id,
-        functools.partial(get_ami_info, ec2_client),
-        functools.partial(check_custom_ami, ec2_client),
-        refer_to_docs_and_quit,
-    )
-    p_val("aws_ami", debug_mode)
-
-    # Create a new EC2 key pair and secret key file for the instance(s)
-    # within the deployment region of choice if either entity doesn't
-    # already exist.
-
-    if ec2_keypair == "ec2_keypair_default":
-        ec2_keypair = instance_serial_number + "_" + region
-
-    secret_key_file = instance_data_dir + ec2_keypair + ".pem"
-
-    setup_keypair(ec2_client, ec2_keypair, secret_key_file, region, debug_mode, refer_to_docs_and_quit)
-    p_val("ec2_keypair", debug_mode)
-
-    # Create and apply an IAM EC2 instance(s) profile from the default
-    # template if iam_role was not defined by the operator.
-    #
-    # If iam_name_prefix was supplied, prepend this string to the IAM role,
-    # policy, and instance profile associated with the instance(s) and
-    # modify the JSON policy document with the modify_iam_policy_document
-    # function.
-    #
-    # All IAM resources are to be terminated along with the instance(s).
-
-    ec2_iam_instance_role, ec2_iam_instance_policy, ec2_iam_instance_profile, preserve_iam_role = setup_iam(
-        iam, iam_role, iam_name_prefix, iam_json_policy, instance_data_dir, instance_serial_number, debug_mode, refer_to_docs_and_quit, modify_iam_policy_document
-    )
-    if debug_mode == "true":
-        print("")
-        p_val("ec2_iam_instance_role", debug_mode)
-        p_val("ec2_iam_instance_profile", debug_mode)
-
-    # Set some critical environment variables to support Turbot operability.
-    # https://turbot.com/about/
-
-    if turbot_account != "DISABLED":
-        turbot_profile = "turbot__" + turbot_account + "__" + instance_owner
-        os.environ["AWS_PROFILE"] = turbot_profile
-        os.environ["AWS_DEFAULT_REGION"] = region
-        boto3.setup_default_session(profile_name=turbot_profile)
-
-    # Generate a unique SNS topic name for important EC2 events involving the
-    # instance(s) and subscribe instance_owner_email.
-
-    sns_topic_name, sns_topic_arn = create_sns_topic_and_subscribe(sns_client, instance_serial_number, instance_owner_email)
-    if debug_mode == "true":
-        print("")
-        print("Subscribed " + instance_owner_email + " to SNS topic: " + sns_topic_name)
-        print("")
-    p_val("sns_topic_name", debug_mode)
-
-    # Generate date and time stamps for the SNS instance message alert.
-
-    sns_datestamp, sns_timestamp = generate_sns_timestamps()
-
-    # Assemble instance_parameters (an InstanceParameters dataclass instance)
-    # for populating the vars_file and rendering the Jinja2 templates.
-
-    instance_parameters = InstanceParameters(
-        architecture=architecture,
-        awscli_preinstalled=awscli_preinstalled,
+    settings = BuildSettings(
+        instance_name=instance_name,
+        instance_serial_number=instance_serial_number,
+        instance_serial_number_file=instance_serial_number_file,
+        instance_data_dir=instance_data_dir,
+        vars_file_path=vars_file_path,
+        region=region,
         az=az,
-        aws_ami=aws_ami,
-        aws_account_id=aws_account_id,
-        base_os=base_os,
-        is_windows=is_windows,
-        package_manager=package_manager,
-        count=count,
-        custom_user_prelogin_scripts=custom_user_prelogin_scripts,
-        custom_user_postboot_scripts=custom_user_postboot_scripts,
         debug_mode=debug_mode,
-        ebs_encryption=ebs_encryption,
-        ebs_optimized=ebs_optimized,
-        ebs_root_volume_size=ebs_root_volume_size,
-        ebs_root_volume_type=ebs_root_volume_type,
-        ebs_root_volume_iops=ebs_root_volume_iops,
-        ebs_device_volume_size=ebs_device_volume_size,
-        ebs_device_volume_type=ebs_device_volume_type,
-        ebs_device_volume_iops=ebs_device_volume_iops,
-        instance_type=instance_type,
-        ec2_keypair=ec2_keypair,
-        ec2_user=ec2_user,
-        ec2_user_home=ec2_user_home,
-        ec2_iam_instance_policy=ec2_iam_instance_policy,
-        ec2_iam_instance_profile=ec2_iam_instance_profile,
-        ec2_iam_instance_role=ec2_iam_instance_role,
-        enable_placement_group=enable_placement_group,
-        hyperthreading=hyperthreading,
-        iam_name_prefix=iam_name_prefix,
-        instance_data_dir=instance_data_dir_abs,
         instance_owner=instance_owner,
         instance_owner_email=instance_owner_email,
         instance_owner_department=instance_owner_department,
-        instance_name=instance_name,
+        instance_type=instance_type,
+        base_os=base_os,
+        count=count,
         request_type=request_type,
-        instance_serial_number=instance_serial_number,
-        instance_serial_number_file=instance_serial_number_file,
-        cloudwatch_log_group=cloudwatch_log_group,
+        enable_placement_group=enable_placement_group,
         enable_cloudwatch_logs=enable_cloudwatch_logs,
         log_retention_days=log_retention_days,
-        placement_group_strategy=placement_group_strategy,
-        preserve_ami=preserve_ami,
-        preserve_cloudwatch_logs=preserve_cloudwatch_logs,
-        prod_level=prod_level,
-        project_id=project_id,
-        preserve_iam_role=preserve_iam_role,
-        public_ip=public_ip,
-        region=region,
-        security_group_name=security_group_name,
-        spot_price=spot_price,
-        ssh_allowed_ips=ssh_allowed_ips,
-        vpc_security_group_ids=vpc_security_group_ids,
-        sns_topic_arn=sns_topic_arn,
-        sns_datestamp=sns_datestamp,
-        sns_timestamp=sns_timestamp,
-        subnet_id=subnet_id,
+        iam_name_prefix=iam_name_prefix,
         turbot_account=turbot_account,
-        vars_file_path=vars_file_path,
-        vpc_id=vpc_id,
-        vpc_name=vpc_name,
         DEPLOYMENT_DATE=DEPLOYMENT_DATE,
         DEPLOYMENT_DATE_TAG=DEPLOYMENT_DATE_TAG,
         TERRAFORM_VERSION=TERRAFORM_VERSION,
     )
 
-    # Print the current values of all defined instance_parameters to the
-    # console when debug_mode is enabled.
-
-    if debug_mode == "true":
-        print_debug_parameters(instance_parameters)
-
-    # Generate the vars_file for this instance.
-
-    vars_file_main_part = """\
-################################################################################
-# Name:    	{instance_name}.yml
-# Author:  	Rodney Marable <rodney.marable@gmail.com>
-# Created On:   June 3, 2019
-# Last Changed: July 17, 2019
-# Deployed On:  {DEPLOYMENT_DATE}
-# Purpose: 	Build template auto-generated by Ec2InstanceMaker
-################################################################################
-
-# Build tool information
-
-debug_mode: {debug_mode}
-vars_file_path: {vars_file_path}
-DEPLOYMENT_DATE: {DEPLOYMENT_DATE}
-DEPLOYMENT_DATE_TAG: {DEPLOYMENT_DATE_TAG}
-
-# SNS topic
-
-sns_arn: {sns_topic_arn}
-
-# IAM parameters
-
-ec2_iam_instance_policy: {ec2_iam_instance_policy}
-ec2_iam_instance_profile: {ec2_iam_instance_profile}
-ec2_iam_instance_role: {ec2_iam_instance_role}
-preserve_iam_role: {preserve_iam_role}
-
-# EC2 instance parameters
-
-aws_ami: {aws_ami}
-preserve_ami: {preserve_ami}
-cloudwatch_log_group: {cloudwatch_log_group}
-enable_cloudwatch_logs: {enable_cloudwatch_logs}
-log_retention_days: {log_retention_days}
-preserve_cloudwatch_logs: {preserve_cloudwatch_logs}
-base_os: {base_os}
-count: {count}
-instance_type: {instance_type}
-architecture: {architecture}
-ec2_keypair: {ec2_keypair}
-ec2_user: {ec2_user}
-ec2_user_home: /home/{ec2_user}
-ec2_user_src: {ec2_user_home}/src
-custom_user_prelogin_scripts: {custom_user_prelogin_scripts}
-custom_user_postboot_scripts: {custom_user_postboot_scripts}
-hyperthreading: {hyperthreading}
-instance_data_dir: {instance_data_dir}
-instance_userdata_script: instance_userdata.{instance_name}.sh
-instance_name: {instance_name}
-instance_owner: {instance_owner}
-instance_owner_department: {instance_owner_department}
-instance_owner_email: {instance_owner_email}
-request_type: {request_type}
-instance_serial_number: {instance_serial_number}
-instance_serial_number_file: {instance_serial_number_file}
-prod_level: {prod_level}
-project_id: {project_id}
-spot_price: {spot_price}
-ssh_keypair_file: {ec2_keypair}.pem
-ssh_known_hosts: ~/.ssh/known_hosts
-
-# EBS parameters
-
-ebs_encryption: {ebs_encryption}
-ebs_optimized: {ebs_optimized}
-ebs_root_volume_size: {ebs_root_volume_size}
-ebs_root_volume_type: {ebs_root_volume_type}
-ebs_root_volume_iops: {ebs_root_volume_iops}
-
-ebs_device_volume_size: {ebs_device_volume_size}
-ebs_device_volume_type: {ebs_device_volume_type}
-ebs_device_volume_iops: {ebs_device_volume_iops}
-
-# AWS networking
-
-az: {az}
-enable_placement_group: {enable_placement_group}
-placement_group_strategy: {placement_group_strategy}
-public_ip: {public_ip}
-region: {region}
-security_group_name: {security_group_name}
-ssh_allowed_ips: {ssh_allowed_ips}
-subnet_id: {subnet_id}
-vpc_id: {vpc_id}
-vpc_name: {vpc_name}
-vpc_security_group_ids: {vpc_security_group_ids}
-
-# Terraform
-
-terraform_version: {TERRAFORM_VERSION}
-provider: aws.{vpc_name}
-provider_tf_dest: provider_aws.tf
-tf_ec2_instance_dest: {instance_name}.tf
-
-# Generated file names (all written into instance_data_dir above)
-
-access_instance_dest: access_instance.{instance_name}.py
-build_instance_script: build_instance.{instance_name}.sh
-build_ami_script: build_ami.{instance_name}.sh
-kill_instance_script: kill_instance.{instance_name}.sh
-"""
-
-    # Write the instance(s) vars_file to disk.
-
-    write_vars_file(vars_file_path, vars_file_main_part, dataclasses.asdict(instance_parameters))
-
-    print("")
-    print("Saved " + instance_name + " build template: " + vars_file_path)
-    print("")
-
-    # Generate the EC2 instance creation templates directly with Jinja2.
-
-    if count == 1:
-        print("Generating templates for instance " + instance_name + "...")
-    else:
-        print("Generating templates for instance family " + instance_name + "...")
-
-    render_instance_templates(dataclasses.asdict(instance_parameters), cwd, instance_data_dir_abs)
-
-    with open(instance_serial_number_file, "a") as fh:
-        print("Rendered instance templates into: " + instance_data_dir_abs, file=fh)
-
-    # Abort if CTRL-C is typed within 5 seconds to ensure all state files and
-    # directories, EC2 keypairs and secret key files, IAM roles and profiles,
-    # and EC2 security groups that might exist are properly deleted.
-
-    ctrlC_Abort(
-        30 if debug_mode == "true" else 5,
-        80,
-        vars_file_path,
-        instance_data_dir,
-        instance_serial_number_file,
-        ec2_client,
-        iam,
-        security_group_name,
-        vpc_security_group_ids,
-        ec2_iam_instance_role,
-        ec2_iam_instance_policy,
-        ec2_iam_instance_profile,
-        preserve_iam_role,
-        ec2_keypair,
+    ebs = EbsRequest(
+        encryption=ebs_encryption,
+        optimized=ebs_optimized,
+        root_volume_size=ebs_root_volume_size,
+        root_volume_type=ebs_root_volume_type,
+        root_volume_iops=ebs_root_volume_iops,
+        device_volume_size=ebs_device_volume_size,
+        device_volume_type=ebs_device_volume_type,
+        device_volume_iops=ebs_device_volume_iops,
     )
 
-    # Create the new EC2 instance(s) with Terraform.
+    # Phase 1: AZ/region validation, instance_type_info, base_os
+    # checks/family, EBS optimize/encrypt/resize, spot pricing, placement
+    # group strategy. Must happen before any other AWS API call that
+    # doesn't itself handle a bad region/AZ cleanly -- describe_availability_zones
+    # is the first call to hit a bogus region with a recognizable,
+    # catchable error (ValueError/EndpointConnectionError), and gives a
+    # clean, friendly abort instead of a raw traceback from something
+    # further down the line.
 
-    print("Invoking Terraform to build " + instance_name + "...")
-    apply_terraform(instance_data_dir, debug_mode, refer_to_docs_and_quit)
+    network = resolve_network_and_compute(settings, aws_clients, ebs, spot_buffer, placement_group_strategy)
 
-    # Apply the common tag set to the EC2 security group.
+    # Phase 2: VPC/subnet, ssh_allowed_ips, security group, ec2_user home
+    # directory, AMI, keypair.
 
-    security_group_tags = build_security_group_tags(
-        security_group_name, instance_name, instance_serial_number, instance_owner, instance_owner_email, instance_owner_department, DEPLOYMENT_DATE_TAG, project_id
+    vpc = resolve_vpc_security_and_keypair(settings, aws_clients, network, vpc_name, security_group, ssh_allowed_ips, custom_ami, ec2_keypair)
+
+    # Phase 3: CloudWatch log group, IAM role/policy/profile setup, Turbot
+    # environment variables, SNS topic creation/subscribe/timestamps.
+
+    iam_sns = provision_iam_sns_and_logging(settings, aws_clients, iam_role, iam_json_policy)
+
+    options = BuildOptions(
+        preserve_ami=preserve_ami,
+        preserve_cloudwatch_logs=preserve_cloudwatch_logs,
+        hyperthreading=hyperthreading,
+        prod_level=prod_level,
+        project_id=project_id,
+        public_ip=public_ip,
     )
-    ec2_client.create_tags(Resources=[vpc_security_group_ids], Tags=security_group_tags)
 
-    # Print a pretty spacing bar to improve user readability.
+    # Phase 4: assemble InstanceParameters, print the --debug_mode dump,
+    # write the vars_file, render the Jinja2 templates, run the CTRL-C-abort
+    # safety window, apply Terraform, and tag the security group.
 
-    print("")
-    print("".center(80, "="))
-    print("")
+    render_and_apply(settings, aws_clients, network, vpc, iam_sns, options, ebs, cwd, instance_data_dir_abs, custom_user_prelogin_scripts, custom_user_postboot_scripts)
 
-    # Print the instance access command to the console if base_os is Linux.
+    # Phase 5: post-apply console guidance, Windows password table if
+    # applicable, and the build-completion SNS notification. Terminal --
+    # every path through main() ends here.
 
-    if not is_windows:
-        if count == 1:
-            print("Access the new " + base_os + " instance via SSM Session Manager:")
-            print("./access_instance.py -N " + instance_name)
-        else:
-            print("Access the " + str(count) + " members of the " + base_os + " instance family via SSM Session Manager:")
-            print("./access_instance.py -N " + instance_name)
-
-    # If base_os is Windows:
-    #   - fetch instance_id/ip_address information from the Terraform output
-    #   - decrypt the Administrator password
-    #   - build and print a "pretty" table to the console for user readability
-    #   - provide instance access guidance using Windows Remote Desktop
-    #
-    # This prevents the decrypted Administrator password from being visible in
-    # the Terraform state file without having to use Vault.
-
-    if is_windows:
-        windows_instance_table = build_windows_password_table(
-            instance_data_dir, ec2_keypair, functools.partial(fetch_windows_instance_details, refer_to_docs_and_quit=refer_to_docs_and_quit), decrypt_windows_admin_passwords
-        )
-        if count == 1:
-            print("Access the new instance via Windows Remote Desktop with this information:")
-        else:
-            print("Access the new instance family members with Windows Remote Desktop:")
-        print("")
-        print(windows_instance_table)
-        print("")
-        print("Reprint this table:")
-        print("./access_instance.py -N " + instance_name)
-
-    # Print the kill-instance command to the console.
-
-    print("")
-    if count == 1:
-        print("Delete the instance:")
-    else:
-        print("Delete the instance family:")
-    print("./kill-instance." + instance_name + ".sh")
-
-    # Print the AMI build command to the console.
-
-    print("")
-    print("Build an AMI from the new instance:")
-    print("./build-ami." + instance_name + ".sh")
-
-    # Generate the SNS message body and publish a notification announcing
-    # creation of the instance(s).
-
-    sns_message_body, sns_instance_subject = build_sns_message(count, instance_name, instance_type, request_type, sns_datestamp, sns_timestamp)
-    publish_sns_notification(sns_client, sns_topic_arn, sns_message_body, sns_instance_subject)
-
-    # Cleanup and exit.
-
-    print("")
-    print("Exiting...")
-    sys.exit(0)
+    report_and_notify(settings, aws_clients, network, vpc, iam_sns)
 
 
 if __name__ == "__main__":
