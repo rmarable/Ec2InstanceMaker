@@ -63,6 +63,8 @@ BASE_CONTEXT = {
     "preserve_ami": "true",
     "project_id": "UNDEFINED",
     "preserve_iam_role": "false",
+    "preserve_security_group": "false",
+    "security_group_name": "ec2instancemaker_sg_12345_us-east-1",
     "public_ip": "true",
     "region": "us-east-1",
     "spot_price": "UNDEFINED",
@@ -608,6 +610,72 @@ class TestCloudWatchAgentInstall:
         apt_rendered = render({"package_manager": "apt", "base_os": "ubuntu2404", "ec2_user": "ubuntu", "ec2_user_home": "/home/ubuntu"})["instance_userdata.j2"]
         assert "/var/log/syslog" in apt_rendered
         assert "/var/log/messages" not in apt_rendered
+
+
+class TestSecurityGroupTeardownOwnership:
+    """Teardown used to run `aws ec2 delete-security-group --group-id <id>`
+    unconditionally, against an ID hardcoded at render time. Since
+    resolve_security_group() silently *reuses* a pre-existing group when
+    --security_group names one that already exists, that meant
+    kill-instance.<name>.sh would delete a security group this toolkit
+    never created -- e.g. a shared corporate SG -- the moment nothing else
+    was attached to it.
+    """
+
+    # The helper function is defined unconditionally; only the *call* is
+    # gated, so these match on the call site specifically.
+    CALL = 'delete_security_group_with_retry "'
+
+    def test_created_group_is_deleted(self):
+        rendered = render({"preserve_security_group": "false"})["kill_instance.j2"]
+        assert self.CALL in rendered
+        assert "Preserved pre-existing EC2 security group" not in rendered
+
+    def test_preexisting_group_is_not_deleted(self):
+        rendered = render({"preserve_security_group": "true"})["kill_instance.j2"]
+        assert self.CALL not in rendered
+        assert "Preserved pre-existing EC2 security group" in rendered
+
+
+class TestTeardownFailureHandling:
+    """The kill script had no `set -e`, no exit-code check on any command,
+    and a hardcoded `exit 0`. Worse, `rm -rf "$INSTANCE_DATA_DIR"` ran
+    immediately after `terraform destroy` and *before* the SNS/CloudWatch/
+    IAM deletions -- unconditionally. A failed destroy therefore deleted the
+    Terraform state, the kill script and its symlink while the instance kept
+    running and kept billing, leaving nothing on disk able to finish the job
+    and no way to re-run.
+    """
+
+    def _rendered(self):
+        return render({})["kill_instance.j2"]
+
+    def test_local_state_deletion_is_gated_on_zero_failures(self):
+        rendered = self._rendered()
+        gate = rendered.index('if [ "$TEARDOWN_FAILURES" -eq 0 ]')
+        assert gate < rendered.index('rm -rf "$INSTANCE_DATA_DIR"')
+
+    def test_state_directory_is_removed_after_the_aws_deletions(self):
+        rendered = self._rendered()
+        # The ordering bug: state used to be destroyed before these ran.
+        assert rendered.index("sns delete-topic") < rendered.index('rm -rf "$INSTANCE_DATA_DIR"')
+        assert rendered.index("iam delete-role ") < rendered.index('rm -rf "$INSTANCE_DATA_DIR"')
+
+    def test_failure_path_preserves_state_and_exits_nonzero(self):
+        rendered = self._rendered()
+        assert "Local state has been PRESERVED" in rendered
+        assert rendered.rstrip().endswith("exit 1")
+
+    def test_no_unconditional_exit_zero(self):
+        assert "\nexit 0\n" not in self._rendered().replace("\texit 0", "")
+
+    def test_security_group_deletion_retries_on_dependency_violation(self):
+        rendered = self._rendered()
+        assert "DependencyViolation" in rendered
+
+    def test_already_gone_resources_do_not_count_as_failures(self):
+        # What makes the script re-runnable after a partial failure.
+        assert "already gone" in self._rendered()
 
 
 class TestCloudWatchLogsTeardown:

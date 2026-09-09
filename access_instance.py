@@ -5,7 +5,8 @@
 # Author:       Rodney Marable <rodney.marable@gmail.com>
 # Created On:   June 3, 2019
 # Last Changed: June 22, 2019
-# Purpose:	Top-level script to SSH into Ec2InstanceMaker-built instances
+# Purpose:	Top-level script to access Ec2InstanceMaker-built instances
+# 		via AWS Systems Manager Session Manager
 ################################################################################
 
 # Load some required Python libraries

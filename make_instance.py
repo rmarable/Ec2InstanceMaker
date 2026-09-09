@@ -277,6 +277,7 @@ def print_debug_parameters(params: InstanceParameters) -> None:
         print("project_id = " + params.project_id)
     if params.ec2_iam_instance_profile:
         print("preserve_iam_role = " + params.preserve_iam_role)
+        print("preserve_security_group = " + params.preserve_security_group)
         if "UNDEFINED" not in params.ec2_iam_instance_policy:
             print("ec2_iam_instance_policy = " + params.ec2_iam_instance_policy)
         print("ec2_iam_instance_profile = " + params.ec2_iam_instance_profile)
@@ -398,6 +399,7 @@ class VpcSecurityAndKeypairResolution:
     ssh_allowed_ips: str
     security_group_name: str
     vpc_security_group_ids: str
+    preserve_security_group: BoolStr
     ec2_user_home: str
     aws_ami: str
     ec2_keypair: str
@@ -551,11 +553,19 @@ def resolve_vpc_security_and_keypair(
     ssh_allowed_ips = resolve_ssh_allowed_ips(ec2_client, vpc_id, ssh_allowed_ips, refer_to_docs_and_quit)
     p_val("ssh_allowed_ips", debug_mode)
 
-    security_group_name, vpc_security_group_ids = resolve_security_group(
+    security_group_name, vpc_security_group_ids, preserve_security_group = resolve_security_group(
         ec2, security_group, settings.instance_serial_number, vpc_id, network.is_windows, ssh_allowed_ips, add_inbound_security_group_rule
     )
     p_val("security_group", debug_mode)
     p_val("vpc_security_group_ids", debug_mode)
+    if preserve_security_group == "true":
+        print("")
+        print("*** WARNING ***")
+        print('Reusing the pre-existing security group "' + security_group_name + '".')
+        print("Its existing inbound rules are left exactly as they are, so --ssh_allowed_ips")
+        print("has NO effect on this build, and kill-instance." + settings.instance_name + ".sh will")
+        print("not delete this security group.")
+        print("")
 
     ec2_user_home = "/home/" + network.ec2_user
     p_val("ec2_user", debug_mode)
@@ -587,6 +597,7 @@ def resolve_vpc_security_and_keypair(
         ssh_allowed_ips=ssh_allowed_ips,
         security_group_name=security_group_name,
         vpc_security_group_ids=vpc_security_group_ids,
+        preserve_security_group=preserve_security_group,
         ec2_user_home=ec2_user_home,
         aws_ami=aws_ami,
         ec2_keypair=ec2_keypair,
@@ -730,6 +741,7 @@ def render_and_apply(
         prod_level=options.prod_level,
         project_id=options.project_id,
         preserve_iam_role=iam_sns.preserve_iam_role,
+        preserve_security_group=vpc.preserve_security_group,
         public_ip=options.public_ip,
         region=settings.region,
         security_group_name=vpc.security_group_name,
@@ -779,6 +791,7 @@ ec2_iam_instance_policy: {ec2_iam_instance_policy}
 ec2_iam_instance_profile: {ec2_iam_instance_profile}
 ec2_iam_instance_role: {ec2_iam_instance_role}
 preserve_iam_role: {preserve_iam_role}
+preserve_security_group: {preserve_security_group}
 
 # EC2 instance parameters
 
@@ -886,6 +899,14 @@ kill_instance_script: kill_instance.{instance_name}.sh
         iam_sns.ec2_iam_instance_profile,
         iam_sns.preserve_iam_role,
         vpc.ec2_keypair,
+        aws_clients.sns_client,
+        iam_sns.sns_topic_arn,
+        aws_clients.logs_client,
+        iam_sns.cloudwatch_log_group,
+        settings.enable_cloudwatch_logs,
+        options.preserve_cloudwatch_logs,
+        vpc.preserve_security_group,
+        settings.instance_name,
     )
 
     print("Invoking Terraform to build " + settings.instance_name + "...")

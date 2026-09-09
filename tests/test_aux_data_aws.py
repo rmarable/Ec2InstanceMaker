@@ -232,6 +232,14 @@ class TestCtrlCAbortIamNaming:
             "iam_instance_profile": "Ec2InstanceMaker-profile-99999999999999_us-east-1",
             "preserve_iam_role": "false",
             "ec2_keypair": "99999999999999_us-east-1_us-east-1",
+            "sns_client": MagicMock(),
+            "sns_topic_arn": "arn:aws:sns:us-east-1:123456789012:fake-topic",
+            "logs_client": MagicMock(),
+            "cloudwatch_log_group": "/ec2instancemaker/fake",
+            "enable_cloudwatch_logs": "true",
+            "preserve_cloudwatch_logs": "false",
+            "preserve_security_group": "false",
+            "instance_name": "fake01",
         }
         kwargs.update(overrides)
         with patch("time.sleep", side_effect=KeyboardInterrupt):
@@ -277,3 +285,97 @@ class TestCtrlCAbortIamNaming:
             ec2_keypair="my-custom-keypair",
         )
         mock_ec2.delete_key_pair.assert_called_with(KeyName="my-custom-keypair")
+
+
+class TestCtrlCAbortCleanupReporting:
+    """ctrlC_Abort() caught ClientError and printed something only when the
+    error code was the "already gone" one. Any other code (AccessDenied,
+    DeleteConflict, Throttling, DependencyViolation) fell off the end of the
+    handler with no message and no re-raise -- so the abort printed
+    "Aborting..." and exited 1 while the security group, keypair, role,
+    policy and instance profile were all still there, and the operator was
+    told cleanup had happened.
+
+    It also never deleted the SNS topic or the CloudWatch Logs group, both
+    of which are created in the phase immediately before the abort window.
+    """
+
+    def _call(self, tmp_path, **overrides):
+        (tmp_path / "kp.pem").write_text("x")
+        kwargs = {
+            "sleep_time": 0,
+            "line_length": 40,
+            "vars_file_path": str(tmp_path / "vars.yml"),
+            "instance_data_dir": str(tmp_path) + "/",
+            "instance_serial_number_file": str(tmp_path / "serial"),
+            "ec2client": MagicMock(),
+            "iam": MagicMock(),
+            "security_group_name": "fake-sg",
+            "vpc_security_group_ids": "sg-fakefakefake",
+            "iam_instance_role": "role",
+            "iam_instance_policy": "policy",
+            "iam_instance_profile": "profile",
+            "preserve_iam_role": "true",
+            "ec2_keypair": "kp",
+            "sns_client": MagicMock(),
+            "sns_topic_arn": "arn:aws:sns:us-east-1:123456789012:fake",
+            "logs_client": MagicMock(),
+            "cloudwatch_log_group": "/ec2instancemaker/fake",
+            "enable_cloudwatch_logs": "true",
+            "preserve_cloudwatch_logs": "false",
+            "preserve_security_group": "false",
+            "instance_name": "fake01",
+        }
+        kwargs.update(overrides)
+        with patch("time.sleep", side_effect=KeyboardInterrupt):
+            with pytest.raises(SystemExit):
+                aux_data.ctrlC_Abort(**kwargs)
+        return kwargs
+
+    @staticmethod
+    def _client_error(code):
+        return ClientError({"Error": {"Code": code, "Message": code}}, "Delete")
+
+    def test_sns_topic_is_deleted(self, tmp_path):
+        kwargs = self._call(tmp_path)
+        kwargs["sns_client"].delete_topic.assert_called_once_with(TopicArn="arn:aws:sns:us-east-1:123456789012:fake")
+
+    def test_cloudwatch_log_group_is_deleted(self, tmp_path):
+        kwargs = self._call(tmp_path)
+        kwargs["logs_client"].delete_log_group.assert_called_once_with(logGroupName="/ec2instancemaker/fake")
+
+    def test_cloudwatch_log_group_is_kept_when_preserved(self, tmp_path):
+        kwargs = self._call(tmp_path, preserve_cloudwatch_logs="true")
+        kwargs["logs_client"].delete_log_group.assert_not_called()
+
+    def test_preexisting_security_group_is_not_deleted(self, tmp_path):
+        kwargs = self._call(tmp_path, preserve_security_group="true")
+        kwargs["ec2client"].delete_security_group.assert_not_called()
+
+    def test_unexpected_error_is_reported_not_swallowed(self, tmp_path, capsys):
+        ec2client = MagicMock()
+        ec2client.delete_security_group.side_effect = self._client_error("DependencyViolation")
+        self._call(tmp_path, ec2client=ec2client)
+        out = capsys.readouterr().out
+        assert "FAILED" in out
+        assert "DependencyViolation" in out
+        assert "could NOT be deleted" in out
+        # The operator is told how to finish the job.
+        assert "kill-instance.fake01.sh" in out
+
+    def test_already_gone_is_not_reported_as_a_failure(self, tmp_path, capsys):
+        ec2client = MagicMock()
+        ec2client.delete_security_group.side_effect = self._client_error("InvalidGroup.NotFound")
+        self._call(tmp_path, ec2client=ec2client)
+        out = capsys.readouterr().out
+        assert "could NOT be deleted" not in out
+        assert "Nothing to delete" in out
+
+    def test_one_failure_does_not_stop_later_cleanup_steps(self, tmp_path):
+        # The whole point of counting failures instead of aborting.
+        ec2client = MagicMock()
+        ec2client.delete_security_group.side_effect = self._client_error("DependencyViolation")
+        kwargs = self._call(tmp_path, ec2client=ec2client)
+        ec2client.delete_key_pair.assert_called_once()
+        kwargs["sns_client"].delete_topic.assert_called_once()
+        kwargs["logs_client"].delete_log_group.assert_called_once()

@@ -1,6 +1,6 @@
 # Ec2InstanceMaker - Easy Automation for Building Cloud Servers
 
-Ec2InstanceMaker is an Open Source command line interface that makes it easy
+Ec2InstanceMaker is a source-available command line interface that makes it easy
 to build, access, and destroy servers in the cloud.  It is also a useful
 teaching tool for those who want to dive deep into cloud computing and
 security paradigms, learn more about infrastructure automation, and explore
@@ -8,21 +8,21 @@ the AWS ecosystem.
 
 ## License Information
 
-Please refer to the LICENSE document included with this Open Source software for the specific terms and conditions that govern its use.
+Please refer to the LICENSE document included with this source-available software for the specific terms and conditions that govern its use.
 
 ## Disclaimer
 
-By using this Open Source software:
+By using this source-available software:
 
-* You accept all potential risks involved with your use of this Open Source software.
+* You accept all potential risks involved with your use of this source-available software.
 
-* You agree that the author shall have no responsibility or liability for any losses or damages incurred in conjunction with your use of this Open Source Software.
+* You agree that the author shall have no responsibility or liability for any losses or damages incurred in conjunction with your use of this source-available software.
 
 * You acknowledge that bugs may still be present, unexpected behavior might be observed, and some features may not be completely documented.
 
-**This Open Source software is authored by Rodney Marable in his individual capacity and is neither endorsed nor supported by Amazon Web Services.**
+**This source-available software is authored by Rodney Marable in his individual capacity and is neither endorsed nor supported by Amazon Web Services.**
 
-You cannot create cases with AWS Technical Support or engage AWS support engineers in public forums if you have any questions, problems, or issues using this Open Source software.
+You cannot create cases with AWS Technical Support or engage AWS support engineers in public forums if you have any questions, problems, or issues using this source-available software.
 
 ```
 "Play at your own risk!"
@@ -31,7 +31,7 @@ You cannot create cases with AWS Technical Support or engage AWS support enginee
 
 ## About Ec2InstanceMaker
 
-Ec2InstanceMaker is an Open Source command line wrapper toolkit that eases the
+Ec2InstanceMaker is a source-available command line wrapper toolkit that eases the
 automation, creation, and destruction of Amazon Elastic Compute Cloud (EC2)
 instance fleets.  This tool is designed to enable anyone to leverage cloud
 computing at scale without requiring deep infrastructure knowledge or
@@ -96,7 +96,6 @@ matching AMI is selected automatically.  (Windows Server does not run on
 Graviton -- AWS does not publish Windows AMIs for ARM64 -- so Windows
 `base_os` values are restricted to x86_64 instance types.)
 
-* Administrative control over the allowed EC2 instance types that can be deployed.
 
 * Custom AMI support to enable deployment of standardized cloud computing environments.  Please see "Working with Custom AMIs" below for more details on how to leverage these options which include:
   * Spawning of new instances from previously built user-supplied "custom AMIs."
@@ -169,7 +168,7 @@ on only instances this toolkit created.
 
 * `manage_instance.py` for starting, stopping, rebooting, or fully
 terminating a previously-built instance or family after the fact, without
-needing to re-run `make_instance.py` -- also reports status (`-s`) and
+needing to re-run `make_instance.py` -- also reports status (`-S`) and
 lists every managed instance in a region (`-l`).
 
 * CloudWatch Agent logging on by default -- ships cloud-init and system
@@ -255,8 +254,10 @@ Ec2InstanceMaker is a collection of scripts and user-configurable templates.
 
 **Scripts.** Please see below for more details on how the scripts are used.
 * make_instance.py
-* access-instance.py
-* kill-instance.$INSTANCE_NAME.py
+* access_instance.py
+* manage_instance.py
+* mcp_server.py
+* kill-instance.$INSTANCE_NAME.sh
 
 **Templates**.  Ec2InstanceMaker provides some generic templates that can be
 customized to permit more granular control over the IAM EC2 instance policy
@@ -264,15 +265,41 @@ that is used to create the instance profiles that are created by the toolkit.
 
   * **MinimalEc2InstancePolicy.json** is a bare-bones template that allows only
 EC2 and S3 API calls.
-  * **GenericEc2InstancePolicy.json** provides enough permissions for an EC2
-"jumphost" spawned by make_instance.py to in turn create additional instances.
-In addition to allowing EC2 and S3, it also permits maintenance of SQS
-queues, SNS topic administration, IAM role and instance profile maintenance,
-and access to SSM.  However, please note that
-this template does *NOT* provide adequate permissions for instances built with
-Ec2InstanceMzker to spwan children of their own.
-  * **ExtendedEc2InstancePolicy.json** is equivalent to `GenericEc2InstancePolicy.json` permissions for an EC2 except that it grants Ec2InstanceMaker-spawned
+  * **GenericEc2InstancePolicy.json** (the default) allows EC2 and S3, and
+also permits maintenance of SQS queues, SNS topic administration, IAM role
+and instance profile maintenance scoped to this instance's own entities, and
+access to SSM.  Note that this template does *NOT* provide adequate
+permissions for instances built with Ec2InstanceMaker to spawn children of
+their own -- use `ExtendedEc2InstancePolicy.json` for that.
+  * **ExtendedEc2InstancePolicy.json** is equivalent to
+`GenericEc2InstancePolicy.json` except that it grants Ec2InstanceMaker-spawned
 instances appropriate permissions to spawn children.
+
+### A note on what these policies actually grant
+
+These are convenience templates, not least-privilege policies.  Read the JSON
+before using one in an account you care about:
+
+  * **None of the three is narrowly scoped.**  All of them grant
+`ec2:TerminateInstances`, `ec2:DeleteSecurityGroup` and `ec2:RunInstances` on
+`Resource: "*"`, and `s3:DeleteObject`/`s3:DeleteBucket` across every bucket in
+the account.  That includes the one named "Minimal", which is minimal only
+relative to the other two.  Anything running on the instance -- including
+anything that can reach the instance metadata service -- inherits all of it.
+  * **`ExtendedEc2InstancePolicy.json` permits privilege escalation by
+design.**  Spawning child instances requires `iam:CreateRole`, `iam:PassRole`
+and `iam:AttachRolePolicy` within the `--iam_name_prefix` namespace, which is
+enough to create a role with broader rights than the instance itself has and
+launch something with it.  That is inherent to the feature, not a defect --
+but only grant it where you would be comfortable granting account
+administrator.
+  * `GenericEc2InstancePolicy.json` previously also granted
+`iam:PutRolePolicy` and `iam:AttachRolePolicy` over the instance's *own* role,
+which let anything on the instance make itself account administrator in a
+single API call.  Those two actions have been removed.
+  * Scope the blast radius with `--iam_name_prefix`, and prefer supplying your
+own policy document over these templates for production use.
+
   * **build_instance.j2** permits the operator to leverage Terraform's
 post-install hook to perform further configuration of EC2 instances using a
 shell script.
@@ -444,7 +471,7 @@ maintain a list of valid values.
 The minimum required arguments are the Availability Zone, the instance owner's
 username and email address, and the instance name.  All other parameters will
 fall back to the default of a single ondemand t2.micro instance running Amazon
-Linux 2 with an 8 GB EBS gp2 unencrypted volume as the root device, using the
+Linux 2023 with an 8 GB EBS gp2 unencrypted volume as the root device, using the
 supplied JSON policy document to generate an IAM instance profile providing
 EC2 and S3 access:
 

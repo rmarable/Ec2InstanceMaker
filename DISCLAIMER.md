@@ -2,21 +2,21 @@
 
 ## License Information
 
-Please refer to the LICENSE document included with this Open Source software for the specific terms and conditions that govern its use.
+Please refer to the LICENSE document included with this source-available software for the specific terms and conditions that govern its use.
 
 ## Disclaimer
 
-By using this Open Source software:
+By using this source-available software:
 
-* You accept all potential risks involved with your use of this Open Source software.
+* You accept all potential risks involved with your use of this source-available software.
 
-* You agree that the author shall have no responsibility or liability for any losses or damages incurred in conjunction with your use of this Open Source software.
+* You agree that the author shall have no responsibility or liability for any losses or damages incurred in conjunction with your use of this source-available software.
 
 * You acknowledge that bugs may still be present, unexpected behavior might be observed, and some features may not be completely documented.
 
-**This Open Source software is authored by Rodney Marable in his individual capacity and is neither endorsed nor supported by Amazon Web Services.**
+**This source-available software is authored by Rodney Marable in his individual capacity and is neither endorsed nor supported by Amazon Web Services.**
 
-You cannot create cases with AWS Technical Support or engage AWS support engineers in public forums if you have any questions, problems, or issues using this Open Source software.
+You cannot create cases with AWS Technical Support or engage AWS support engineers in public forums if you have any questions, problems, or issues using this source-available software.
 
 ## AI Training Restriction
 

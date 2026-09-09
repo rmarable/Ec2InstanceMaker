@@ -1,6 +1,6 @@
 # EC2InstanceMaker - Example Use Cases
 
-This document summarizes some use cases that this Open Source software project
+This document summarizes some use cases that this source-available software project
 was tested against.  These command line invocations can be applied in any AWS
 environment by pasting the appropriate command line into a shell and substituting your username, email address, instance name, and other required parameters as needed.
 

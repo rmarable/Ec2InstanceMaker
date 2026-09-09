@@ -30,8 +30,10 @@ $ python3.12 -m venv .venv && source .venv/bin/activate
 $ pip install -r requirements.txt
 ```
 
-Also requires, on PATH: `terraform` (0.12.x — pinned/checked via
-`TERRAFORM_VERSION` in `make_instance.py` and `linux-ec2-setup.sh`), `jq`,
+Also requires, on PATH: `terraform` (any HCL2-capable version, i.e. 0.12 or newer; CI and the
+template linter both run current 1.x. Note that nothing in the build
+*enforces* a version -- `get_terraform_version()` only detects and prints
+it. `linux-ec2-setup.sh` still installs 0.12.9, which is stale), `jq`,
 and configured AWS credentials (`aws configure` or env vars).
 `make_instance.py` and `template_engine.py` both resolve paths (e.g.
 `templates/`) relative to the current working directory, so commands must be
@@ -369,7 +371,7 @@ toolkit-controlled and user-controlled halves don't mix. Selected via
 each name resolves to `custom_user_prelogin_script.j2_<name>` (cloud-init,
 before first login — content gets embedded into `instance_userdata.j2`'s
 `write_files`/`runcmd`) and/or `custom_user_postboot_script.j2_<name>`
-(pushed and run by `DEFAULT_EC2_TEMPLATE.j2`'s SSH remote-exec provisioner,
+(pushed and run via `aws ssm send-command` by `ssm_provision.j2`, as root,
 after `build_instance.sh`) — a name needs at least one of the two, and a
 name matching neither is a hard failure
 (`instance_builder.resolve_custom_user_scripts()`), not a silent no-op. Both
@@ -465,8 +467,7 @@ is set in `DEFAULT_EC2_TEMPLATE.j2`'s `tags`/`volume_tags` blocks and the
 spot-tagging `local-exec` command (needed there too — `aws_spot_instance_request`'s
 own tags don't propagate to the instance it launches; that's what the
 existing `create-tags` local-exec block is for) — keep it in all three
-spots if either changes. Unlike `make_instance.py`/`access_instance.py`,
-this one *is* unit tested (`tests/test_manage_instance.py`, a plain
+spots if either changes. This one is unit tested (`tests/test_manage_instance.py`, a plain
 `import manage_instance`) — its logic lives in standalone,
 dependency-injected functions gated behind
 `if __name__ == "__main__": main()`.

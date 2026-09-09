@@ -263,7 +263,21 @@ def resolve_ssh_allowed_ips(ec2_client: EC2Client, vpc_id: str, ssh_allowed_ips:
 
 # Function: resolve_security_group()
 # Purpose: reuse the named EC2 security group if it already exists,
-# otherwise create it with the appropriate inbound rule for the base_os
+# otherwise create it with the appropriate inbound rule for the base_os.
+#
+# Also reports which of those two happened, as preserve_security_group,
+# which is threaded into the generated kill script the same way
+# preserve_iam_role already is. Teardown previously deleted the security
+# group unconditionally, by hardcoded ID -- so `--security_group
+# corp-shared-sg` against an existing group meant kill-instance.<name>.sh
+# would delete a security group this toolkit never created, and which
+# other things may well still be using. Only a group this build actually
+# created is ours to delete.
+#
+# Note that the reuse path deliberately does not touch the existing
+# group's rules, which also means --ssh_allowed_ips has no effect there;
+# make_instance.py warns about that at the call site, since silently
+# ignoring a security flag is worse than saying so.
 # (RDP/3389 for Windows, SSH/22 otherwise), scoped to ssh_allowed_ips
 # (see resolve_ssh_allowed_ips() above -- never 0.0.0.0/0). Returns the
 # resolved security_group_name (never the boto3 resource object -- the
@@ -280,11 +294,12 @@ def resolve_security_group(
     is_windows: bool,
     ssh_allowed_ips: str,
     add_inbound_security_group_rule: Callable[[SecurityGroup, str, str, int, int], None],
-) -> tuple[str, str]:
+) -> tuple[str, str, BoolStr]:
     if security_group_name == "ec2instancemaker_sg":
         security_group_name = security_group_name + "_" + instance_serial_number
     filters: list[FilterTypeDef] = [{"Name": "group-name", "Values": [security_group_name]}, {"Name": "vpc-id", "Values": [vpc_id]}]
     sg_id = list(ec2.security_groups.filter(Filters=filters))
+    preserve_security_group: BoolStr = "true"
     if not sg_id:
         security_group = ec2.create_security_group(GroupName=security_group_name, Description="EC2 security group - created by Ec2InstanceMaker", VpcId=vpc_id)
         if is_windows:
@@ -292,8 +307,9 @@ def resolve_security_group(
         else:
             add_inbound_security_group_rule(security_group, "tcp", ssh_allowed_ips, 22, 22)
         sg_id = list(ec2.security_groups.filter(Filters=filters))
+        preserve_security_group = "false"
     vpc_security_group_ids = sg_id[0].id
-    return security_group_name, vpc_security_group_ids
+    return security_group_name, vpc_security_group_ids, preserve_security_group
 
 
 # Function: setup_keypair()
@@ -755,6 +771,7 @@ class InstanceParameters:
     prod_level: Literal["dev", "test", "stage", "prod"]
     project_id: str
     preserve_iam_role: BoolStr
+    preserve_security_group: BoolStr
     public_ip: BoolStr
     region: str
     security_group_name: str

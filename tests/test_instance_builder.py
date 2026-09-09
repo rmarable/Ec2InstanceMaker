@@ -179,6 +179,24 @@ class TestValidateAndResizeEbsVolumes:
                 refer_to_docs_and_quit=_quitting_mock(),
             )
 
+    def test_io1_root_iops_above_the_maximum_is_refused(self):
+        # The mirror of test_io1_requires_device_iops_in_range below. Only
+        # the *device* check was previously exercised at the top of the
+        # range, so deleting "or ebs_root_volume_iops > 16000" from the
+        # root check broke nothing in the suite -- confirmed by mutation
+        # testing during an adversarial review.
+        with pytest.raises(SystemExit):
+            instance_builder.validate_and_resize_ebs_volumes(
+                ebs_root_volume_size=8,
+                ebs_device_volume_size=0,
+                ebs_root_volume_type="io1",
+                ebs_device_volume_type="gp2",
+                ebs_root_volume_iops=16001,
+                ebs_device_volume_iops=100,
+                is_windows=False,
+                refer_to_docs_and_quit=_quitting_mock(),
+            )
+
     def test_io1_requires_device_iops_in_range(self):
         with pytest.raises(SystemExit):
             instance_builder.validate_and_resize_ebs_volumes(
@@ -304,6 +322,23 @@ class TestResolveVpcAndSubnet:
             instance_builder.resolve_vpc_and_subnet(ec2_client, "nonexistent-vpc", "us-east-1a", quit_fn)
         quit_fn.assert_called_once_with('"nonexistent-vpc" is an undefined VPC!')
 
+    def test_subnet_lookup_is_scoped_to_the_requested_az(self):
+        # Every existing test set describe_subnets.return_value and asserted
+        # on the SubnetId that came back, so the Filters= argument was never
+        # inspected -- removing the availabilityZone filter entirely left
+        # the suite green (confirmed by mutation testing). Without it,
+        # --az us-east-2a can select a subnet in us-east-2c and Terraform
+        # launches in the wrong AZ, defeating the point of the flag.
+        ec2_client = MagicMock()
+        ec2_client.describe_vpcs.return_value = {"Vpcs": [{"VpcId": "vpc-abc123", "Tags": [{"Key": "Name", "Value": "vpc_default"}]}]}
+        ec2_client.describe_subnets.return_value = {"Subnets": [{"SubnetId": "subnet-xyz789"}]}
+
+        instance_builder.resolve_vpc_and_subnet(ec2_client, "vpc_default", "us-east-1b", MagicMock(side_effect=SystemExit(1)))
+
+        filters = ec2_client.describe_subnets.call_args.kwargs["Filters"]
+        az_filter = next(f for f in filters if f["Name"] == "availabilityZone")
+        assert az_filter["Values"] == ["us-east-1b"]
+
     def test_no_subnets_in_az_quits(self):
         ec2_client = MagicMock()
         ec2_client.describe_vpcs.return_value = {"Vpcs": [{"VpcId": "vpc-abc123", "Tags": [{"Key": "Name", "Value": "vpc_default"}]}]}
@@ -378,7 +413,7 @@ class TestResolveSecurityGroup:
         ec2 = self._ec2_with_filter_results([[fake_sg]])
         add_rule = MagicMock()
 
-        name, sg_ids = instance_builder.resolve_security_group(ec2, "ec2instancemaker_sg", "12345_us-east-1", "vpc-abc", False, "10.0.0.0/16", add_rule)
+        name, sg_ids, preserve = instance_builder.resolve_security_group(ec2, "ec2instancemaker_sg", "12345_us-east-1", "vpc-abc", False, "10.0.0.0/16", add_rule)
 
         assert name == "ec2instancemaker_sg_12345_us-east-1"
         assert sg_ids == "sg-0123456789abcdef0"
@@ -390,7 +425,7 @@ class TestResolveSecurityGroup:
         ec2 = self._ec2_with_filter_results([[fake_sg]])
         add_rule = MagicMock()
 
-        name, sg_ids = instance_builder.resolve_security_group(ec2, "my-custom-sg", "12345_us-east-1", "vpc-abc", False, "10.0.0.0/16", add_rule)
+        name, sg_ids, preserve = instance_builder.resolve_security_group(ec2, "my-custom-sg", "12345_us-east-1", "vpc-abc", False, "10.0.0.0/16", add_rule)
 
         assert name == "my-custom-sg"
         assert sg_ids == "sg-custom111111111"
@@ -401,7 +436,7 @@ class TestResolveSecurityGroup:
         ec2.create_security_group.return_value = created_sg
         add_rule = MagicMock()
 
-        name, sg_ids = instance_builder.resolve_security_group(ec2, "ec2instancemaker_sg", "999_us-east-1", "vpc-abc", True, "10.0.0.0/16", add_rule)
+        name, sg_ids, preserve = instance_builder.resolve_security_group(ec2, "ec2instancemaker_sg", "999_us-east-1", "vpc-abc", True, "10.0.0.0/16", add_rule)
 
         ec2.create_security_group.assert_called_once()
         add_rule.assert_called_once_with(created_sg, "tcp", "10.0.0.0/16", 3389, 3389)
@@ -416,6 +451,31 @@ class TestResolveSecurityGroup:
         instance_builder.resolve_security_group(ec2, "ec2instancemaker_sg", "999_us-east-1", "vpc-abc", False, "10.0.0.0/16", add_rule)
 
         add_rule.assert_called_once_with(created_sg, "tcp", "10.0.0.0/16", 22, 22)
+
+    def test_newly_created_group_is_not_preserved_on_teardown(self):
+        ec2 = self._ec2_with_filter_results([[], [_fake_security_group("sg-newlycreated0003")]])
+        ec2.create_security_group.return_value = _fake_security_group("sg-newlycreated0003")
+
+        _, _, preserve = instance_builder.resolve_security_group(ec2, "ec2instancemaker_sg", "999_us-east-1", "vpc-abc", False, "10.0.0.0/16", MagicMock())
+
+        assert preserve == "false"
+
+    def test_preexisting_group_is_preserved_on_teardown(self):
+        # A group this build did not create is not ours to delete. Teardown
+        # previously deleted the security group unconditionally by hardcoded
+        # ID, so `--security_group corp-shared-sg` meant
+        # kill-instance.<name>.sh would delete a shared security group the
+        # toolkit never created.
+        ec2 = self._ec2_with_filter_results([[_fake_security_group("sg-preexisting00001")]])
+        add_rule = MagicMock()
+
+        _, _, preserve = instance_builder.resolve_security_group(ec2, "corp-shared-sg", "999_us-east-1", "vpc-abc", False, "10.0.0.0/16", add_rule)
+
+        assert preserve == "true"
+        ec2.create_security_group.assert_not_called()
+        # The reuse path deliberately leaves the existing rules alone, which
+        # is exactly why --ssh_allowed_ips has no effect here.
+        add_rule.assert_not_called()
 
     def test_lookup_is_scoped_to_the_target_vpc(self):
         # Regression test: a bare group-name filter (with no vpc-id
@@ -637,6 +697,17 @@ class TestBuildSecurityGroupTags:
         assert tag_dict["Name"] == "dev01-sg"
         assert tag_dict["InstanceOwner"] == "rmarable"
         assert "ProjectID" not in tag_dict
+
+    def test_instance_serial_number_tag_is_present(self):
+        # Resource lifecycle hinges on InstanceSerialNumber -- it is the tag
+        # value the generated kill script and build_ami.j2 use to find
+        # everything belonging to one instance/family. Dropping it from
+        # this tag set orphans the security group on teardown, and nothing
+        # in the suite noticed: the string "InstanceSerialNumber" did not
+        # appear anywhere under tests/ before this test.
+        tags = instance_builder.build_security_group_tags("dev01-sg", "dev01", "12345_us-east-1", "rmarable", "r@x.com", "hpc", "7-September-2026", "UNDEFINED")
+        tag_dict = {t["Key"]: t["Value"] for t in tags}
+        assert tag_dict["InstanceSerialNumber"] == "12345_us-east-1"
 
     def test_project_id_included_when_defined(self):
         tags = instance_builder.build_security_group_tags("dev01-sg", "dev01", "12345_us-east-1", "rmarable", "r@x.com", "hpc", "7-September-2026", "myproj123")

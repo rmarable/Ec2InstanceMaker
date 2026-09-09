@@ -19,7 +19,7 @@ scheme that happens to produce a different-but-still-broken result.
 
 import subprocess
 
-from template_engine import _hcl_escape_filter, _shquote_filter, _tf_shquote_filter
+from template_engine import _bool_filter, _hcl_escape_filter, _shquote_filter, _tf_shquote_filter
 
 
 class TestShquoteFilter:
@@ -57,22 +57,94 @@ class TestShquoteFilter:
 
 
 class TestTfShquoteFilter:
+    @staticmethod
+    def _hcl_unquote(hcl_string):
+        """Un-escape an HCL double-quoted string literal the way Terraform's
+        own parser does: consume the opening quote, resolve backslash
+        escapes, and STOP at the first *unescaped* closing quote. Returns
+        (value, trailing) so a caller can assert nothing escaped the
+        literal.
+
+        This used to be `hcl_string[1:-1].replace(...)`, which blindly
+        assumed the literal was well-formed. That made the test vacuous:
+        a payload that closed the string early round-tripped unchanged,
+        and deleting tf_shquote's entire HCL-escaping pass still left the
+        suite green (verified by mutation testing during an adversarial
+        review). Terminating at the first unescaped quote is the whole
+        property being tested, so the simulated parser has to model it.
+        """
+        assert hcl_string.startswith('"')
+        out = []
+        i = 1
+        while i < len(hcl_string):
+            char = hcl_string[i]
+            if char == "\\":
+                out.append(hcl_string[i + 1])
+                i += 2
+                continue
+            if char == '"':
+                return "".join(out), hcl_string[i + 1 :]
+            out.append(char)
+            i += 1
+        raise AssertionError("unterminated HCL string literal: " + hcl_string)
+
     def test_result_survives_an_hcl_double_quoted_wrapper_then_a_shell(self, tmp_path):
         # Simulates DEFAULT_EC2_TEMPLATE.j2's local-exec command = "..."
-        # HCL string containing a shell command -- Terraform's own HCL
-        # parser un-escapes \\ and \" before ever handing the string to
-        # the shell, so this test does that same un-escaping step (what
-        # Terraform would do) before running it, proving the shell sees
-        # exactly the shlex.quote()'d token tf_shquote started from.
+        # HCL string containing a shell command.
         marker = tmp_path / "pwned_tfshquote"
         payload = f'tester\'s "build"; touch {marker}'
         tf_quoted = _tf_shquote_filter(payload)
-        hcl_string = '"' + tf_quoted + '"'
-        # What Terraform's HCL parser does to a double-quoted string literal:
-        shell_command_str = hcl_string[1:-1].replace('\\"', '"').replace("\\\\", "\\")
+        # The escaping pass must actually have happened -- without this
+        # assertion the test passes on a filter that does nothing but
+        # shlex.quote().
+        assert '\\"' in tf_quoted
+        shell_command_str, trailing = self._hcl_unquote('"' + tf_quoted + '"')
+        # Nothing escaped the HCL string literal.
+        assert trailing == ""
         result = subprocess.run(f"echo {shell_command_str}", shell=True, capture_output=True, text=True)  # nosec B602
         assert result.stdout.strip() == payload
         assert not marker.exists()
+
+    def test_hcl_interpolation_sequence_is_neutralized(self):
+        # The real defect this closes: Terraform expands "${...}" in a
+        # local-exec command string AFTER rendering and BEFORE handing it
+        # to /bin/sh. An expansion result containing a single quote would
+        # otherwise escape the '...' wrapping shlex.quote() put around the
+        # value, turning operator free text into executed shell commands.
+        tf_quoted = _tf_shquote_filter("${self.tags.InstanceOwnerDepartment}")
+        assert "$${" in tf_quoted
+        assert "${" not in tf_quoted.replace("$${", "")
+
+    def test_hcl_directive_sequence_is_neutralized(self):
+        # "%{ ... }" is HCL's other template sequence and evaluates just as
+        # readily as "${ ... }".
+        tf_quoted = _tf_shquote_filter("%{ for i in [1, 2] }x%{ endfor }")
+        assert "%%{" in tf_quoted
+        assert "%{" not in tf_quoted.replace("%%{", "")
+
+
+class TestBoolFilter:
+    """_bool_filter had no tests at all. It gates
+    `encrypted = "{{ ebs_encryption | bool | lower }}"` in
+    DEFAULT_EC2_TEMPLATE.j2 plus five tag sites, so a bug here silently
+    flips EBS encryption on or off for every generated instance -- and
+    scripts/lint_templates.py cannot see it, since the rendered .tf stays
+    syntactically valid either way. Mutation testing confirmed the gap:
+    making this filter return True unconditionally left the suite green.
+    """
+
+    def test_ansible_style_true_values(self):
+        for value in ("true", "True", "TRUE", " true ", "yes", "t", "1", "on", True, 1):
+            assert _bool_filter(value) is True, value
+
+    def test_ansible_style_false_values(self):
+        for value in ("false", "False", "FALSE", "no", "0", "off", "", None, False, 0, "banana"):
+            assert _bool_filter(value) is False, value
+
+    def test_rendered_form_is_the_lowercase_string_terraform_expects(self):
+        # This is the actual `| bool | lower` chain the templates use.
+        assert str(_bool_filter("True")).lower() == "true"
+        assert str(_bool_filter("False")).lower() == "false"
 
 
 class TestHclEscapeFilter:

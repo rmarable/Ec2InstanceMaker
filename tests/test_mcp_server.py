@@ -409,7 +409,7 @@ def _patch_aws_and_terraform_boundary(monkeypatch):
     monkeypatch.setattr(make_instance, "setup_cloudwatch_logging", MagicMock())
     monkeypatch.setattr(make_instance, "resolve_vpc_and_subnet", MagicMock(return_value=("vpc-0123456789abcdef0", "vpc_default", "subnet-0123456789abcdef0")))
     monkeypatch.setattr(make_instance, "resolve_ssh_allowed_ips", MagicMock(return_value="10.0.0.0/16"))
-    monkeypatch.setattr(make_instance, "resolve_security_group", MagicMock(return_value=("ec2instancemaker_sg_mcpdev01-000000010926", "sg-0123456789abcdef0")))
+    monkeypatch.setattr(make_instance, "resolve_security_group", MagicMock(return_value=("ec2instancemaker_sg_mcpdev01-000000010926", "sg-0123456789abcdef0", "false")))
     monkeypatch.setattr(make_instance, "resolve_ami", MagicMock(return_value="ami-0123456789abcdef0"))
     monkeypatch.setattr(make_instance, "setup_keypair", MagicMock())
     monkeypatch.setattr(make_instance, "setup_iam", MagicMock(return_value=("Ec2InstanceMaker-role-mcpdev01", "Ec2InstanceMaker-policy-mcpdev01", "Ec2InstanceMaker-profile-mcpdev01", "false")))

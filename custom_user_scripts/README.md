@@ -34,14 +34,16 @@ your custom command needs to be true when it runs.
 
 ### `custom_user_postboot_script.j2_<name>` -- POST-BOOT
 
-- Runs via Terraform's SSH `remote-exec` provisioner, automatically as part
+- Runs via `aws ssm send-command` (from `ssm_provision.j2`, which
+  `DEFAULT_EC2_TEMPLATE.j2`'s `local-exec` provisioner invokes), as part
   of the build -- but *after* cloud-init reports `boot-finished` and after
   `build_instance.sh` has already run: package manager updated/upgraded,
   git/gcc/zip/unzip installed, the AWS CLI confirmed present and its
-  default region set, SSH keepalive configured. **SSH is already up by the
+  default region set. **The SSM Agent is already registered by the
   time this runs** -- despite happening automatically as part of the
   build, this is not a before-login hook.
-- Runs as the connecting SSH user (`ec2_user`), with passwordless `sudo`
+- Runs as **root** (SSM's `AWS-RunShellScript` document is invoked with no
+  `RunAs` parameter), so `sudo`
   available -- not root directly.
 - Good fits: real software installs, cloning a repo, per-user dotfiles/
   config -- anything heavier or longer-running than the prelogin hook
@@ -87,7 +89,7 @@ own templates.
 **Not supported.** Both hooks are Linux-only today -- `is_windows` builds get
 neither `user_data` (cloud-init doesn't apply to Windows the same way; EC2's
 Windows path uses EC2Launch v2 with a completely different `<script>`/
-`<powershell>` syntax) nor the SSH remote-exec provisioner that runs the
+`<powershell>` syntax) nor the SSM provisioning step that runs the
 postboot hook. This is a known, real gap, not an oversight to be quietly
 worked around -- Windows customization would need its own, separate
 mechanism, not an extension of this one.

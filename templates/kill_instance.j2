@@ -8,9 +8,31 @@
 # Purpose:	Destroy EC2 instance {{ instance_name }}
 ###############################################################################
 
-# Set the path to the source tree.
+# Abort on an unset variable, but deliberately *not* on a failed command
+# (`set -e`). Teardown has to attempt every deletion even after one of them
+# fails, so that a single failure doesn't strand every resource behind it.
+# Failures are counted instead -- see teardown_step() below -- and the local
+# state needed to re-run this script is preserved unless every step
+# succeeded.
 
-SRC_TREE_DIR="`git rev-parse --show-toplevel`"
+set -u
+
+# Set the path to the source tree.
+#
+# Fail loudly rather than silently operating against the wrong directory.
+# This used to `cd ""` whenever git rev-parse produced nothing (a tarball
+# export, or a git that refuses the checkout as dubiously owned), which left
+# the state-file and symlink cleanup below running against whatever the
+# operator's current working directory happened to be.
+
+SRC_TREE_DIR="$(git rev-parse --show-toplevel 2>/dev/null)"
+if [ -z "$SRC_TREE_DIR" ]
+then
+	echo "*** ERROR ***"
+	echo "Could not locate the Ec2InstanceMaker source tree."
+	echo "This script must be run from inside the git checkout that generated it."
+	exit 1
+fi
 
 # Set some critical paths and variables.
 
@@ -22,10 +44,92 @@ SSH_KEYPAIR_FILE="{{ ssh_keypair_file }}"
 SNS_TOPIC_ARN="{{ sns_arn }}"
 CLOUDWATCH_LOG_GROUP="{{ cloudwatch_log_group }}"
 
-# Parse the AMI ImageId and EBS SnapshotId tagged with instance_serial_number.
+# Number of teardown steps that failed. Local state is deleted only if this
+# is still zero when the script finishes.
 
-AMI_ID=`aws --region {{ region }} ec2 describe-images --filters Name=tag-value,Values={{ instance_serial_number }} | jq '.Images[].ImageId' | tr -d \"`
-AMI_SNAPSHOT_ID=`aws --region {{ region }} ec2 describe-images --filters Name=tag-value,Values={{ instance_serial_number }} | jq '.Images[].BlockDeviceMappings[].Ebs.SnapshotId' | tr -d \"`
+TEARDOWN_FAILURES=0
+
+# teardown_step <description> <command> [args...]
+#
+# Run one deletion, report it, and record a failure without aborting the
+# script. An "already gone" response counts as success, which is what makes
+# this script safely re-runnable after a partial failure -- it previously
+# deleted itself, its Terraform state, and its own symlink on every path,
+# including the paths where the instance was still running, so a single
+# transient AWS error produced permanently orphaned billable resources with
+# no local artifact left to clean them up.
+
+teardown_step() {
+	local description="$1"
+	shift
+	local output
+	if output=$("$@" 2>&1)
+	then
+		echo "$description"
+		return 0
+	fi
+	case "$output" in
+		*NotFound*|*NoSuchEntity*|*ResourceNotFoundException*|*does\ not\ exist*)
+			echo "$description (already gone)"
+			return 0
+			;;
+	esac
+	echo "*** FAILED: $description" >&2
+	echo "    $output" >&2
+	TEARDOWN_FAILURES=$((TEARDOWN_FAILURES + 1))
+	return 1
+}
+
+# delete_security_group_with_retry <group-id>
+#
+# Deleting a security group immediately after `terraform destroy` routinely
+# fails with DependencyViolation because the instance's network interface
+# has not been released yet. There was previously no retry and no error
+# check at all, so the normal outcome of losing that race was an orphaned
+# security group still carrying this instance's SSH/RDP ingress rule.
+
+delete_security_group_with_retry() {
+	local group_id="$1"
+	local attempt=1
+	local output
+	while [ "$attempt" -le 12 ]
+	do
+		if output=$(aws --region {{ region }} ec2 delete-security-group --group-id "$group_id" 2>&1)
+		then
+			echo "Deleted EC2 security group: $group_id"
+			return 0
+		fi
+		case "$output" in
+			*InvalidGroup.NotFound*)
+				echo "Deleted EC2 security group: $group_id (already gone)"
+				return 0
+				;;
+			*DependencyViolation*)
+				echo "Waiting for the network interface to detach from $group_id (attempt $attempt/12)..."
+				sleep 10
+				attempt=$((attempt + 1))
+				;;
+			*)
+				echo "*** FAILED: Deleted EC2 security group: $group_id" >&2
+				echo "    $output" >&2
+				TEARDOWN_FAILURES=$((TEARDOWN_FAILURES + 1))
+				return 1
+				;;
+		esac
+	done
+	echo "*** FAILED: security group $group_id still had attached dependencies after 2 minutes." >&2
+	TEARDOWN_FAILURES=$((TEARDOWN_FAILURES + 1))
+	return 1
+}
+
+# Parse the AMI ImageId and EBS SnapshotIds tagged with
+# instance_serial_number. Every instance built by this toolkit has two EBS
+# volumes (root plus the /dev/sdf device volume), so an AMI made from one
+# has more than one backing snapshot -- these are handled one at a time
+# below, since `delete-snapshot --snapshot-id` takes exactly one.
+
+AMI_ID=$(aws --region {{ region }} ec2 describe-images --filters Name=tag-value,Values={{ instance_serial_number }} | jq -r '.Images[].ImageId')
+AMI_SNAPSHOT_IDS=$(aws --region {{ region }} ec2 describe-images --filters Name=tag-value,Values={{ instance_serial_number }} | jq -r '.Images[].BlockDeviceMappings[].Ebs.SnapshotId | select(. != null)')
 
 # Pause for 5 seconds before deleting anything.
 
@@ -54,114 +158,115 @@ echo ""
 # Destroy the instance and associated resources created by Terraform.
 {% endif %}
 
-cd "$INSTANCE_DATA_DIR"
+if ! cd "$INSTANCE_DATA_DIR"
+then
+	echo "*** ERROR ***"
+	echo "Missing instance data directory: $INSTANCE_DATA_DIR"
+	echo "Terraform state lives there and is required to destroy the instance(s)."
+	exit 1
+fi
 {% if request_type == 'ondemand' %}
-{% if debug_mode == 'true' %}TF_LOG=DEBUG {% endif %}terraform destroy -auto-approve -target="aws_instance.${INSTANCE_NAME}"
+if {% if debug_mode == 'true' %}TF_LOG=DEBUG {% endif %}terraform destroy -auto-approve -target="aws_instance.${INSTANCE_NAME}"
 {% else %}
-{% if debug_mode == 'true' %}TF_LOG=DEBUG {% endif %}terraform destroy -auto-approve -target="aws_spot_instance_request.${INSTANCE_NAME}"
+if {% if debug_mode == 'true' %}TF_LOG=DEBUG {% endif %}terraform destroy -auto-approve -target="aws_spot_instance_request.${INSTANCE_NAME}"
 {% endif %}
-cd "$SRC_TREE_DIR"
+then
+{% if count > 1 %}
+	echo "Destroyed EC2 instance family: {{ instance_name }}"
+{% else %}
+	echo "Destroyed EC2 instance: {{ instance_name }}"
+{% endif %}
+else
+	echo "*** FAILED: terraform destroy" >&2
+	TEARDOWN_FAILURES=$((TEARDOWN_FAILURES + 1))
+fi
+cd "$SRC_TREE_DIR" || exit 1
 
 {% if count > 1 %}
-# Delete the ec2_keypair and PEM files associated with this instance family.
+# Delete the ec2_keypair associated with this instance family.
 {% else %}
-# Delete the ec2_keypair and PEM files associated with this instance.
+# Delete the ec2_keypair associated with this instance.
 {% endif %}
 
-aws --region {{ region }} ec2 delete-key-pair --key-name "$EC2_KEYPAIR"
-echo "Deleted EC2 keypair: $EC2_KEYPAIR"
-for file in "$INSTANCE_DATA_DIR/$SSH_KEYPAIR_FILE" "$SRC_TREE_DIR/$SSH_KEYPAIR_FILE"
-do
-	if [ -f "$file" ]
-	then
-		rm "$file"
-		echo "Deleted SSH keypair file: $file"
-	fi
-done
+teardown_step "Deleted EC2 keypair: $EC2_KEYPAIR" aws --region {{ region }} ec2 delete-key-pair --key-name "$EC2_KEYPAIR"
 
+{% if preserve_security_group == 'false' %}
 # Delete the EC2 security group.
 
-aws --region {{ region }} ec2 delete-security-group --group-id {{ vpc_security_group_ids }}
+delete_security_group_with_retry "{{ vpc_security_group_ids }}"
+{% else %}
+# This build reused a pre-existing security group rather than creating one,
+# so it is not ours to delete -- something else may well still be using it.
 
-# Delete the EC2 instance data directory.
-
-if [ -d "$INSTANCE_DATA_DIR" ]
-then
-	rm -rf "$INSTANCE_DATA_DIR"
-	echo "Deleted directory: $INSTANCE_DATA_DIR"
-fi
-
+echo "Preserved pre-existing EC2 security group: {{ security_group_name }} ({{ vpc_security_group_ids }})"
+{% endif %}
 {% if enable_placement_group == 'true' %}
+
 # Delete the EC2 placement group.
 
-aws --region {{ region }} ec2 delete-placement-group --group-name ec2pg-{{ instance_serial_number }}
-
+teardown_step "Deleted EC2 placement group: ec2pg-{{ instance_serial_number }}" aws --region {{ region }} ec2 delete-placement-group --group-name ec2pg-{{ instance_serial_number }}
 {% endif %}
 {% if preserve_ami == 'false' %}
 
-# Delete the AMI ImageId and EBS SnapshotId tagged with instance_serial_number.
+# Delete the AMI ImageId and EBS SnapshotIds tagged with
+# instance_serial_number.
 
-if [ ! -z "$AMI_ID" ]
+if [ -n "$AMI_ID" ]
 then
-	aws --region {{ region }} ec2 deregister-image --image-id "$AMI_ID"
-	aws --region {{ region }} ec2 delete-snapshot --snapshot-id "$AMI_SNAPSHOT_ID"
-	echo ""
-	echo "Deleted AMI: $AMI_ID"
-	echo "Deleted EBS snapshot: $AMI_SNAPSHOT_ID"
-	echo ""
+	teardown_step "Deleted AMI: $AMI_ID" aws --region {{ region }} ec2 deregister-image --image-id "$AMI_ID"
+	while IFS= read -r ami_snapshot_id
+	do
+		if [ -n "$ami_snapshot_id" ]
+		then
+			teardown_step "Deleted EBS snapshot: $ami_snapshot_id" aws --region {{ region }} ec2 delete-snapshot --snapshot-id "$ami_snapshot_id"
+		fi
+	done <<< "$AMI_SNAPSHOT_IDS"
 else
-	echo ""
 	echo "No AMI image tagged with {{ instance_serial_number }} was found."
-	echo ""
 fi
 {% else %}
 
-# Print a message to the console confirming preservation of the AMI ImageId and
-# EBS SnapshotId tagged with instance_serial_number.
+# Print a message to the console confirming preservation of the AMI ImageId
+# and EBS SnapshotIds tagged with instance_serial_number.
 
-if [ ! -z "$AMI_ID" ]
+if [ -n "$AMI_ID" ]
 then
-	echo ""
 	echo "Preserved AMI: $AMI_ID"
-	echo "Preserved EBS snapshot: $AMI_SNAPSHOT_ID"
-	echo "*** Delete this snapshot if it isn't needed to avoid additional charges!"
-	echo ""
+	while IFS= read -r ami_snapshot_id
+	do
+		if [ -n "$ami_snapshot_id" ]
+		then
+			echo "Preserved EBS snapshot: $ami_snapshot_id"
+		fi
+	done <<< "$AMI_SNAPSHOT_IDS"
+	echo "*** Delete these if they aren't needed to avoid additional charges!"
 else
-	echo ""
 	echo "No AMI image tagged with {{ instance_serial_number }} was found."
-	echo ""
 fi
 {% endif %}
 
 # Send an SNS notification that the instance is being terminated.
 
 {% if count > 1 %}
-echo "Published instance family termination message:"
-aws sns publish --topic-arn "$SNS_TOPIC_ARN" --subject "[Ec2InstanceMaker] Instance Family Termination Notice" --message "EC2 instance family {{ instance_name }} was terminated on `date +%Y-%m-%d` at `date +%H:%M.`"
+teardown_step "Published instance family termination message." aws --region {{ region }} sns publish --topic-arn "$SNS_TOPIC_ARN" --subject "[Ec2InstanceMaker] Instance Family Termination Notice" --message "EC2 instance family {{ instance_name }} was terminated on $(date +%Y-%m-%d) at $(date +%H:%M).  There were {{ count }} instances terminated in this family."
 {% else %}
-echo "Published instance termination message:"
-aws --region {{ region }} sns publish --topic-arn "$SNS_TOPIC_ARN" --subject "[Ec2InstanceMaker] Instance Termination Notice" --message "EC2 instance {{ instance_name }} was terminated on `date +%Y-%m-%d` at `date +%H:%M.`  There were {{ count }} instances terminated in this family."
+teardown_step "Published instance termination message." aws --region {{ region }} sns publish --topic-arn "$SNS_TOPIC_ARN" --subject "[Ec2InstanceMaker] Instance Termination Notice" --message "EC2 instance {{ instance_name }} was terminated on $(date +%Y-%m-%d) at $(date +%H:%M)."
 {% endif %}
 
 # Delete the SNS topic.
 
-aws --region {{ region }} sns delete-topic --topic-arn "$SNS_TOPIC_ARN"
-echo "Deleted SNS topic: $SNS_TOPIC_ARN"
-echo ""
+teardown_step "Deleted SNS topic: $SNS_TOPIC_ARN" aws --region {{ region }} sns delete-topic --topic-arn "$SNS_TOPIC_ARN"
 {% if enable_cloudwatch_logs == 'true' %}
 {% if preserve_cloudwatch_logs == 'false' %}
 
 # Delete the CloudWatch Logs group.
 
-aws --region {{ region }} logs delete-log-group --log-group-name "$CLOUDWATCH_LOG_GROUP"
-echo "Deleted CloudWatch Logs group: $CLOUDWATCH_LOG_GROUP"
-echo ""
+teardown_step "Deleted CloudWatch Logs group: $CLOUDWATCH_LOG_GROUP" aws --region {{ region }} logs delete-log-group --log-group-name "$CLOUDWATCH_LOG_GROUP"
 {% else %}
 
 # Preserve the CloudWatch Logs group.
 
 echo "Preserved CloudWatch Logs group: $CLOUDWATCH_LOG_GROUP"
-echo ""
 {% endif %}
 {% endif %}
 {% if preserve_iam_role == 'false' %}
@@ -170,16 +275,16 @@ echo ""
 # 	- Delete the IAM EC2 instance policy.
 # 	- Remove the IAM role from the EC2 instance profile.
 # 	- Delete the IAM EC2 instance profile and role.
+#
+# The ordering matters and is deliberate: IAM refuses to delete a role that
+# still has an inline policy or is still referenced by an instance profile.
 
 if [[ "$PRESERVE_IAM_ROLE" == "false" ]]
 then
-	aws iam delete-role-policy --role-name {{ ec2_iam_instance_role }} --policy-name {{ ec2_iam_instance_policy }}
-	aws iam remove-role-from-instance-profile --instance-profile-name {{ ec2_iam_instance_profile }} --role-name {{ ec2_iam_instance_role }}
-	aws iam delete-instance-profile --instance-profile-name {{ ec2_iam_instance_profile }}
-	aws iam delete-role --role-name {{ ec2_iam_instance_role }}
-	echo "Deleted IAM EC2 policy: {{ ec2_iam_instance_policy }}"
-	echo "Deleted IAM EC2 instance profile: {{ ec2_iam_instance_profile }}"
-	echo "Deleted IAM EC2 role: {{ ec2_iam_instance_role }}"
+	teardown_step "Deleted IAM EC2 policy: {{ ec2_iam_instance_policy }}" aws iam delete-role-policy --role-name {{ ec2_iam_instance_role }} --policy-name {{ ec2_iam_instance_policy }}
+	teardown_step "Removed IAM role {{ ec2_iam_instance_role }} from instance profile {{ ec2_iam_instance_profile }}" aws iam remove-role-from-instance-profile --instance-profile-name {{ ec2_iam_instance_profile }} --role-name {{ ec2_iam_instance_role }}
+	teardown_step "Deleted IAM EC2 instance profile: {{ ec2_iam_instance_profile }}" aws iam delete-instance-profile --instance-profile-name {{ ec2_iam_instance_profile }}
+	teardown_step "Deleted IAM EC2 role: {{ ec2_iam_instance_role }}" aws iam delete-role --role-name {{ ec2_iam_instance_role }}
 fi
 {% else %}
 
@@ -191,44 +296,71 @@ echo "Preserved EC2 IAM instance profile: {{ ec2_iam_instance_profile }}"
 echo "Preserved EC2 IAM instance role: {{ ec2_iam_instance_role }}"
 {% endif %}
 
-# Remove all state data associated with {{ instance_name }}.
+# Local state is deleted only after every AWS deletion above succeeded.
+#
+# This ordering is the whole point of the rewrite. `rm -rf` on the instance
+# data directory used to run unconditionally, immediately after `terraform
+# destroy`, and before the SNS/CloudWatch/IAM deletions below it -- so a
+# failed destroy (an instance stuck in shutting-down, expired credentials, a
+# DependencyViolation, terraform missing from PATH) deleted the Terraform
+# state, this script, and its symlink while the instance kept running and
+# kept billing, with nothing left on disk able to finish the job.
 
-echo ""
-echo "Deleted state files:"
-for file in {{ vars_file_path }} {{ instance_serial_number_file }}
-do
-	if [ -f "$file" ]
+if [ "$TEARDOWN_FAILURES" -eq 0 ]
+then
+	cd "$SRC_TREE_DIR" || exit 1
+	echo ""
+	echo "Deleted local state:"
+	for file in "$INSTANCE_DATA_DIR/$SSH_KEYPAIR_FILE" "$SRC_TREE_DIR/$SSH_KEYPAIR_FILE" "{{ vars_file_path }}" "{{ instance_serial_number_file }}"
+	do
+		if [ -f "$file" ]
+		then
+			rm "$file"
+			echo "	$file"
+		fi
+	done
+	if [ -d "$INSTANCE_DATA_DIR" ]
 	then
-		rm "$file"
-		echo "	$file"
+		rm -rf "$INSTANCE_DATA_DIR"
+		echo "	$INSTANCE_DATA_DIR"
 	fi
-done
-
-# Delete symlinks to the top-level shell scripts.
-
-cd "$SRC_TREE_DIR"
-echo ""
-echo "Removed symlinks:"
-for link in kill-instance.{{ instance_name }}.sh build-ami.{{ instance_name }}.sh
-do
-	if [ -L "$link" ]
-	then
-		unlink "$link"
-		echo "	$link"
-	fi
-done
-
-# Cleanup and exit.
-
-echo ""
-echo "###############################################################################"
+	echo ""
+	echo "Removed symlinks:"
+	for link in kill-instance.{{ instance_name }}.sh build-ami.{{ instance_name }}.sh
+	do
+		if [ -L "$link" ]
+		then
+			unlink "$link"
+			echo "	$link"
+		fi
+	done
+	echo ""
+	echo "###############################################################################"
 {% if count > 1 %}
-echo "##    Finished deleting EC2 instance family: {{ instance_name }}"
-echo "##                           Instance count: {{ count }}"
+	echo "##    Finished deleting EC2 instance family: {{ instance_name }}"
+	echo "##                           Instance count: {{ count }}"
 {% else %}
-echo "##    Finished deleting EC2 instance: {{ instance_name }}"
+	echo "##    Finished deleting EC2 instance: {{ instance_name }}"
 {% endif %}
+	echo "###############################################################################"
+	echo ""
+	echo "Exiting..."
+	exit 0
+fi
+
+echo ""
+echo "###############################################################################"
+echo "##    *** $TEARDOWN_FAILURES teardown step(s) FAILED ***"
 echo "###############################################################################"
 echo ""
-echo "Exiting..."
-exit 0
+echo "AWS resources belonging to {{ instance_name }} may still exist and may"
+echo "still be incurring charges. Review the errors above."
+echo ""
+echo "Local state has been PRESERVED so that this script can be run again:"
+echo "	$INSTANCE_DATA_DIR"
+echo "	$SRC_TREE_DIR/kill-instance.{{ instance_name }}.sh"
+echo ""
+echo "Re-run this script once the underlying problem is resolved. Steps that"
+echo "already succeeded will report \"already gone\" and be skipped."
+echo ""
+exit 1

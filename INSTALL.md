@@ -2,11 +2,11 @@
 
 ## License and Disclaimer Information
 
-Please refer to the LICENSE and DISCLAIMER.md documents included with this Open Source software for the specific terms and conditions that govern its use.
+Please refer to the LICENSE and DISCLAIMER.md documents included with this source-available software for the specific terms and conditions that govern its use.
 
 ## Introduction
 
-Ec2InstanceMaker is Open Source software that simplifies the automation
+Ec2InstanceMaker is source-available software that simplifies the automation
 of creating, deleting, and administering cloud computing server and storage
 resources through an easy-to-use command line interface.  It can also be used
 as a teaching tool for those who wish to dive deep into cloud automation and
@@ -45,6 +45,13 @@ $ /usr/bin/ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/inst
 * Use Homebrew to install some other critical applications:
 ```
 $ brew install autoconf automake gcc jq libtool make python@3.12 readline
+```
+
+* Install Terraform, which `make_instance.py` shells out to and aborts without.
+Any HCL2-capable version works (0.12 or newer); current 1.x is what CI and the
+template linter use:
+```
+$ brew install terraform
 ```
 
 * Configure the AWS CLI according to the guidelines provided in the AWS public
@@ -88,7 +95,7 @@ After building a fresh EC2 instance, clone the repository to a local $SRC_DIR ru
 ```
 $ mkdir -p ~/src && cd ~/src
 $ git clone https://github.com/rmarable/Ec2InstanceMaker.git
-$ cd src/Ec2InstanceMaker
+$ cd Ec2InstanceMaker
 $ ./linux-ec2-setup.sh
 ```
 
@@ -105,7 +112,7 @@ $ ./make_instance.py --help
 ## Example Use Cases
 
 Please review these common use cases that this tool can help address.  More
-details are provided in the EXAMPLE_USE-CASES.md document.
+details are provided in the EXAMPLE_USE_CASES.md document.
 
 ### Example: Building a Single Linux Instance
 

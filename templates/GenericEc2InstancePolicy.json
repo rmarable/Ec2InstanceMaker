@@ -235,10 +235,8 @@
                 "iam:DeleteRolePolicy",
                 "iam:CreateInstanceProfile",
                 "iam:DeleteInstanceProfile",
-                "iam:AttachRolePolicy",
                 "iam:DetachRolePolicy",
                 "iam:PassRole",
-                "iam:PutRolePolicy",
                 "iam:GetInstanceProfile"
             ],
             "Effect": "Allow",

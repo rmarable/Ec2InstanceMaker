@@ -74,8 +74,10 @@ $ source .venv/bin/activate
 $ pip install -r requirements.txt
 ```
 
-Also required, on `PATH`: `terraform` (0.12.x — pinned/checked via
-`TERRAFORM_VERSION` in `make_instance.py` and `linux-ec2-setup.sh`), `jq`,
+Also required, on `PATH`: `terraform` (any HCL2-capable version, i.e. 0.12 or newer; CI and the
+template linter both run current 1.x. Note that nothing in the build
+*enforces* a version -- `get_terraform_version()` only detects and prints
+it. `linux-ec2-setup.sh` still installs 0.12.9, which is stale), `jq`,
 and configured AWS credentials. `make_instance.py` and `template_engine.py`
 both resolve paths (e.g. `templates/`) relative to the current working
 directory, so commands must be run from the repo root. See `INSTALL.md`.
