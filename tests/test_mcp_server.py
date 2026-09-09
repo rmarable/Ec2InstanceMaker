@@ -201,6 +201,30 @@ class TestBuildInstance:
         assert argv[argv.index("--request_type") + 1] == "spot"
         assert argv[argv.index("--base_os") + 1] == "ubuntu2404"
 
+    def test_confirm_false_message_reflects_blast_radius(self):
+        with pytest.raises(ToolError, match=r"count=5.*instance_type=m5\.xlarge.*request_type=spot"):
+            mcp_server.build_instance(
+                az="us-east-2a",
+                instance_name="dev01",
+                instance_owner="tester",
+                instance_owner_email="tester@example.com",
+                confirm=False,
+                count=5,
+                instance_type="m5.xlarge",
+                request_type="spot",
+            )
+
+    def test_invalid_instance_name_rejected_before_confirm_check(self):
+        run_build_mock = MagicMock()
+        with patch("mcp_server.run_build", run_build_mock), pytest.raises(ToolError):
+            mcp_server.build_instance(az="us-east-2a", instance_name="../../etc/passwd", instance_owner="tester", instance_owner_email="tester@example.com", confirm=False)
+        run_build_mock.assert_not_called()
+
+    def test_argparse_system_exit_is_converted_to_tool_error_not_left_to_hang(self):
+        run_build_mock = MagicMock(side_effect=SystemExit(2))
+        with patch("mcp_server.run_build", run_build_mock), pytest.raises(ToolError, match="argparse exited with code 2"):
+            mcp_server.build_instance(az="us-east-2a", instance_name="dev01", instance_owner="-rf", instance_owner_email="tester@example.com", confirm=True)
+
 
 class TestDestroyInstance:
     def test_confirm_false_raises_without_calling_kill_script(self):
@@ -215,6 +239,58 @@ class TestDestroyInstance:
             result = mcp_server.destroy_instance("dev01", confirm=True)
         terminate_mock.assert_called_once_with("dev01", True, mcp_server._mcp_quit)
         assert result == {"instance_name": "dev01", "kill_script_returncode": 0}
+
+    def test_path_traversal_instance_name_rejected_before_kill_script(self):
+        terminate_mock = MagicMock()
+        with patch("mcp_server.terminate_via_kill_script", terminate_mock), pytest.raises(ToolError):
+            mcp_server.destroy_instance("../../../../tmp/evil", confirm=True)
+        terminate_mock.assert_not_called()
+
+
+class TestInstanceNameValidationAcrossTools:
+    """Regression coverage for the path-traversal finding: get_build_record's
+    os.path.join("vars_files", instance_name + ".yml") and
+    manage_instance.resolve_region()'s "./vars_files/" + instance_name +
+    ".yml" (used by get_instance_status/start_instance/stop_instance/
+    reboot_instance whenever region is omitted) both happily escape
+    vars_files/ given a "../"-laden instance_name -- proven by planting a
+    file outside vars_files/ and reading it back through get_build_record
+    before this fix existed. Every tool taking instance_name must reject
+    it via validate_instance_name_format() before doing anything else.
+    """
+
+    PATH_TRAVERSAL_NAME = "../../../../tmp/evil"
+
+    def test_get_build_record_rejects_path_traversal(self):
+        with pytest.raises(ToolError):
+            mcp_server.get_build_record(self.PATH_TRAVERSAL_NAME)
+
+    def test_get_instance_status_rejects_path_traversal_before_any_aws_call(self):
+        with patch("mcp_server.boto3.client") as mock_boto3_client, pytest.raises(ToolError):
+            mcp_server.get_instance_status(self.PATH_TRAVERSAL_NAME)
+        mock_boto3_client.assert_not_called()
+
+    def test_start_instance_rejects_path_traversal_before_any_aws_call(self):
+        with patch("mcp_server.boto3.client") as mock_boto3_client, pytest.raises(ToolError):
+            mcp_server.start_instance(self.PATH_TRAVERSAL_NAME, confirm=True)
+        mock_boto3_client.assert_not_called()
+
+    def test_stop_instance_rejects_path_traversal_before_any_aws_call(self):
+        with patch("mcp_server.boto3.client") as mock_boto3_client, pytest.raises(ToolError):
+            mcp_server.stop_instance(self.PATH_TRAVERSAL_NAME, confirm=True)
+        mock_boto3_client.assert_not_called()
+
+    def test_reboot_instance_rejects_path_traversal_before_any_aws_call(self):
+        with patch("mcp_server.boto3.client") as mock_boto3_client, pytest.raises(ToolError):
+            mcp_server.reboot_instance(self.PATH_TRAVERSAL_NAME, confirm=True)
+        mock_boto3_client.assert_not_called()
+
+    def test_uppercase_instance_name_also_rejected(self):
+        # validate_instance_name_format() enforces the same
+        # [a-z][a-z0-9-]* rule the CLI does -- not just a traversal
+        # blocklist, the same allowlist manage_instance.py main() applies.
+        with pytest.raises(ToolError):
+            mcp_server.get_build_record("Dev01")
 
 
 class TestChangePowerState:

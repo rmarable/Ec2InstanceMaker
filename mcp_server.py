@@ -25,6 +25,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mypy_boto3_ec2.client import EC2Client
 from mypy_boto3_ec2.type_defs import InstanceTypeDef
 
+from instance_builder import validate_instance_name_format
 from make_instance import BoolStr, run_build
 from manage_instance import check_spot_lifecycle_conflict, find_managed_instances, list_all_managed_instances, resolve_region, tag_value, terminate_via_kill_script
 
@@ -97,6 +98,7 @@ def get_instance_status(instance_name: str, region: str | None = None) -> list[d
     """Report the status of one Ec2InstanceMaker-managed instance or family.
     `region` falls back to the region recorded in
     ./vars_files/<instance_name>.yml at build time if omitted."""
+    validate_instance_name_format(instance_name, _mcp_quit)
     resolved_region = resolve_region(instance_name, region, _mcp_quit)
     return _get_instance_status(boto3.client("ec2", region_name=resolved_region), instance_name, resolved_region)
 
@@ -107,6 +109,7 @@ def get_build_record(instance_name: str) -> dict[str, Any]:
     (./vars_files/<instance_name>.yml) that make_instance.py wrote -- the
     parameters an instance/family was actually built with. Local file
     read only; makes no AWS API call."""
+    validate_instance_name_format(instance_name, _mcp_quit)
     vars_file_path = os.path.join("vars_files", instance_name + ".yml")
     if not os.path.exists(vars_file_path):
         raise ToolError('No build record found at "' + vars_file_path + '".')
@@ -180,10 +183,37 @@ def build_instance(
     SNS topic, and, if enabled, a CloudWatch log group) and can take
     several minutes (Terraform apply, then SSM provisioning). Requires
     confirm=True: unlike the CLI, there is no interactive CTRL-C abort
-    window here. See make_instance.py --help / README.md for what each
-    parameter does."""
+    window here, and confirming does not by itself limit how many
+    instances count builds -- check count against the actual budget
+    before setting confirm=True.
+
+    "UNDEFINED"/"DISABLED" sentinel defaults mean "not set", not literal
+    values to pass through: custom_ami, iam_role, project_id,
+    ssh_allowed_ips, turbot_account. ssh_allowed_ips="UNDEFINED" resolves
+    to the instance's own VPC CIDR; 0.0.0.0/0 is always rejected.
+    spot_buffer only applies when request_type="spot": a fractional
+    markup applied to the current spot price to reduce interruption risk
+    (spot_price = spot_price + spot_price*spot_buffer). turbot_account
+    enables Turbot governance tagging when set to a real account ID.
+    security_group/iam_name_prefix/iam_json_policy control the generated
+    security group and IAM role, not a pre-existing one to attach --
+    pass a real iam_role to reuse an existing IAM role instead.
+
+    See make_instance.py --help / README.md for the remaining
+    parameters."""
+    validate_instance_name_format(instance_name, _mcp_quit)
     if not confirm:
-        raise ToolError('Set confirm=True to actually build "' + instance_name + '" -- this creates real, billable AWS resources.')
+        raise ToolError(
+            'Set confirm=True to actually build "'
+            + instance_name
+            + '" (count='
+            + str(count)
+            + ", instance_type="
+            + instance_type
+            + ", request_type="
+            + request_type
+            + ") -- this creates real, billable AWS resources."
+        )
 
     argv = [
         "--az",
@@ -265,7 +295,19 @@ def build_instance(
         "--vpc_name",
         vpc_name,
     ]
-    report = run_build(argv, _mcp_quit, ctrlc_abort_seconds=0)
+    # run_build() ultimately calls argparse.parse_args() on the argv built
+    # above -- any value argparse itself rejects (e.g. one that starts
+    # with "-" and looks like a flag, or an invalid choice bypassing this
+    # tool's own Literal-typed schema) makes argparse call sys.exit(),
+    # raising SystemExit. Confirmed via a real stdio smoke test: SystemExit
+    # is a BaseException, not an Exception, so it slips past every "except
+    # Exception" guard in this mcp SDK's call stack instead of becoming a
+    # clean ToolError -- the tool call just hangs, never returning a
+    # response to the client. Caught and converted here instead.
+    try:
+        report = run_build(argv, _mcp_quit, ctrlc_abort_seconds=0)
+    except SystemExit as e:
+        raise ToolError("Invalid build_instance parameters (argparse exited with code " + str(e.code) + ') -- check for a value that starts with "-" or an invalid choice.') from e
     return dataclasses.asdict(report)
 
 
@@ -304,6 +346,7 @@ def start_instance(instance_name: str, confirm: bool, region: str | None = None)
     family. Blocked against one-time Spot Instances -- AWS does not allow
     restarting a stopped Spot Instance; use destroy_instance and
     build_instance instead. Requires confirm=True."""
+    validate_instance_name_format(instance_name, _mcp_quit)
     if not confirm:
         raise ToolError('Set confirm=True to actually start "' + instance_name + '".')
     resolved_region = resolve_region(instance_name, region, _mcp_quit)
@@ -316,6 +359,7 @@ def stop_instance(instance_name: str, confirm: bool, region: str | None = None) 
     against one-time Spot Instances -- AWS does not allow restarting a
     stopped Spot Instance; use destroy_instance instead. Requires
     confirm=True."""
+    validate_instance_name_format(instance_name, _mcp_quit)
     if not confirm:
         raise ToolError('Set confirm=True to actually stop "' + instance_name + '".')
     resolved_region = resolve_region(instance_name, region, _mcp_quit)
@@ -326,6 +370,7 @@ def stop_instance(instance_name: str, confirm: bool, region: str | None = None) 
 def reboot_instance(instance_name: str, confirm: bool, region: str | None = None) -> dict[str, Any]:
     """Reboot an Ec2InstanceMaker-managed instance or family. Safe for
     Spot Instances, unlike start/stop. Requires confirm=True."""
+    validate_instance_name_format(instance_name, _mcp_quit)
     if not confirm:
         raise ToolError('Set confirm=True to actually reboot "' + instance_name + '".')
     resolved_region = resolve_region(instance_name, region, _mcp_quit)
@@ -340,6 +385,7 @@ def destroy_instance(instance_name: str, confirm: bool) -> dict[str, Any]:
     same script manage_instance.py -A terminate uses. Only works from the
     repo checkout where the instance was built. Irreversible; requires
     confirm=True."""
+    validate_instance_name_format(instance_name, _mcp_quit)
     if not confirm:
         raise ToolError('Set confirm=True to actually destroy "' + instance_name + '" -- this permanently deletes real AWS resources and cannot be undone.')
     returncode = terminate_via_kill_script(instance_name, True, _mcp_quit)
