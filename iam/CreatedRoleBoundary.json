@@ -1,0 +1,59 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "DenyAllIamWriteAccessToInstanceRoles",
+            "Effect": "Deny",
+            "Action": [
+                "iam:CreateRole",
+                "iam:DeleteRole",
+                "iam:PutRolePolicy",
+                "iam:DeleteRolePolicy",
+                "iam:AttachRolePolicy",
+                "iam:DetachRolePolicy",
+                "iam:CreateUser",
+                "iam:CreateAccessKey",
+                "iam:CreateLoginProfile",
+                "iam:UpdateAssumeRolePolicy",
+                "iam:PutRolePermissionsBoundary",
+                "iam:DeleteRolePermissionsBoundary",
+                "iam:CreatePolicy",
+                "iam:CreatePolicyVersion",
+                "iam:SetDefaultPolicyVersion",
+                "iam:PassRole",
+                "organizations:*",
+                "account:*"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "TheMostAnInstanceRoleMayEverDo",
+            "Effect": "Allow",
+            "Action": [
+                "ec2:Describe*",
+                "s3:Get*",
+                "s3:List*",
+                "s3:PutObject",
+                "s3:DeleteObject",
+                "sqs:*",
+                "sns:Publish",
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+                "logs:DescribeLogStreams",
+                "logs:DescribeLogGroups",
+                "ssm:DescribeAssociation",
+                "ssm:ListAssociations",
+                "ssm:GetDocument",
+                "ssm:ListInstanceAssociations",
+                "ssm:UpdateAssociationStatus",
+                "ssm:UpdateInstanceInformation",
+                "ssmmessages:*",
+                "ec2messages:*",
+                "cloudwatch:PutMetricData",
+                "sts:GetCallerIdentity"
+            ],
+            "Resource": "*"
+        }
+    ]
+}

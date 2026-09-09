@@ -2,7 +2,10 @@
   "mcpServers": {
     "ec2instancemaker": {
       "command": ".venv/bin/python3",
-      "args": ["mcp_server.py"]
+      "args": [
+        "mcp_server.py",
+        "--allow-mutating"
+      ]
     }
   }
 }

@@ -662,8 +662,33 @@ it buys:
    resources. It also closes a real defect — `_change_power_state()` used
    to act on `find_managed_instances()` results the caller never saw.
 4. **Scoped AWS credentials** are the only thing that holds against a
-   fully injected model, and they are the operator's job, not this
-   file's.
+   fully injected model. `iam/` now ships the documents for this:
+   `McpServerTrustPolicy.json` (who may assume the role, MFA required),
+   `McpServerPolicy.json` (what it may do), and
+   `CreatedRoleBoundary.json` (a permissions boundary applied to every
+   instance role the toolkit creates, which is what stops
+   `ExtendedEc2InstancePolicy.json`'s IAM grants from escalating).
+   `verify_mcp_credentials.py` checks a live identity against them via
+   `iam:SimulatePrincipalPolicy` — simulation only, nothing is created or
+   deleted. README.md's "Running the MCP server under a scoped IAM role"
+   is the setup procedure.
+
+   Naming trap worth knowing: `templates/*Ec2InstancePolicy.json` is what
+   a **built instance** gets; `iam/McpServerPolicy.json` is what the
+   **caller** gets. Different principals. Don't edit one thinking it is
+   the other, and don't move `iam/*.json` into `templates/` — the build's
+   `*Ec2InstancePolicy.json` glob and `modify_iam_policy_document()`
+   would then pick them up.
+
+   Honest limits, both documented in README: IAM has no condition key for
+   `RunInstances` count, so the number of instances a build launches is
+   bounded only by an EC2 vCPU service quota; and the instance-type Deny
+   applies cleanly to `ec2:RunInstances` but only partially to the Spot
+   path, since the Spot service launches the instance in response to
+   `ec2:RequestSpotInstances`. Unlike the rest of this review's findings,
+   these policy documents were reasoned about rather than verified
+   against a live account — which is exactly why
+   `verify_mcp_credentials.py` exists.
 
 Accepted risk, not fixed: `build_instance`'s `confirm=False` error message
 includes `count`/`instance_type`/`request_type` so the blast radius is

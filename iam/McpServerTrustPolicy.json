@@ -1,0 +1,18 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "AllowTheOperatorToAssumeThisRole",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam::<AWS_ACCOUNT_ID>:user/<OPERATOR_IAM_USER>"
+            },
+            "Action": "sts:AssumeRole",
+            "Condition": {
+                "Bool": {
+                    "aws:MultiFactorAuthPresent": "true"
+                }
+            }
+        }
+    ]
+}

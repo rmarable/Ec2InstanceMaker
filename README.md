@@ -917,8 +917,10 @@ $ .venv/bin/python3 mcp_server.py --allow-mutating
 ```
 
 or by setting `EC2INSTANCEMAKER_ALLOW_MUTATING=true` in the environment
-(easier for a Claude Desktop connector).  To enable them for Claude Code,
-add the flag to `.mcp.json`:
+(easier for a Claude Desktop connector).
+
+The checked-in `.mcp.json` **does** pass `--allow-mutating`, so a Claude
+Code session started from the repo root gets all 8 tools:
 
 ```json
 {
@@ -931,9 +933,10 @@ add the flag to `.mcp.json`:
 }
 ```
 
-The checked-in `.mcp.json` deliberately does **not** include it.  Most
-sessions only need to look things up, and a launch-time flag is one of the
-few decisions here that the model cannot reach or revise mid-conversation.
+To run read-only instead -- worth doing for any session that only needs to
+look things up -- drop `"--allow-mutating"` from that `args` array.  The
+point of the flag is that it is a launch-time decision: whichever way you
+set it, it is one the model cannot reach or revise mid-conversation.
 
 **Every mutating tool is two-phase.**  The first call performs the lookup
 and returns exactly what would be affected -- for a power action, the
@@ -983,11 +986,99 @@ context.  Treat it as data, never as instructions.
 **The strongest control is the credentials, not the server.**  Nothing in
 this process can stop a model that has been successfully injected.  What
 does stop it is running the server with AWS credentials that cannot do the
-damage in the first place: an IAM role scoped to a sandbox account, or to
-resources tagged `ManagedBy=Ec2InstanceMaker`, with the instance types,
-regions and counts you are willing to pay for.  If you enable the mutating
-tools against production credentials, that is the decision that matters --
-not `confirm=True`.
+damage in the first place.  That is what `iam/` is for.
+
+### Running the MCP server under a scoped IAM role
+
+`iam/` contains three documents.  They are not applied by any script --
+you create them yourself, deliberately, in an account you control:
+
+| File | What it is |
+|---|---|
+| `iam/McpServerTrustPolicy.json` | Who may assume the server's role.  Requires MFA. |
+| `iam/McpServerPolicy.json` | What that role may do.  Attach to the role. |
+| `iam/CreatedRoleBoundary.json` | A permissions boundary applied to every *instance* role the toolkit creates. |
+
+Note the distinction, because the names are similar: `templates/*Ec2InstancePolicy.json`
+are what a **built instance** gets.  `iam/McpServerPolicy.json` is what the
+**operator or MCP server** gets.  Different principals, different blast
+radius.
+
+Substitute the placeholders (`<AWS_ACCOUNT_ID>`, `<OPERATOR_IAM_USER>`,
+`<ALLOWED_REGIONS>`, `<ALLOWED_INSTANCE_TYPES>`, `<EC2_IAM_PREFIX>`), then:
+
+```
+$ aws iam create-policy --policy-name Ec2InstanceMakerCreatedRoleBoundary     --policy-document file://iam/CreatedRoleBoundary.json
+$ aws iam create-policy --policy-name Ec2InstanceMakerMcpServerPolicy     --policy-document file://iam/McpServerPolicy.json
+$ aws iam create-role --role-name Ec2InstanceMakerMcpServer     --assume-role-policy-document file://iam/McpServerTrustPolicy.json
+$ aws iam attach-role-policy --role-name Ec2InstanceMakerMcpServer     --policy-arn arn:aws:iam::<AWS_ACCOUNT_ID>:policy/Ec2InstanceMakerMcpServerPolicy
+```
+
+Point the server at it with a profile that assumes the role:
+
+```json
+{
+  "mcpServers": {
+    "ec2instancemaker": {
+      "command": ".venv/bin/python3",
+      "args": ["mcp_server.py", "--allow-mutating"],
+      "env": { "AWS_PROFILE": "ec2instancemaker-mcp" }
+    }
+  }
+}
+```
+
+**Then verify it, rather than assuming it.**  `verify_mcp_credentials.py`
+asks IAM itself, via `iam:SimulatePrincipalPolicy`, whether the dangerous
+things are actually denied and the necessary things are still allowed.
+Every check is a simulation; nothing is created, modified or deleted:
+
+```
+$ ./verify_mcp_credentials.py --region us-east-1
+  ok    terminate an instance this toolkit did not create
+        want denied, got explicitDeny
+  ok    create an IAM user
+        want denied, got implicitDeny
+  ...
+All 13 checks passed.
+```
+
+It exits non-zero if any check fails, so it works as a pre-flight.
+
+**What this policy set actually enforces:**
+
+* An explicit `Deny` on start/stop/reboot/terminate for any instance not
+  tagged `ManagedBy=Ec2InstanceMaker`.  This is the single most valuable
+  statement in the file -- an explicit Deny holds even if some future
+  `Allow` gets broader.
+* An explicit `Deny` outside your chosen regions, and outside your chosen
+  instance types.
+* IAM writes scoped to `<EC2_IAM_PREFIX>-*`, `iam:PassRole` restricted to
+  `ec2.amazonaws.com`, and role creation refused unless the permissions
+  boundary is attached -- so a role the toolkit creates cannot exceed the
+  boundary even with `ExtendedEc2InstancePolicy.json`, which otherwise
+  grants enough IAM to escalate.
+* A `Deny` on rewriting the boundary or the server's own role, because a
+  boundary the caller can edit is not a boundary.
+* A `Deny` on creating users, access keys or login profiles at all.
+
+**What it does not enforce, and you should know before relying on it:**
+
+* **It cannot bound how many instances a build launches.**  IAM has no
+  condition key for `RunInstances` count.  Use an EC2 vCPU service quota
+  for that -- it is the only real cap, and it is worth setting.
+* **The instance-type `Deny` covers the on-demand path cleanly, and the
+  Spot path only partially.**  Spot instances are launched by the Spot
+  service in response to `ec2:RequestSpotInstances`, so tag-on-create
+  conditions do not apply to them the way they do to `ec2:RunInstances`
+  -- which is the same reason `DEFAULT_EC2_TEMPLATE.j2` needs a
+  `create-tags` `local-exec` for spot at all.  The `ManagedBy` Deny above
+  still protects them once they are tagged.
+* **These documents have not been applied against a live account by their
+  author.**  Everything else in this toolkit's security posture was
+  verified by execution; this was reasoned about.  Run
+  `verify_mcp_credentials.py` before trusting it, and treat a failed check
+  as the policy being wrong rather than the check being wrong.
 
 ## Troubleshooting
 
