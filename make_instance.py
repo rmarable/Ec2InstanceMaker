@@ -193,6 +193,72 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+# Function: print_debug_parameters()
+# Purpose: print the current values of all defined instance_parameters to
+# the console when --debug_mode=true. Reads a single typed
+# InstanceParameters instance instead of ~50 separate local variables --
+# was inline in main() before instance_parameters became a dataclass (see
+# CLAUDE-STATE.md), where a signature this wide would've been unreadable.
+
+
+def print_debug_parameters(params: InstanceParameters) -> None:
+    print_TextHeader(params.instance_name, "Printing", 80)
+    print("aws_account_id = " + params.aws_account_id)
+    if params.turbot_account != "DISABLED":
+        print("turbot_account = " + params.turbot_account)
+    print("aws_ami = " + str(params.aws_ami))
+    print("az = " + params.az)
+    print("base_os = " + params.base_os)
+    if params.count > 1:
+        print("count = " + str(params.count))
+    print("ebs_encryption = " + str(params.ebs_encryption))
+    print("ebs_optimized = " + str(params.ebs_optimized))
+    print("ebs_root_volume_size = " + str(params.ebs_root_volume_size))
+    print("ebs_root_volume_type = " + params.ebs_root_volume_type)
+    print("ebs_root_volume_iops = " + str(params.ebs_root_volume_iops))
+    print("ebs_device_volume_size = " + str(params.ebs_device_volume_size))
+    print("ebs_device_volume_type = " + params.ebs_device_volume_type)
+    print("ebs_device_volume_iops = " + str(params.ebs_device_volume_iops))
+    print("instance_type = " + params.instance_type)
+    print("architecture = " + params.architecture)
+    print("ec2_keypair = " + params.ec2_keypair)
+    print("ec2_user = " + params.ec2_user)
+    print("ec2_user_home = " + params.ec2_user_home)
+    if params.enable_placement_group == "true":
+        print("enable_placement_group = " + params.enable_placement_group)
+        print("placement_group_strategy = " + params.placement_group_strategy)
+    print("hyperthreading = " + params.hyperthreading)
+    print("instance_name = " + params.instance_name)
+    print("instance_owner = " + params.instance_owner)
+    print("instance_owner_email = " + params.instance_owner_email)
+    print("instance_owner_department = " + params.instance_owner_department)
+    print("instance_serial_number = " + params.instance_serial_number)
+    print("instance_serial_number_file = " + params.instance_serial_number_file)
+    print("request_type = " + params.request_type)
+    print("preserve_ami = " + params.preserve_ami)
+    print("prod_devel = " + params.prod_level)
+    if params.project_id != "UNDEFINED":
+        print("project_id = " + params.project_id)
+    if params.ec2_iam_instance_profile:
+        print("preserve_iam_role = " + params.preserve_iam_role)
+        if "UNDEFINED" not in params.ec2_iam_instance_policy:
+            print("ec2_iam_instance_policy = " + params.ec2_iam_instance_policy)
+        print("ec2_iam_instance_profile = " + params.ec2_iam_instance_profile)
+        print("ec2_iam_instance_role = " + params.ec2_iam_instance_role)
+    print("public_ip = " + params.public_ip)
+    print("region = " + params.region)
+    print("security_group_name = " + str(params.security_group_name))
+    print("spot_price = " + str(params.spot_price))
+    print("subnet_id = " + params.subnet_id)
+    print("vars_file_path = " + params.vars_file_path)
+    print("vpc_id = " + params.vpc_id)
+    print("vpc_name = " + params.vpc_name)
+    print("vpc_security_group_ids = " + params.vpc_security_group_ids)
+    print("sns_topic_arn = " + params.sns_topic_arn)
+    print("DEPLOYMENT_DATE = " + params.DEPLOYMENT_DATE)
+    print("TERRAFORM_VERSION = " + params.TERRAFORM_VERSION)
+
+
 def main(argv: list[str] | None = None) -> NoReturn:
     # Create variables from the optional instance parameter values provided
     # from the command line. Recording argv (falling back to sys.argv only
@@ -605,61 +671,7 @@ def main(argv: list[str] | None = None) -> NoReturn:
     # console when debug_mode is enabled.
 
     if debug_mode == "true":
-        print_TextHeader(instance_name, "Printing", 80)
-        print("aws_account_id = " + aws_account_id)
-        if turbot_account != "DISABLED":
-            print("turbot_account = " + turbot_account)
-        print("aws_ami = " + str(aws_ami))
-        print("az = " + az)
-        print("base_os = " + base_os)
-        if count > 1:
-            print("count = " + str(count))
-        print("ebs_encryption = " + str(ebs_encryption))
-        print("ebs_optimized = " + str(ebs_optimized))
-        print("ebs_root_volume_size = " + str(ebs_root_volume_size))
-        print("ebs_root_volume_type = " + ebs_root_volume_type)
-        print("ebs_root_volume_iops = " + str(ebs_root_volume_iops))
-        print("ebs_device_volume_size = " + str(ebs_device_volume_size))
-        print("ebs_device_volume_type = " + ebs_device_volume_type)
-        print("ebs_device_volume_iops = " + str(ebs_device_volume_iops))
-        print("instance_type = " + instance_type)
-        print("architecture = " + architecture)
-        print("ec2_keypair = " + ec2_keypair)
-        print("ec2_user = " + ec2_user)
-        print("ec2_user_home = " + ec2_user_home)
-        if enable_placement_group == "true":
-            print("enable_placement_group = " + enable_placement_group)
-            print("placement_group_strategy = " + placement_group_strategy)
-        print("hyperthreading = " + hyperthreading)
-        print("instance_name = " + instance_name)
-        print("instance_owner = " + instance_owner)
-        print("instance_owner_email = " + instance_owner_email)
-        print("instance_owner_department = " + instance_owner_department)
-        print("instance_serial_number = " + instance_serial_number)
-        print("instance_serial_number_file = " + instance_serial_number_file)
-        print("request_type = " + request_type)
-        print("preserve_ami = " + preserve_ami)
-        print("prod_devel = " + prod_level)
-        if project_id != "UNDEFINED":
-            print("project_id = " + project_id)
-        if ec2_iam_instance_profile:
-            print("preserve_iam_role = " + preserve_iam_role)
-            if "UNDEFINED" not in ec2_iam_instance_policy:
-                print("ec2_iam_instance_policy = " + ec2_iam_instance_policy)
-            print("ec2_iam_instance_profile = " + ec2_iam_instance_profile)
-            print("ec2_iam_instance_role = " + ec2_iam_instance_role)
-        print("public_ip = " + public_ip)
-        print("region = " + region)
-        print("security_group_name = " + str(security_group_name))
-        print("spot_price = " + str(spot_price))
-        print("subnet_id = " + subnet_id)
-        print("vars_file_path = " + vars_file_path)
-        print("vpc_id = " + vpc_id)
-        print("vpc_name = " + vpc_name)
-        print("vpc_security_group_ids = " + vpc_security_group_ids)
-        print("sns_topic_arn = " + sns_topic_arn)
-        print("DEPLOYMENT_DATE = " + DEPLOYMENT_DATE)
-        print("TERRAFORM_VERSION = " + TERRAFORM_VERSION)
+        print_debug_parameters(instance_parameters)
 
     # Generate the vars_file for this instance.
 
