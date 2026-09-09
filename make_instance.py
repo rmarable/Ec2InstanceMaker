@@ -60,6 +60,7 @@ from instance_builder import (
     generate_instance_serial_number,
     generate_sns_timestamps,
     get_terraform_version,
+    instance_lock,
     publish_sns_notification,
     resolve_ami,
     resolve_custom_user_scripts,
@@ -976,6 +977,8 @@ def run_build(argv: list[str] | None, refer_to_docs_and_quit: QuitFn, ctrlc_abor
 
     recorded_argv = list(argv) if argv is not None else sys.argv
     args = parse_args(argv)
+    instance_name = args.instance_name
+
     az = args.az
     base_os = args.base_os
     count = args.count
@@ -997,7 +1000,6 @@ def run_build(argv: list[str] | None, refer_to_docs_and_quit: QuitFn, ctrlc_abor
     iam_json_policy = args.iam_json_policy
     iam_name_prefix = args.iam_name_prefix
     iam_role = args.iam_role
-    instance_name = args.instance_name
     instance_owner = args.instance_owner
     instance_owner_department = args.instance_owner_department
     instance_owner_email = args.instance_owner_email
@@ -1061,120 +1063,139 @@ def run_build(argv: list[str] | None, refer_to_docs_and_quit: QuitFn, ctrlc_abor
     # before creating any state directories. If an existing vars_file
     # exists, abort to prevent potential duplications.
 
-    abort_if_vars_file_exists(vars_file_path, recorded_argv)
-    if debug_mode == "true":
-        print_TextHeader(instance_name, "Validating", 80)
-    else:
-        print("Performing parameter validation...")
-    p_val("vars_file_path", debug_mode)
+    # Held for the rest of the build: closes a TOCTOU gap in the
+    # duplicate-build guard right below (two concurrent builds of the
+    # same instance_name could otherwise both pass the "vars_file
+    # doesn't exist yet" check before either created it) and prevents a
+    # concurrent destroy_instance/terminate_via_kill_script from racing
+    # against this build's own instance_data_dir/vars_file state.
+    with instance_lock(instance_name, refer_to_docs_and_quit):
+        abort_if_vars_file_exists(vars_file_path, recorded_argv)
+        if debug_mode == "true":
+            print_TextHeader(instance_name, "Validating", 80)
+        else:
+            print("Performing parameter validation...")
+        p_val("vars_file_path", debug_mode)
 
-    # Create the vars_file/instance_data/active_instances state directories
-    # if they don't already exist, and generate a unique
-    # instance_serial_number for the instance(s).
+        # Create the vars_file/instance_data/active_instances state directories
+        # if they don't already exist, and generate a unique
+        # instance_serial_number for the instance(s).
 
-    instance_data_dir = "./instance_data/" + instance_name + "/"
-    ensure_state_directories(instance_data_dir)
+        instance_data_dir = "./instance_data/" + instance_name + "/"
+        ensure_state_directories(instance_data_dir)
 
-    serial_number_info = generate_instance_serial_number(instance_name)
-    DEPLOYMENT_DATE = serial_number_info["DEPLOYMENT_DATE"]
-    DEPLOYMENT_DATE_TAG = serial_number_info["DEPLOYMENT_DATE_TAG"]
-    instance_serial_datestamp = serial_number_info["instance_serial_datestamp"]
-    instance_serial_number = serial_number_info["instance_serial_number"]
-    instance_serial_number_file = "./active_instances/" + instance_name + ".serial"
+        serial_number_info = generate_instance_serial_number(instance_name)
+        DEPLOYMENT_DATE = serial_number_info["DEPLOYMENT_DATE"]
+        DEPLOYMENT_DATE_TAG = serial_number_info["DEPLOYMENT_DATE_TAG"]
+        instance_serial_datestamp = serial_number_info["instance_serial_datestamp"]
+        instance_serial_number = serial_number_info["instance_serial_number"]
+        instance_serial_number_file = "./active_instances/" + instance_name + ".serial"
 
-    write_serial_number_file(instance_serial_number_file, instance_name, instance_serial_datestamp, recorded_argv)
-    p_val("instance_serial_number", debug_mode)
-    p_val("instance_serial_number_file", debug_mode)
+        write_serial_number_file(instance_serial_number_file, instance_name, instance_serial_datestamp, recorded_argv)
+        p_val("instance_serial_number", debug_mode)
+        p_val("instance_serial_number_file", debug_mode)
 
-    # Create the AWS clients needed for the rest of the build.
+        # Create the AWS clients needed for the rest of the build.
 
-    aws_clients = create_aws_clients(region, boto3.client, boto3.resource)
+        aws_clients = create_aws_clients(region, boto3.client, boto3.resource)
 
-    # settings bundles every value established once above (or straight from
-    # argparse) that's never reassigned again -- threaded unchanged through
-    # every phase below instead of unpacked into a dozen individual
-    # parameters per phase call.
+        # settings bundles every value established once above (or straight from
+        # argparse) that's never reassigned again -- threaded unchanged through
+        # every phase below instead of unpacked into a dozen individual
+        # parameters per phase call.
 
-    settings = BuildSettings(
-        instance_name=instance_name,
-        instance_serial_number=instance_serial_number,
-        instance_serial_number_file=instance_serial_number_file,
-        instance_data_dir=instance_data_dir,
-        vars_file_path=vars_file_path,
-        region=region,
-        az=az,
-        debug_mode=debug_mode,
-        instance_owner=instance_owner,
-        instance_owner_email=instance_owner_email,
-        instance_owner_department=instance_owner_department,
-        instance_type=instance_type,
-        base_os=base_os,
-        count=count,
-        request_type=request_type,
-        enable_placement_group=enable_placement_group,
-        enable_cloudwatch_logs=enable_cloudwatch_logs,
-        log_retention_days=log_retention_days,
-        iam_name_prefix=iam_name_prefix,
-        turbot_account=turbot_account,
-        DEPLOYMENT_DATE=DEPLOYMENT_DATE,
-        DEPLOYMENT_DATE_TAG=DEPLOYMENT_DATE_TAG,
-        TERRAFORM_VERSION=TERRAFORM_VERSION,
-    )
+        settings = BuildSettings(
+            instance_name=instance_name,
+            instance_serial_number=instance_serial_number,
+            instance_serial_number_file=instance_serial_number_file,
+            instance_data_dir=instance_data_dir,
+            vars_file_path=vars_file_path,
+            region=region,
+            az=az,
+            debug_mode=debug_mode,
+            instance_owner=instance_owner,
+            instance_owner_email=instance_owner_email,
+            instance_owner_department=instance_owner_department,
+            instance_type=instance_type,
+            base_os=base_os,
+            count=count,
+            request_type=request_type,
+            enable_placement_group=enable_placement_group,
+            enable_cloudwatch_logs=enable_cloudwatch_logs,
+            log_retention_days=log_retention_days,
+            iam_name_prefix=iam_name_prefix,
+            turbot_account=turbot_account,
+            DEPLOYMENT_DATE=DEPLOYMENT_DATE,
+            DEPLOYMENT_DATE_TAG=DEPLOYMENT_DATE_TAG,
+            TERRAFORM_VERSION=TERRAFORM_VERSION,
+        )
 
-    ebs = EbsRequest(
-        encryption=ebs_encryption,
-        optimized=ebs_optimized,
-        root_volume_size=ebs_root_volume_size,
-        root_volume_type=ebs_root_volume_type,
-        root_volume_iops=ebs_root_volume_iops,
-        device_volume_size=ebs_device_volume_size,
-        device_volume_type=ebs_device_volume_type,
-        device_volume_iops=ebs_device_volume_iops,
-    )
+        ebs = EbsRequest(
+            encryption=ebs_encryption,
+            optimized=ebs_optimized,
+            root_volume_size=ebs_root_volume_size,
+            root_volume_type=ebs_root_volume_type,
+            root_volume_iops=ebs_root_volume_iops,
+            device_volume_size=ebs_device_volume_size,
+            device_volume_type=ebs_device_volume_type,
+            device_volume_iops=ebs_device_volume_iops,
+        )
 
-    # Phase 1: AZ/region validation, instance_type_info, base_os
-    # checks/family, EBS optimize/encrypt/resize, spot pricing, placement
-    # group strategy. Must happen before any other AWS API call that
-    # doesn't itself handle a bad region/AZ cleanly -- describe_availability_zones
-    # is the first call to hit a bogus region with a recognizable,
-    # catchable error (ValueError/EndpointConnectionError), and gives a
-    # clean, friendly abort instead of a raw traceback from something
-    # further down the line.
+        # Phase 1: AZ/region validation, instance_type_info, base_os
+        # checks/family, EBS optimize/encrypt/resize, spot pricing, placement
+        # group strategy. Must happen before any other AWS API call that
+        # doesn't itself handle a bad region/AZ cleanly -- describe_availability_zones
+        # is the first call to hit a bogus region with a recognizable,
+        # catchable error (ValueError/EndpointConnectionError), and gives a
+        # clean, friendly abort instead of a raw traceback from something
+        # further down the line.
 
-    network = resolve_network_and_compute(settings, aws_clients, ebs, spot_buffer, placement_group_strategy, refer_to_docs_and_quit)
+        network = resolve_network_and_compute(settings, aws_clients, ebs, spot_buffer, placement_group_strategy, refer_to_docs_and_quit)
 
-    # Phase 2: VPC/subnet, ssh_allowed_ips, security group, ec2_user home
-    # directory, AMI, keypair.
+        # Phase 2: VPC/subnet, ssh_allowed_ips, security group, ec2_user home
+        # directory, AMI, keypair.
 
-    vpc = resolve_vpc_security_and_keypair(settings, aws_clients, network, vpc_name, security_group, ssh_allowed_ips, custom_ami, ec2_keypair, refer_to_docs_and_quit)
+        vpc = resolve_vpc_security_and_keypair(settings, aws_clients, network, vpc_name, security_group, ssh_allowed_ips, custom_ami, ec2_keypair, refer_to_docs_and_quit)
 
-    # Phase 3: CloudWatch log group, IAM role/policy/profile setup, Turbot
-    # environment variables, SNS topic creation/subscribe/timestamps.
+        # Phase 3: CloudWatch log group, IAM role/policy/profile setup, Turbot
+        # environment variables, SNS topic creation/subscribe/timestamps.
 
-    iam_sns = provision_iam_sns_and_logging(settings, aws_clients, iam_role, iam_json_policy, refer_to_docs_and_quit)
+        iam_sns = provision_iam_sns_and_logging(settings, aws_clients, iam_role, iam_json_policy, refer_to_docs_and_quit)
 
-    options = BuildOptions(
-        preserve_ami=preserve_ami,
-        preserve_cloudwatch_logs=preserve_cloudwatch_logs,
-        hyperthreading=hyperthreading,
-        prod_level=prod_level,
-        project_id=project_id,
-        public_ip=public_ip,
-    )
+        options = BuildOptions(
+            preserve_ami=preserve_ami,
+            preserve_cloudwatch_logs=preserve_cloudwatch_logs,
+            hyperthreading=hyperthreading,
+            prod_level=prod_level,
+            project_id=project_id,
+            public_ip=public_ip,
+        )
 
-    # Phase 4: assemble InstanceParameters, print the --debug_mode dump,
-    # write the vars_file, render the Jinja2 templates, run the CTRL-C-abort
-    # safety window, apply Terraform, and tag the security group.
+        # Phase 4: assemble InstanceParameters, print the --debug_mode dump,
+        # write the vars_file, render the Jinja2 templates, run the CTRL-C-abort
+        # safety window, apply Terraform, and tag the security group.
 
-    render_and_apply(
-        settings, aws_clients, network, vpc, iam_sns, options, ebs, cwd, instance_data_dir_abs, custom_user_prelogin_scripts, custom_user_postboot_scripts, refer_to_docs_and_quit, ctrlc_abort_seconds
-    )
+        render_and_apply(
+            settings,
+            aws_clients,
+            network,
+            vpc,
+            iam_sns,
+            options,
+            ebs,
+            cwd,
+            instance_data_dir_abs,
+            custom_user_prelogin_scripts,
+            custom_user_postboot_scripts,
+            refer_to_docs_and_quit,
+            ctrlc_abort_seconds,
+        )
 
-    # Phase 5: post-apply console guidance, Windows password table if
-    # applicable, and the build-completion SNS notification. Terminal --
-    # every path through run_build() ends here.
+        # Phase 5: post-apply console guidance, Windows password table if
+        # applicable, and the build-completion SNS notification. Terminal --
+        # every path through run_build() ends here.
 
-    return report_and_notify(settings, aws_clients, network, vpc, iam_sns, refer_to_docs_and_quit)
+        return report_and_notify(settings, aws_clients, network, vpc, iam_sns, refer_to_docs_and_quit)
 
 
 def main(argv: list[str] | None = None) -> NoReturn:

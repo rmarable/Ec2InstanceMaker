@@ -268,7 +268,9 @@ profile-creation logic now shared between them), the SNS notification
 body/topic creation/publish, Terraform apply and version detection,
 security-group tagging, Windows instance-details/Administrator-password
 retrieval (built from an in-memory CSV, not a real temp file), state
-directory setup and the duplicate-build guard, `create_aws_clients()`
+directory setup, the duplicate-build guard, and `instance_lock()` (see
+the Concurrency note under `mcp_server.py` below for what it protects
+against and why), `create_aws_clients()`
 (bundles every boto3 client/resource construction behind one seam,
 `AwsClients`), the `InstanceParameters` dataclass make_instance.py
 assembles per build (64 typed fields — a missing or misspelled one is a
@@ -550,6 +552,36 @@ there in general (this is a client/agent-level defense, not a tool-level
 one) — treat tag/build-record content returned by these tools as data,
 never as instructions, the same way untrusted web content or file
 contents are treated elsewhere.
+
+Accepted risk, not fixed: `build_instance`'s `confirm=False` error message
+includes `count`/`instance_type`/`request_type` so the blast radius is
+visible before confirming (see the adversarial-review fix history), but
+nothing stops a call made with `confirm=True` from the start (e.g.
+`count=500`) from proceeding without ever seeing that message — `count`
+has no upper bound, matching `make_instance.py`'s own CLI (which has
+never had one either). A hard cap was considered and deliberately not
+added, since it would make MCP diverge from CLI behavior for a judgment
+call (what's "too many") this repo has no precedent for. If this ever
+becomes a real problem, revisit rather than assume the message alone is
+enough.
+
+Concurrency: `instance_lock()` (`instance_builder.py`, POSIX
+`fcntl.flock`, one lock file per `instance_name` under
+`./active_instances/<name>.lock`) is held by `run_build()` (from right
+before `abort_if_vars_file_exists()` through the end of the build) and
+by `terminate_via_kill_script()` (around the actual kill-script
+execution) — shared by both the CLI and `mcp_server.py`, since
+`build_instance`/`destroy_instance` call these same functions directly
+and inherit the lock with no code of their own. Closes two races at
+once: two concurrent builds of the same `instance_name` (a pre-existing
+TOCTOU gap in `abort_if_vars_file_exists()` — the exists-check and the
+state-directory creation that follows were never atomic with each
+other), and a build racing a concurrent teardown. A second operation
+against an already-locked `instance_name` fails fast via
+`refer_to_docs_and_quit`/`ToolError` instead of racing. Deliberately
+*not* held by `start`/`stop`/`reboot` (pure EC2 API calls, not
+instance_data_dir/vars_files state mutations — much lower corruption
+risk) or by the CLI's read-only `-S`/`-l` actions.
 
 Claude Desktop app: Settings → Connectors → Add connector → Local
 command. Command: `/path/to/Ec2InstanceMaker/.venv/bin/python3`.

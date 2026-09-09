@@ -16,13 +16,15 @@
 # make_instance.py.
 ################################################################################
 
+import contextlib
 import errno
+import fcntl
 import ipaddress
 import os
 import re
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import UTC
 from datetime import datetime as DateTime
@@ -894,6 +896,44 @@ def ensure_state_directories(instance_data_dir: str) -> None:
         except OSError as e:
             if e.errno != errno.EEXIST:
                 raise
+
+
+# Function: instance_lock()
+# Purpose: hold an exclusive, non-blocking OS-level lock (fcntl.flock) on
+# ./active_instances/<instance_name>.lock for the duration of a build or
+# teardown, so two overlapping operations against the same instance_name
+# (make_instance.py run_build() and manage_instance.py
+# terminate_via_kill_script(), whether both invoked from the CLI, both
+# from mcp_server.py, or one of each) fail fast with a clear message
+# instead of racing on instance_data_dir/vars_files/active_instances
+# state. This also closes a pre-existing TOCTOU gap in
+# abort_if_vars_file_exists() above: that check and the state-directory
+# creation that follows it were never atomic with each other, so two
+# concurrent builds of the same instance_name could both pass the
+# "doesn't exist yet" check before either created it. flock's exclusivity
+# is per open file description, not per process, so this works whether
+# the two operations are two separate CLI invocations (two processes) or
+# two tool calls handled by the same long-running mcp_server.py process.
+# POSIX-only (fcntl) -- consistent with this project's stated OSX/Linux
+# support; Windows was never supported.
+
+
+@contextlib.contextmanager
+def instance_lock(instance_name: str, refer_to_docs_and_quit: QuitFn) -> Iterator[None]:
+    os.makedirs("./active_instances", exist_ok=True)
+    lock_path = "./active_instances/" + instance_name + ".lock"
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as e:
+            if e.errno in (errno.EACCES, errno.EAGAIN):
+                refer_to_docs_and_quit('Another build or teardown is already in progress for "' + instance_name + '" (lock held on ' + lock_path + "). Wait for it to finish and try again.")
+            raise
+        yield
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
 
 
 # Function: abort_if_vars_file_exists()

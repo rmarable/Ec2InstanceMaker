@@ -28,7 +28,7 @@ from prettytable import PrettyTable
 # Import some external lists and functions.
 # Source: aux_data.py
 from aux_data import refer_to_docs_and_quit
-from instance_builder import validate_instance_name_format
+from instance_builder import instance_lock, validate_instance_name_format
 
 # Type aliases used throughout this module's signatures -- same duplicated
 # convention as instance_builder.py/aux_data.py (see the comment there for
@@ -205,7 +205,8 @@ def terminate_via_kill_script(
         if confirmation.strip().lower() != "yes":
             print("Aborting...")
             sys.exit(1)
-    return run_kill_script(["bash", kill_script]).returncode
+    with instance_lock(instance_name, refer_to_docs_and_quit):
+        return run_kill_script(["bash", kill_script]).returncode
 
 
 def main() -> NoReturn:

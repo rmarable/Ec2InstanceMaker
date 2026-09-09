@@ -6,6 +6,7 @@ with no importable functions, like make_instance.py/access_instance.py
 still are.
 """
 
+import contextlib
 from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
@@ -254,7 +255,7 @@ class TestTerminateViaKillScript:
         quit_fn = _quitting_mock()
         run_mock = MagicMock(return_value=MagicMock(returncode=0))
         confirm_mock = MagicMock()
-        with patch("os.path.exists", return_value=True):
+        with patch("os.path.exists", return_value=True), patch("manage_instance.instance_lock", return_value=contextlib.nullcontext()):
             result = manage_instance.terminate_via_kill_script("dev01", True, quit_fn, run_kill_script=run_mock, confirm_input=confirm_mock)
         confirm_mock.assert_not_called()
         run_mock.assert_called_once_with(["bash", "kill-instance.dev01.sh"])
@@ -272,6 +273,14 @@ class TestTerminateViaKillScript:
         quit_fn = _quitting_mock()
         run_mock = MagicMock(return_value=MagicMock(returncode=0))
         confirm_mock = MagicMock(return_value="yes")
-        with patch("os.path.exists", return_value=True):
+        with patch("os.path.exists", return_value=True), patch("manage_instance.instance_lock", return_value=contextlib.nullcontext()):
             manage_instance.terminate_via_kill_script("dev01", False, quit_fn, run_kill_script=run_mock, confirm_input=confirm_mock)
         run_mock.assert_called_once_with(["bash", "kill-instance.dev01.sh"])
+
+    def test_lock_held_elsewhere_quits_without_running_kill_script(self):
+        quit_fn = _quitting_mock()
+        run_mock = MagicMock()
+        with patch("os.path.exists", return_value=True), patch("manage_instance.instance_lock", side_effect=SystemExit(1)) as lock_mock, pytest.raises(SystemExit):
+            manage_instance.terminate_via_kill_script("dev01", True, quit_fn, run_kill_script=run_mock)
+        lock_mock.assert_called_once_with("dev01", quit_fn)
+        run_mock.assert_not_called()

@@ -6,6 +6,7 @@ against real AWS.
 """
 
 import json
+import os
 import time
 from datetime import UTC
 from datetime import datetime as DateTime
@@ -1176,6 +1177,55 @@ class TestAbortIfVarsFileExists:
         (tmp_path / "vars_files" / "dev01.yml").write_text("existing")
         with pytest.raises(SystemExit):
             instance_builder.abort_if_vars_file_exists("./vars_files/dev01.yml", ["make_instance.py", "-N", "dev01"])
+
+
+class TestInstanceLock:
+    def test_creates_lock_file_and_yields(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        quit_fn = MagicMock(side_effect=SystemExit(1))
+        with instance_builder.instance_lock("dev01", quit_fn):
+            assert (tmp_path / "active_instances" / "dev01.lock").is_file()
+        quit_fn.assert_not_called()
+
+    def test_lock_is_released_after_the_with_block_exits(self, tmp_path, monkeypatch):
+        # A second acquisition after the first completes must succeed --
+        # proves the lock doesn't leak past its own `with` block.
+        monkeypatch.chdir(tmp_path)
+        quit_fn = MagicMock(side_effect=SystemExit(1))
+        with instance_builder.instance_lock("dev01", quit_fn):
+            pass
+        with instance_builder.instance_lock("dev01", quit_fn):
+            pass
+        quit_fn.assert_not_called()
+
+    def test_already_held_lock_quits_without_yielding(self, tmp_path, monkeypatch):
+        import fcntl
+
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "active_instances").mkdir()
+        lock_path = tmp_path / "active_instances" / "dev01.lock"
+        holder_fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR)
+        fcntl.flock(holder_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            quit_fn = MagicMock(side_effect=SystemExit(1))
+            entered = False
+            with pytest.raises(SystemExit), instance_builder.instance_lock("dev01", quit_fn):
+                entered = True
+            assert not entered
+            quit_fn.assert_called_once()
+            assert "dev01" in quit_fn.call_args.args[0]
+        finally:
+            fcntl.flock(holder_fd, fcntl.LOCK_UN)
+            os.close(holder_fd)
+
+    def test_lock_released_even_if_the_with_block_raises(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        quit_fn = MagicMock(side_effect=SystemExit(1))
+        with pytest.raises(ValueError), instance_builder.instance_lock("dev01", quit_fn):
+            raise ValueError("boom")
+        with instance_builder.instance_lock("dev01", quit_fn):
+            pass
+        quit_fn.assert_not_called()
 
 
 class TestWriteSerialNumberFile:

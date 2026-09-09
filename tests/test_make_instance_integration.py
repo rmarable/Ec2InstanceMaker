@@ -198,3 +198,41 @@ class TestMainVarsFileDuplicateGuard:
 
         assert exc_info.value.code == 1
         mock_get_instance_type_info.assert_not_called()
+
+
+class TestMainConcurrencyGuard:
+    """run_build() now holds instance_lock() (instance_builder.py) from
+    right before abort_if_vars_file_exists() through the end of the
+    build -- proves a second concurrent build of the same instance_name
+    aborts cleanly instead of racing on instance_data_dir/vars_files
+    state, and proves uppercase-name validation still runs with zero
+    filesystem side effects (no lock file created) since it happens
+    before the lock is ever acquired.
+    """
+
+    def test_second_concurrent_build_of_same_name_aborts_without_touching_aws(self, tmp_path, monkeypatch):
+        import fcntl
+
+        monkeypatch.chdir(tmp_path)
+        _symlink_repo_assets(tmp_path)
+        mock_get_instance_type_info = MagicMock()
+        monkeypatch.setattr(make_instance, "get_instance_type_info", mock_get_instance_type_info)
+
+        (tmp_path / "active_instances").mkdir()
+        lock_path = tmp_path / "active_instances" / "testint01.lock"
+        holder_fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR)
+        fcntl.flock(holder_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            with pytest.raises(SystemExit) as exc_info:
+                make_instance.main(_happy_path_argv())
+            assert exc_info.value.code == 1
+            mock_get_instance_type_info.assert_not_called()
+        finally:
+            fcntl.flock(holder_fd, fcntl.LOCK_UN)
+            os.close(holder_fd)
+
+    def test_uppercase_instance_name_creates_no_lock_file(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        with pytest.raises(SystemExit):
+            make_instance.main(_happy_path_argv("TestInt01"))
+        assert not (tmp_path / "active_instances").exists()
