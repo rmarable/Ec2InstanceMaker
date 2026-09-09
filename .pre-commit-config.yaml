@@ -83,9 +83,8 @@ repos:
           runtime toolkit) but is fully typed -- its own functions are
           small and narrow, and it already imports the fully-typed
           template_engine.py, so it costs almost nothing to include.
-          mcp_server.py (requirements-mcp.txt, an optional dependency) is
-          likewise fully typed and imports manage_instance.py's
-          already-tested functions directly.
+          mcp_server.py is likewise fully typed and imports
+          manage_instance.py's already-tested functions directly.
           pass_filenames is false and mypy is invoked bare (no file args)
           so it always checks its own `files` list in pyproject.toml in
           full, regardless of which of these actually changed -- same

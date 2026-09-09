@@ -9,6 +9,7 @@ cryptography
 Jinja2
 jmespath
 jq
+mcp
 MarkupSafe
 prettytable
 pyasn1
