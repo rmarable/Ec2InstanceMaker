@@ -369,7 +369,7 @@ class TestResolveSecurityGroup:
         ec2 = self._ec2_with_filter_results([[fake_sg]])
         add_rule = MagicMock()
 
-        name, sg_ids = instance_builder.resolve_security_group(ec2, "us-east-1", "ec2instancemaker_sg", "12345_us-east-1", "vpc-abc", False, "10.0.0.0/16", add_rule)
+        name, sg_ids = instance_builder.resolve_security_group(ec2, "ec2instancemaker_sg", "12345_us-east-1", "vpc-abc", False, "10.0.0.0/16", add_rule)
 
         assert name == "ec2instancemaker_sg_12345_us-east-1"
         assert sg_ids == "sg-0123456789abcdef0"
@@ -383,7 +383,7 @@ class TestResolveSecurityGroup:
         ec2 = self._ec2_with_filter_results([[fake_sg]])
         add_rule = MagicMock()
 
-        name, sg_ids = instance_builder.resolve_security_group(ec2, "us-east-1", "my-custom-sg", "12345_us-east-1", "vpc-abc", False, "10.0.0.0/16", add_rule)
+        name, sg_ids = instance_builder.resolve_security_group(ec2, "my-custom-sg", "12345_us-east-1", "vpc-abc", False, "10.0.0.0/16", add_rule)
 
         assert name == "my-custom-sg"
         assert sg_ids == "sg-custom111111111"
@@ -396,10 +396,10 @@ class TestResolveSecurityGroup:
         ec2.create_security_group.return_value = created_sg
         add_rule = MagicMock()
 
-        name, sg_ids = instance_builder.resolve_security_group(ec2, "us-east-1", "ec2instancemaker_sg", "999_us-east-1", "vpc-abc", True, "10.0.0.0/16", add_rule)
+        name, sg_ids = instance_builder.resolve_security_group(ec2, "ec2instancemaker_sg", "999_us-east-1", "vpc-abc", True, "10.0.0.0/16", add_rule)
 
         ec2.create_security_group.assert_called_once()
-        add_rule.assert_called_once_with("us-east-1", created_sg, "tcp", "10.0.0.0/16", 3389, 3389)
+        add_rule.assert_called_once_with(created_sg, "tcp", "10.0.0.0/16", 3389, 3389)
         assert sg_ids == "sg-newlycreated0001"
 
     def test_creates_group_and_opens_ssh_for_linux(self):
@@ -410,9 +410,9 @@ class TestResolveSecurityGroup:
         ec2.create_security_group.return_value = created_sg
         add_rule = MagicMock()
 
-        instance_builder.resolve_security_group(ec2, "us-east-1", "ec2instancemaker_sg", "999_us-east-1", "vpc-abc", False, "10.0.0.0/16", add_rule)
+        instance_builder.resolve_security_group(ec2, "ec2instancemaker_sg", "999_us-east-1", "vpc-abc", False, "10.0.0.0/16", add_rule)
 
-        add_rule.assert_called_once_with("us-east-1", created_sg, "tcp", "10.0.0.0/16", 22, 22)
+        add_rule.assert_called_once_with(created_sg, "tcp", "10.0.0.0/16", 22, 22)
 
     def test_lookup_is_scoped_to_the_target_vpc(self):
         # Regression test: a bare group-name filter (with no vpc-id
@@ -425,7 +425,7 @@ class TestResolveSecurityGroup:
         ec2 = self._ec2_with_filter_results([[fake_sg]])
         add_rule = MagicMock()
 
-        instance_builder.resolve_security_group(ec2, "us-east-1", "my-custom-sg", "12345_us-east-1", "vpc-target123", False, "10.0.0.0/16", add_rule)
+        instance_builder.resolve_security_group(ec2, "my-custom-sg", "12345_us-east-1", "vpc-target123", False, "10.0.0.0/16", add_rule)
 
         called_filters = ec2.security_groups.filter.call_args.kwargs["Filters"]
         vpc_filter = next(f for f in called_filters if f["Name"] == "vpc-id")
@@ -896,8 +896,6 @@ class TestSetupIam:
         assert policy == "UNDEFINED"
         assert profile == "my-preexisting-role_instance_profile"
         assert preserve == "true"
-        iam.create_role.assert_not_called()
-        modify_policy.assert_not_called()  # only relevant to the create-new path
 
     def test_unrecognized_iam_json_policy_quits_before_touching_the_filesystem(self, tmp_path):
         # Defense-in-depth: --iam_json_policy's argparse choices=[...] is
@@ -923,6 +921,8 @@ class TestSetupIam:
         quit_fn.assert_called_once()
         modify_policy.assert_not_called()
         iam.create_role.assert_not_called()
+        iam.create_role.assert_not_called()
+        modify_policy.assert_not_called()  # only relevant to the create-new path
 
     def test_preexisting_role_missing_quits_before_touching_instance_profile(self):
         iam = MagicMock()

@@ -27,8 +27,12 @@ from prettytable import from_csv
 # Function: menuCount()
 # Purpose: iterate through a list from item_value=low to item_value=high
 #
-# This function would normally be defined within aux_data.py but importing
-# from non-local directories makes the code look ugly and unPythonic.
+# This is the sole implementation -- this generated script must be
+# self-contained (it runs standalone on disk, not imported alongside
+# aux_data.py), so it can't just import a shared copy from the toolkit.
+# There used to be a second, identical copy in aux_data.py itself, but it
+# was never actually called by anything except its own unit test -- an
+# adversarial review found and removed it as dead code.
 
 def menuCount(low, high):
     counter = 0

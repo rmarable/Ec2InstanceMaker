@@ -164,6 +164,13 @@ class TestGetAmiInfo:
             aux_data.get_ami_info(ec2_client, "al2023", "x86_64")
 
 
+class TestAddInboundSecurityGroupRule:
+    def test_calls_authorize_ingress_with_the_right_arguments(self):
+        sec_grp = MagicMock()
+        aux_data.add_inbound_security_group_rule(sec_grp, "tcp", "10.0.0.0/16", 22, 22)
+        sec_grp.authorize_ingress.assert_called_once_with(IpProtocol="tcp", CidrIp="10.0.0.0/16", FromPort=22, ToPort=22)
+
+
 class TestCheckCustomAmi:
     def test_found_returns_ami_id(self):
         ec2_client = MagicMock()

@@ -210,14 +210,6 @@ class TestModifyIamPolicyDocument:
             assert "Ec2InstanceMaker-" in resource_arn
 
 
-class TestMenuCount:
-    def test_iterates_low_to_high_exclusive(self):
-        assert list(aux_data.menuCount(1, 4)) == [1, 2, 3]
-
-    def test_empty_range(self):
-        assert list(aux_data.menuCount(5, 5)) == []
-
-
 class TestPFailPVal:
     def test_p_fail_exits(self):
         with pytest.raises(SystemExit):

@@ -240,13 +240,12 @@ def resolve_ssh_allowed_ips(ec2_client: EC2Client, vpc_id: str, ssh_allowed_ips:
 
 def resolve_security_group(
     ec2: EC2ServiceResource,
-    region: str,
     security_group_name: str,
     instance_serial_number: str,
     vpc_id: str,
     is_windows: bool,
     ssh_allowed_ips: str,
-    add_inbound_security_group_rule: Callable[[str, SecurityGroup, str, str, int, int], None],
+    add_inbound_security_group_rule: Callable[[SecurityGroup, str, str, int, int], None],
 ) -> tuple[str, str]:
     if security_group_name == "ec2instancemaker_sg":
         security_group_name = security_group_name + "_" + instance_serial_number
@@ -255,9 +254,9 @@ def resolve_security_group(
     if not sg_id:
         security_group = ec2.create_security_group(GroupName=security_group_name, Description="EC2 security group - created by Ec2InstanceMaker", VpcId=vpc_id)
         if is_windows:
-            add_inbound_security_group_rule(region, security_group, "tcp", ssh_allowed_ips, 3389, 3389)
+            add_inbound_security_group_rule(security_group, "tcp", ssh_allowed_ips, 3389, 3389)
         else:
-            add_inbound_security_group_rule(region, security_group, "tcp", ssh_allowed_ips, 22, 22)
+            add_inbound_security_group_rule(security_group, "tcp", ssh_allowed_ips, 22, 22)
         sg_id = list(ec2.security_groups.filter(Filters=filters))
     vpc_security_group_ids = sg_id[0].id
     return security_group_name, vpc_security_group_ids

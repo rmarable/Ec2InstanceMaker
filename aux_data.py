@@ -6,7 +6,6 @@
 # Purpose:	Data structures and functions to support Ec2InstanceMaker
 ################################################################################
 
-from collections.abc import Iterator
 from typing import Any, Literal, NoReturn, cast
 
 from mypy_boto3_ec2.client import EC2Client
@@ -74,7 +73,7 @@ def get_base_os_family(base_os: str) -> dict[str, Any]:
 # Purpose: add a rule to a security group
 
 
-def add_inbound_security_group_rule(region: str, sec_grp: SecurityGroup, protocol: str, cidr: str, psource: int, pdest: int) -> None:
+def add_inbound_security_group_rule(sec_grp: SecurityGroup, protocol: str, cidr: str, psource: int, pdest: int) -> None:
     sec_grp.authorize_ingress(IpProtocol=protocol, CidrIp=cidr, FromPort=psource, ToPort=pdest)
 
 
@@ -401,24 +400,6 @@ def get_ami_info(ec2client: EC2Client, base_os: str, architecture: str) -> str:
         refer_to_docs_and_quit("AWS API error while looking up an AMI for base_os " + base_os + ": " + str(e))
     amis = sorted(ami_information["Images"], key=lambda x: x["CreationDate"], reverse=True)
     return amis[0]["ImageId"]
-
-
-# Function: menuCount()
-# Purpose: iterate through a list from item_value=low to item_value=high
-
-
-def menuCount(low: int, high: int) -> Iterator[int]:
-    counter = 0
-
-    def tmp() -> int | None:
-        nonlocal counter
-        item_value = low + counter
-        if item_value < high:
-            counter += 1
-            return item_value
-        return None
-
-    return iter(tmp, None)
 
 
 # Function: illegal_az_msg()

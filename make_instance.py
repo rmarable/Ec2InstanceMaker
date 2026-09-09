@@ -527,7 +527,7 @@ def resolve_vpc_security_and_keypair(
     p_val("ssh_allowed_ips", debug_mode)
 
     security_group_name, vpc_security_group_ids = resolve_security_group(
-        ec2, settings.region, security_group, settings.instance_serial_number, vpc_id, network.is_windows, ssh_allowed_ips, add_inbound_security_group_rule
+        ec2, security_group, settings.instance_serial_number, vpc_id, network.is_windows, ssh_allowed_ips, add_inbound_security_group_rule
     )
     p_val("security_group", debug_mode)
     p_val("vpc_security_group_ids", debug_mode)
