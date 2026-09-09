@@ -899,6 +899,31 @@ class TestSetupIam:
         iam.create_role.assert_not_called()
         modify_policy.assert_not_called()  # only relevant to the create-new path
 
+    def test_unrecognized_iam_json_policy_quits_before_touching_the_filesystem(self, tmp_path):
+        # Defense-in-depth: --iam_json_policy's argparse choices=[...] is
+        # the only thing currently keeping this from reaching setup_iam()
+        # as an arbitrary string that becomes a filesystem path -- this
+        # proves setup_iam() itself refuses an unrecognized value too.
+        iam = MagicMock()
+        quit_fn = MagicMock(side_effect=SystemExit(1))
+        modify_policy = MagicMock()
+
+        with pytest.raises(SystemExit):
+            instance_builder.setup_iam(
+                iam,
+                "UNDEFINED",
+                "Ec2InstanceMaker",
+                "../../etc/passwd",
+                str(tmp_path) + "/",
+                "12345_us-east-1",
+                "false",
+                quit_fn,
+                modify_policy,
+            )
+        quit_fn.assert_called_once()
+        modify_policy.assert_not_called()
+        iam.create_role.assert_not_called()
+
     def test_preexisting_role_missing_quits_before_touching_instance_profile(self):
         iam = MagicMock()
         iam.get_role.side_effect = _client_error("NoSuchEntity")

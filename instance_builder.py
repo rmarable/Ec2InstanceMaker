@@ -629,6 +629,18 @@ def setup_iam(
     modify_iam_policy_document: Callable[[str, str, str, str], None],
 ) -> tuple[str, str, str, BoolStr]:
     if iam_role == "UNDEFINED":
+        # iam_json_policy is currently only ever one of these three
+        # filenames -- enforced today by argparse's choices=[...] on
+        # --iam_json_policy (make_instance.py's parse_args()), which every
+        # call path (CLI and mcp_server.py's build_instance) goes through.
+        # Checked again here, explicitly, rather than trusting that
+        # invariant to hold forever: this string is about to become a
+        # filesystem path, and an adversarial review found exactly this
+        # "caller-validates, callee trusts" pattern exploitable elsewhere
+        # in this codebase (mcp_server.py's instance_name handling) when
+        # the calling convention changed out from under it.
+        if iam_json_policy not in ("MinimalEc2InstancePolicy.json", "GenericEc2InstancePolicy.json", "ExtendedEc2InstancePolicy.json"):
+            refer_to_docs_and_quit('"' + iam_json_policy + '" is not a recognized IAM policy document!')
         role_name, policy_name, profile_name = derive_iam_names(iam_name_prefix, instance_serial_number)
         instance_json_policy_src = "templates/" + iam_json_policy
         instance_json_policy_stage = instance_data_dir + "stage-" + iam_json_policy

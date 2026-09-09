@@ -60,6 +60,15 @@ def dispatch_to_instance_access_script(
     refer_to_docs_and_quit: QuitFn,
     run_access_script: Callable[..., subprocess.CompletedProcess[bytes]] = subprocess.run,
 ) -> int:
+    # Defense-in-depth: main() already validates instance_name before
+    # calling this, but this function constructs a filesystem path and
+    # shells out from instance_name directly -- an adversarial review
+    # found the same "unvalidated instance_name in a path" pattern
+    # exploitable elsewhere (mcp_server.py) when a function relied solely
+    # on its caller having validated first. Validating again here means
+    # this function stays safe even if called directly by a future
+    # caller (a test, a refactor, an MCP tool) that doesn't.
+    validate_instance_name_format(instance_name, refer_to_docs_and_quit)
     instance_dir = os.path.join("instance_data", instance_name)
     access_script_path = os.path.join(instance_dir, "access_instance." + instance_name + ".py")
     if not os.path.exists(access_script_path):

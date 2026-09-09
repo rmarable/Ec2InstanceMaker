@@ -58,3 +58,16 @@ class TestDispatchToInstanceAccessScript:
             result = access_instance.dispatch_to_instance_access_script("dev01", 0, quit_fn, run_access_script=run_mock)
         assert result == 1
         assert "Interrupted." in capsys.readouterr().out
+
+    def test_invalid_instance_name_rejected_before_touching_filesystem_or_subprocess(self):
+        # Defense-in-depth: main() already validates instance_name first,
+        # but this proves the function is safe even called directly,
+        # bypassing main() -- same path-traversal class of bug an
+        # adversarial review found and fixed in mcp_server.py.
+        quit_fn = _quitting_mock()
+        run_mock = MagicMock()
+        with patch("os.path.exists") as exists_mock, pytest.raises(SystemExit):
+            access_instance.dispatch_to_instance_access_script("../../etc/passwd", 0, quit_fn, run_access_script=run_mock)
+        quit_fn.assert_called_once()
+        exists_mock.assert_not_called()
+        run_mock.assert_not_called()
