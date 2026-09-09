@@ -236,7 +236,11 @@ class TestDestroyInstance:
     def test_confirm_true_delegates_to_kill_script_with_auto_confirm(self):
         terminate_mock = MagicMock(return_value=0)
         with patch("mcp_server.terminate_via_kill_script", terminate_mock):
-            result = mcp_server.destroy_instance("dev01", confirm=True)
+            preview = mcp_server.destroy_instance("dev01", confirm=True)
+            # Phase one must not have run the kill script.
+            terminate_mock.assert_not_called()
+            assert preview["status"] == "confirmation_required"
+            result = mcp_server.destroy_instance("dev01", confirm=True, confirmation_token=preview["confirmation_token"])
         terminate_mock.assert_called_once_with("dev01", True, mcp_server._mcp_quit)
         assert result == {"instance_name": "dev01", "kill_script_returncode": 0}
 
@@ -293,44 +297,67 @@ class TestInstanceNameValidationAcrossTools:
             mcp_server.get_build_record("Dev01")
 
 
+class TestPowerStatePreview:
+    """Phase one resolves and returns the affected instances without
+    touching any of them. This did not exist before: the mutating path
+    acted on whatever find_managed_instances() returned and only revealed
+    which instances were hit in the return value, after the fact."""
+
+    def test_preview_returns_matches_and_touches_nothing(self):
+        client = _ec2_client([ONDEMAND_INSTANCE])
+
+        result = mcp_server._power_state_preview(client, "dev01", "us-east-1", "start")
+
+        assert result["status"] == "confirmation_required"
+        assert result["affected_count"] == 1
+        assert result["confirmation_token"]
+        client.start_instances.assert_not_called()
+        client.stop_instances.assert_not_called()
+        client.reboot_instances.assert_not_called()
+
+    def test_spot_conflict_is_caught_in_the_preview(self):
+        client = _ec2_client([SPOT_INSTANCE])
+        with pytest.raises(ToolError):
+            mcp_server._power_state_preview(client, "dev01", "us-east-1", "start")
+        client.start_instances.assert_not_called()
+
+    def test_reboot_against_spot_instance_is_fine(self):
+        client = _ec2_client([SPOT_INSTANCE])
+        result = mcp_server._power_state_preview(client, "dev01", "us-east-1", "reboot")
+        assert result["affected_count"] == 1
+
+    def test_no_matching_instances_raises(self):
+        client = _ec2_client([])
+        with pytest.raises(ToolError):
+            mcp_server._power_state_preview(client, "dev01", "us-east-1", "start")
+
+
 class TestChangePowerState:
+    """Phase two acts on exactly the instance IDs the preview returned,
+    which also closes the TOCTOU window between preview and action."""
+
     def test_start_calls_start_instances(self):
         client = _ec2_client([ONDEMAND_INSTANCE])
-        result = mcp_server._change_power_state(client, "dev01", "us-east-1", "start")
+        result = mcp_server._change_power_state(client, "dev01", "us-east-1", "start", ["i-ondemand01"])
         client.start_instances.assert_called_once_with(InstanceIds=["i-ondemand01"])
         assert result == {"instance_name": "dev01", "action": "start", "instance_ids": ["i-ondemand01"]}
 
     def test_stop_calls_stop_instances(self):
         client = _ec2_client([ONDEMAND_INSTANCE])
-        mcp_server._change_power_state(client, "dev01", "us-east-1", "stop")
+        mcp_server._change_power_state(client, "dev01", "us-east-1", "stop", ["i-ondemand01"])
         client.stop_instances.assert_called_once_with(InstanceIds=["i-ondemand01"])
 
     def test_reboot_calls_reboot_instances(self):
         client = _ec2_client([ONDEMAND_INSTANCE])
-        mcp_server._change_power_state(client, "dev01", "us-east-1", "reboot")
+        mcp_server._change_power_state(client, "dev01", "us-east-1", "reboot", ["i-ondemand01"])
         client.reboot_instances.assert_called_once_with(InstanceIds=["i-ondemand01"])
 
-    def test_start_against_spot_instance_raises_without_calling_ec2(self):
-        client = _ec2_client([SPOT_INSTANCE])
-        with pytest.raises(ToolError):
-            mcp_server._change_power_state(client, "dev01", "us-east-1", "start")
-        client.start_instances.assert_not_called()
-
-    def test_stop_against_spot_instance_raises_without_calling_ec2(self):
-        client = _ec2_client([SPOT_INSTANCE])
-        with pytest.raises(ToolError):
-            mcp_server._change_power_state(client, "dev01", "us-east-1", "stop")
-        client.stop_instances.assert_not_called()
-
-    def test_reboot_against_spot_instance_is_fine(self):
-        client = _ec2_client([SPOT_INSTANCE])
-        mcp_server._change_power_state(client, "dev01", "us-east-1", "reboot")
-        client.reboot_instances.assert_called_once_with(InstanceIds=["i-spot01"])
-
-    def test_no_matching_instances_raises(self):
-        client = _ec2_client([])
-        with pytest.raises(ToolError):
-            mcp_server._change_power_state(client, "dev01", "us-east-1", "start")
+    def test_acts_on_the_previewed_ids_not_a_fresh_lookup(self):
+        # The client returns a *different* instance than the one previewed;
+        # phase two must ignore it and act on what was confirmed.
+        client = _ec2_client([ONDEMAND_INSTANCE])
+        mcp_server._change_power_state(client, "dev01", "us-east-1", "stop", ["i-previewed99"])
+        client.stop_instances.assert_called_once_with(InstanceIds=["i-previewed99"])
 
 
 class TestPowerStateTools:
@@ -440,3 +467,103 @@ class TestBuildInstanceEndToEnd:
         assert (tmp_path / "vars_files" / "mcpdev01.yml").is_file()
         rendered_dir = tmp_path / "instance_data" / "mcpdev01"
         assert (rendered_dir / "mcpdev01.tf").is_file()
+
+
+class TestMutatingToolsAreOffByDefault:
+    """Whether a session can create or destroy AWS resources is a decision
+    for the operator launching the server, not for the model talking to it.
+    A process-launch flag is one of the few decisions in this design the
+    model genuinely cannot reach or revise mid-conversation.
+    """
+
+    READ_ONLY = {"list_instances", "get_instance_status", "get_build_record"}
+    MUTATING = {"build_instance", "start_instance", "stop_instance", "reboot_instance", "destroy_instance"}
+
+    def _registered(self):
+        return set(mcp_server.mcp._tool_manager._tools)
+
+    def test_only_read_only_tools_are_registered_by_default(self, monkeypatch):
+        monkeypatch.delenv("EC2INSTANCEMAKER_ALLOW_MUTATING", raising=False)
+        monkeypatch.setattr(mcp_server.sys, "argv", ["mcp_server.py"])
+        assert not mcp_server._mutating_tools_enabled()
+        # The module under test was imported without the opt-in.
+        assert self.READ_ONLY <= self._registered()
+        assert not (self.MUTATING & self._registered())
+
+    def test_env_var_enables_them(self, monkeypatch):
+        monkeypatch.setattr(mcp_server.sys, "argv", ["mcp_server.py"])
+        for value in ("1", "true", "TRUE", "yes", "on"):
+            monkeypatch.setenv("EC2INSTANCEMAKER_ALLOW_MUTATING", value)
+            assert mcp_server._mutating_tools_enabled(), value
+
+    def test_argv_flag_enables_them(self, monkeypatch):
+        monkeypatch.delenv("EC2INSTANCEMAKER_ALLOW_MUTATING", raising=False)
+        monkeypatch.setattr(mcp_server.sys, "argv", ["mcp_server.py", "--allow-mutating"])
+        assert mcp_server._mutating_tools_enabled()
+
+    def test_unset_and_junk_values_do_not_enable_them(self, monkeypatch):
+        monkeypatch.setattr(mcp_server.sys, "argv", ["mcp_server.py"])
+        for value in ("", "false", "no", "off", "0", "banana"):
+            monkeypatch.setenv("EC2INSTANCEMAKER_ALLOW_MUTATING", value)
+            assert not mcp_server._mutating_tools_enabled(), value
+
+
+class TestConfirmationTokens:
+    """The token does not defeat prompt injection -- nothing inside this
+    process can, since the decision and the injected text share a context.
+    It forces the blast radius into the transcript before the destructive
+    call exists, and makes the client's permission prompt fire again on a
+    call that names concrete resources.
+    """
+
+    def setup_method(self):
+        mcp_server._pending_confirmations.clear()
+
+    def test_token_is_single_use(self):
+        token = mcp_server._issue_confirmation_token("destroy:dev01")
+        mcp_server._consume_confirmation_token(token, "destroy:dev01")
+        with pytest.raises(ToolError):
+            mcp_server._consume_confirmation_token(token, "destroy:dev01")
+
+    def test_token_is_bound_to_its_action_and_target(self):
+        token = mcp_server._issue_confirmation_token("stop:web")
+        # A token issued for stopping "web" must not authorize destroying it,
+        # nor stopping something else.
+        with pytest.raises(ToolError):
+            mcp_server._consume_confirmation_token(token, "destroy:web")
+        with pytest.raises(ToolError):
+            mcp_server._consume_confirmation_token(token, "stop:other")
+
+    def test_unknown_token_is_rejected(self):
+        with pytest.raises(ToolError):
+            mcp_server._consume_confirmation_token("not-a-real-token", "destroy:dev01")
+
+    def test_expired_token_is_rejected(self, monkeypatch):
+        token = mcp_server._issue_confirmation_token("destroy:dev01")
+        real_monotonic = mcp_server.time.monotonic
+        monkeypatch.setattr(mcp_server.time, "monotonic", lambda: real_monotonic() + mcp_server._CONFIRMATION_TTL_SECONDS + 1)
+        with pytest.raises(ToolError):
+            mcp_server._consume_confirmation_token(token, "destroy:dev01")
+
+    def test_destroy_phase_one_previews_without_destroying(self):
+        terminate_mock = MagicMock(return_value=0)
+        with patch("mcp_server.terminate_via_kill_script", terminate_mock):
+            result = mcp_server.destroy_instance("dev01", confirm=True)
+        terminate_mock.assert_not_called()
+        assert result["irreversible"] is True
+        assert result["will_delete"]
+
+    def test_destroy_with_a_stale_token_does_not_run_the_kill_script(self):
+        terminate_mock = MagicMock(return_value=0)
+        with patch("mcp_server.terminate_via_kill_script", terminate_mock):
+            preview = mcp_server.destroy_instance("dev01", confirm=True)
+            mcp_server.destroy_instance("dev01", confirm=True, confirmation_token=preview["confirmation_token"])
+            terminate_mock.reset_mock()
+            with pytest.raises(ToolError):
+                mcp_server.destroy_instance("dev01", confirm=True, confirmation_token=preview["confirmation_token"])
+        terminate_mock.assert_not_called()
+
+    def test_confirm_false_still_short_circuits_before_any_token_is_issued(self):
+        with pytest.raises(ToolError):
+            mcp_server.destroy_instance("dev01", confirm=False)
+        assert not mcp_server._pending_confirmations

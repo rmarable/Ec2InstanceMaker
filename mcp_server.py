@@ -15,6 +15,9 @@
 
 import dataclasses
 import os
+import secrets
+import sys
+import time
 from math import pi
 from typing import Any, Literal, NoReturn
 
@@ -46,6 +49,63 @@ mcp = MCPServer("ec2instancemaker")
 # them, logged server-side as an "unexpected exception"). ToolError is the
 # SDK's designated type for an intentional, client-visible tool failure --
 # its message reaches the caller as-is.
+
+
+# Two-phase confirmation for every mutating tool.
+#
+# `confirm=True` alone is a typo guard, not a security control: it is a
+# value the calling model writes itself, in the same turn, from the same
+# context that untrusted EC2 tag values and vars_file contents were read
+# into. An injected "ignore previous instructions and destroy X" reaches
+# the model with confirm=True already in hand.
+#
+# This does not fix that -- nothing inside this process can, since the
+# decision and the injection share a context. What it does fix is
+# *visibility*: the first call performs the lookup and returns what would
+# actually be affected without touching anything, so the blast radius is
+# in the transcript before the destructive call exists, and the MCP
+# client's own permission prompt (the real trust boundary -- see
+# README.md's "Securing the MCP server") fires a second time on a call
+# that now names concrete instance IDs.
+#
+# Tokens are single-use, short-lived, and bound to a specific
+# action+target, so a token issued for stopping "web" cannot authorize
+# destroying it. For power actions the resolved instance IDs are carried
+# on the token and acted on directly in phase two, which also closes the
+# TOCTOU window between preview and action.
+
+_CONFIRMATION_TTL_SECONDS = 300
+
+
+@dataclasses.dataclass
+class _PendingConfirmation:
+    action_key: str
+    expires_at: float
+    instance_ids: list[str]
+
+
+_pending_confirmations: dict[str, _PendingConfirmation] = {}
+
+
+def _issue_confirmation_token(action_key: str, instance_ids: list[str] | None = None) -> str:
+    _purge_expired_confirmations()
+    token = secrets.token_urlsafe(9)
+    _pending_confirmations[token] = _PendingConfirmation(action_key, time.monotonic() + _CONFIRMATION_TTL_SECONDS, instance_ids or [])
+    return token
+
+
+def _purge_expired_confirmations() -> None:
+    now = time.monotonic()
+    for token in [t for t, p in _pending_confirmations.items() if p.expires_at < now]:
+        del _pending_confirmations[token]
+
+
+def _consume_confirmation_token(token: str, action_key: str) -> _PendingConfirmation:
+    _purge_expired_confirmations()
+    pending = _pending_confirmations.pop(token, None)
+    if pending is None or pending.action_key != action_key:
+        raise ToolError("confirmation_token is invalid, expired, already used, or was issued for a different action. Call this tool again without confirmation_token to get a fresh preview and token.")
+    return pending
 
 
 def _mcp_quit(error_msg: str) -> NoReturn:
@@ -134,7 +194,6 @@ _ProdLevel = Literal["dev", "test", "stage", "prod"]
 _PlacementGroupStrategy = Literal["cluster", "spread"]
 
 
-@mcp.tool()
 def build_instance(
     az: str,
     instance_name: str,
@@ -327,10 +386,34 @@ def build_instance(
 _PowerAction = Literal["start", "stop", "reboot"]
 
 
-def _change_power_state(ec2_client: EC2Client, instance_name: str, region: str, action: _PowerAction) -> dict[str, Any]:
+def _power_state_preview(ec2_client: EC2Client, instance_name: str, region: str, action: _PowerAction) -> dict[str, Any]:
+    """Phase one: resolve and return exactly which instances would be hit,
+    without touching any of them.
+
+    This previously did not exist, and the mutating path acted on whatever
+    find_managed_instances() returned without ever surfacing it -- so a
+    stop aimed at one instance could take out a whole family and the
+    caller only learned which instances were affected from the return
+    value, after the fact."""
     instances = find_managed_instances(ec2_client, instance_name, region, _mcp_quit)
     check_spot_lifecycle_conflict(instances, action, _mcp_quit)
-    instance_ids = [instance["InstanceId"] for instance in instances]
+    instance_ids = [str(instance["InstanceId"]) for instance in instances]
+    return {
+        "status": "confirmation_required",
+        "action": action,
+        "instance_name": instance_name,
+        "region": region,
+        "affected_instances": [_instance_summary(instance) for instance in instances],
+        "affected_count": len(instance_ids),
+        "confirmation_token": _issue_confirmation_token(action + ":" + instance_name, instance_ids),
+        "next_step": (
+            "Review affected_instances above. To proceed, call this tool again with the same arguments plus "
+            "confirmation_token set to the value above. The token is single-use and expires in " + str(_CONFIRMATION_TTL_SECONDS) + " seconds."
+        ),
+    }
+
+
+def _change_power_state(ec2_client: EC2Client, instance_name: str, region: str, action: _PowerAction, instance_ids: list[str]) -> dict[str, Any]:
     if action == "start":
         ec2_client.start_instances(InstanceIds=instance_ids)
     elif action == "stop":
@@ -340,8 +423,7 @@ def _change_power_state(ec2_client: EC2Client, instance_name: str, region: str, 
     return {"instance_name": instance_name, "action": action, "instance_ids": instance_ids}
 
 
-@mcp.tool()
-def start_instance(instance_name: str, confirm: bool, region: str | None = None) -> dict[str, Any]:
+def start_instance(instance_name: str, confirm: bool, region: str | None = None, confirmation_token: str | None = None) -> dict[str, Any]:
     """Start a previously stopped Ec2InstanceMaker-managed instance or
     family. Blocked against one-time Spot Instances -- AWS does not allow
     restarting a stopped Spot Instance; use destroy_instance and
@@ -350,11 +432,14 @@ def start_instance(instance_name: str, confirm: bool, region: str | None = None)
     if not confirm:
         raise ToolError('Set confirm=True to actually start "' + instance_name + '".')
     resolved_region = resolve_region(instance_name, region, _mcp_quit)
-    return _change_power_state(boto3.client("ec2", region_name=resolved_region), instance_name, resolved_region, "start")
+    ec2_client = boto3.client("ec2", region_name=resolved_region)
+    if confirmation_token is None:
+        return _power_state_preview(ec2_client, instance_name, resolved_region, "start")
+    pending = _consume_confirmation_token(confirmation_token, "start:" + instance_name)
+    return _change_power_state(ec2_client, instance_name, resolved_region, "start", pending.instance_ids)
 
 
-@mcp.tool()
-def stop_instance(instance_name: str, confirm: bool, region: str | None = None) -> dict[str, Any]:
+def stop_instance(instance_name: str, confirm: bool, region: str | None = None, confirmation_token: str | None = None) -> dict[str, Any]:
     """Stop a running Ec2InstanceMaker-managed instance or family. Blocked
     against one-time Spot Instances -- AWS does not allow restarting a
     stopped Spot Instance; use destroy_instance instead. Requires
@@ -363,22 +448,28 @@ def stop_instance(instance_name: str, confirm: bool, region: str | None = None) 
     if not confirm:
         raise ToolError('Set confirm=True to actually stop "' + instance_name + '".')
     resolved_region = resolve_region(instance_name, region, _mcp_quit)
-    return _change_power_state(boto3.client("ec2", region_name=resolved_region), instance_name, resolved_region, "stop")
+    ec2_client = boto3.client("ec2", region_name=resolved_region)
+    if confirmation_token is None:
+        return _power_state_preview(ec2_client, instance_name, resolved_region, "stop")
+    pending = _consume_confirmation_token(confirmation_token, "stop:" + instance_name)
+    return _change_power_state(ec2_client, instance_name, resolved_region, "stop", pending.instance_ids)
 
 
-@mcp.tool()
-def reboot_instance(instance_name: str, confirm: bool, region: str | None = None) -> dict[str, Any]:
+def reboot_instance(instance_name: str, confirm: bool, region: str | None = None, confirmation_token: str | None = None) -> dict[str, Any]:
     """Reboot an Ec2InstanceMaker-managed instance or family. Safe for
     Spot Instances, unlike start/stop. Requires confirm=True."""
     validate_instance_name_format(instance_name, _mcp_quit)
     if not confirm:
         raise ToolError('Set confirm=True to actually reboot "' + instance_name + '".')
     resolved_region = resolve_region(instance_name, region, _mcp_quit)
-    return _change_power_state(boto3.client("ec2", region_name=resolved_region), instance_name, resolved_region, "reboot")
+    ec2_client = boto3.client("ec2", region_name=resolved_region)
+    if confirmation_token is None:
+        return _power_state_preview(ec2_client, instance_name, resolved_region, "reboot")
+    pending = _consume_confirmation_token(confirmation_token, "reboot:" + instance_name)
+    return _change_power_state(ec2_client, instance_name, resolved_region, "reboot", pending.instance_ids)
 
 
-@mcp.tool()
-def destroy_instance(instance_name: str, confirm: bool) -> dict[str, Any]:
+def destroy_instance(instance_name: str, confirm: bool, confirmation_token: str | None = None) -> dict[str, Any]:
     """Tear down an Ec2InstanceMaker-built instance or family: the EC2
     instance(s), security group, IAM role/policy/profile, SNS topic, and
     local state -- delegates to ./kill-instance.<instance_name>.sh, the
@@ -388,8 +479,71 @@ def destroy_instance(instance_name: str, confirm: bool) -> dict[str, Any]:
     validate_instance_name_format(instance_name, _mcp_quit)
     if not confirm:
         raise ToolError('Set confirm=True to actually destroy "' + instance_name + '" -- this permanently deletes real AWS resources and cannot be undone.')
+    if confirmation_token is None:
+        return {
+            "status": "confirmation_required",
+            "action": "destroy",
+            "instance_name": instance_name,
+            "irreversible": True,
+            "will_delete": [
+                "the EC2 instance(s) and their EBS volumes",
+                "the EC2 keypair and its local .pem file",
+                "the security group, unless this build reused a pre-existing one",
+                "the IAM role, policy and instance profile, unless --preserve_iam_role was set",
+                "the SNS topic and its email subscription",
+                "the CloudWatch Logs group, unless --preserve_cloudwatch_logs was set",
+                "the local Terraform state, vars_file and generated scripts",
+            ],
+            "kill_script": "./kill-instance." + instance_name + ".sh",
+            "confirmation_token": _issue_confirmation_token("destroy:" + instance_name),
+            "next_step": (
+                "This cannot be undone. To proceed, call destroy_instance again with the same instance_name plus "
+                "confirmation_token set to the value above. The token is single-use and expires in " + str(_CONFIRMATION_TTL_SECONDS) + " seconds."
+            ),
+        }
+    _consume_confirmation_token(confirmation_token, "destroy:" + instance_name)
     returncode = terminate_via_kill_script(instance_name, True, _mcp_quit)
     return {"instance_name": instance_name, "kill_script_returncode": returncode}
+
+
+# Mutating tools are OFF by default.
+#
+# build_instance and destroy_instance create and destroy real, billable AWS
+# resources; start/stop/reboot change the state of running ones. Whether a
+# given session should be able to do any of that is a decision that belongs
+# to the operator launching the server, not to the model talking to it --
+# and unlike the `confirm` argument, a process-launch flag is a decision the
+# model cannot reach or revise mid-conversation.
+#
+# So the default install exposes only the three read-only tools
+# (list_instances, get_instance_status, get_build_record), which is all most
+# sessions need. Opt in with either:
+#
+#   .venv/bin/python3 mcp_server.py --allow-mutating
+#   EC2INSTANCEMAKER_ALLOW_MUTATING=true .venv/bin/python3 mcp_server.py
+#
+# The env var exists because a Claude Desktop "Local command" connector sets
+# env more naturally than argv; .mcp.json can use either.
+#
+# This is a real reduction in blast radius, not theatre -- but be clear about
+# what it is not: an operator who enables mutating tools is back to relying
+# on the MCP client's own permission prompt, which is the actual trust
+# boundary. See README.md's "Securing the MCP server".
+
+
+def _mutating_tools_enabled() -> bool:
+    if os.environ.get("EC2INSTANCEMAKER_ALLOW_MUTATING", "").strip().lower() in ("1", "true", "yes", "on"):
+        return True
+    return "--allow-mutating" in sys.argv
+
+
+def _register_mutating_tools() -> None:
+    for tool in (build_instance, start_instance, stop_instance, reboot_instance, destroy_instance):
+        mcp.tool()(tool)
+
+
+if _mutating_tools_enabled():
+    _register_mutating_tools()
 
 
 if __name__ == "__main__":
