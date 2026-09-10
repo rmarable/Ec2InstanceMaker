@@ -98,13 +98,13 @@ Resolving deltas: 100% (156/156), done.
 ================================================================================
 
 Access the new alinux2 instance via SSM Session Manager:
-./access_instance.py -N dev01
+./access_instance.py -N child01
 
 Delete the instance:
-./kill-instance.dev01.sh
+./kill-instance.child01.sh
 
 Build an AMI from the new instance:
-./build-ami.dev01.sh
+./build-ami.child01.sh
 
 Exiting...
 [ec2-user@ip-172-31-45-18 ~]$ ./access_instance.py -N dev01
