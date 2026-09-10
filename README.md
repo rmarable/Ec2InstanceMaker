@@ -12,22 +12,7 @@ Please refer to the LICENSE document included with this source-available softwar
 
 ## Disclaimer
 
-By using this source-available software:
-
-* You accept all potential risks involved with your use of this source-available software.
-
-* You agree that the author shall have no responsibility or liability for any losses or damages incurred in conjunction with your use of this source-available software.
-
-* You acknowledge that bugs may still be present, unexpected behavior might be observed, and some features may not be completely documented.
-
-**This source-available software is authored by Rodney Marable in his individual capacity and is neither endorsed nor supported by Amazon Web Services.**
-
-You cannot create cases with AWS Technical Support or engage AWS support engineers in public forums if you have any questions, problems, or issues using this source-available software.
-
-```
-"Play at your own risk!"
- -- Planet Patrol
-```
+See [DISCLAIMER.md](DISCLAIMER.md) for the full disclaimer, including the AI training restriction and the author's contact/bug-reporting information.
 
 ## About Ec2InstanceMaker
 
