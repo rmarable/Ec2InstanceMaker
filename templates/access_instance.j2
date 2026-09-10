@@ -176,7 +176,7 @@ atexit.register(_remove_csv_temp_file)
 csv_file = open(csvTempFile, 'w')
 {% if is_windows %}
 
-csv_file.write('Item,Instance Name,IP Address,Adminstrator Password\n')
+csv_file.write('Item,Instance Name,IP Address,Administrator Password\n')
 {% else %}
 csv_file.write('Item,Instance Name,IP Address,Instance ID\n')
 {% endif %}

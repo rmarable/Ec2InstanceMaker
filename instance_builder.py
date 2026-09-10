@@ -1477,7 +1477,7 @@ def build_windows_password_table(
     windows_administrator_password = decrypt_windows_admin_passwords(instance_data_dir, ec2_keypair, windows_instance_id)
 
     csv_buffer = io.StringIO()
-    csv_buffer.write("Instance Name,IP Address,Adminstrator Password\n")
+    csv_buffer.write("Instance Name,IP Address,Administrator Password\n")
     for name, ip_address, password in zip(windows_instance_name.split(","), windows_ip_address.split(","), windows_administrator_password.split(","), strict=True):
         csv_buffer.write(name + "," + ip_address + "," + password + "\n")
     csv_buffer.seek(0)

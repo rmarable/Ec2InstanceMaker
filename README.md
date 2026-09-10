@@ -87,7 +87,7 @@ Graviton -- AWS does not publish Windows AMIs for ARM64 -- so Windows
   * Creation of new "golden images" using EC2 instances spawned from Ec2InstanceMaker as the source.
   * Easy inclusion of user customization scripts within the Ec2InstanceMaker provisioning process.
   * Optional construction of "golden images" with encrypted root EBS volumes.
-  * Incorporation into existing DevOps CI/CD piplines.
+  * Incorporation into existing DevOps CI/CD pipelines.
 
 * Multiple instances with identical configurations built at the same time a.k.a. "instance families."
 
@@ -103,18 +103,18 @@ prevent terminations caused by Spot market fluctuations.
 
 * Automatic application of EBS optimization for supported instance types.
 
-* Attachment of provisioned IOPS, throughput optizimed, and general purpose
+* Attachment of provisioned IOPS, throughput optimized, and general purpose
 (gp2) SSD EBS volumes during the instance creation process.
 
 * Selective disabling of Intel HyperThreading.
 
 * Custom i.e. user-provided EC2 security groups.
 
-* Custom i.e. user-provided IAM instance profiles that can be created from user-supplied JSON policy documents or pre-existing IAM roles.  Guidance for how to communicate with your local DevOps team to get their support with deployment of tthe aforementioned policy documents is also provided in the "Note to DevOps Teams" section below.
+* Custom i.e. user-provided IAM instance profiles that can be created from user-supplied JSON policy documents or pre-existing IAM roles.  Guidance for how to communicate with your local DevOps team to get their support with deployment of the aforementioned policy documents is also provided in the "Note to DevOps Teams" section below.
 
 * Control of the IAM namespace used by roles, instance profiles, and policies
 through the "iam_name_prefix" parameter.  If this switch is not set, all IAM
-entitities default to using "Ec2InstanceMaker" as the prefix.  This makes it
+entities default to using "Ec2InstanceMaker" as the prefix.  This makes it
 easier for DevOps teams to incorporate Ec2InstanceMaker into architectures that
 are based on users assuming predefined roles to perform activities in the AWS
 environment.
@@ -169,7 +169,7 @@ the toolkit-controlled `templates/` directory -- both a real pre-login
 (cloud-init) hook and a post-boot hook, selectable per build via
 `--custom_user_scripts`.
 
-* Operability in Turbot environnments.  Please visit https://www.turbot.com for more information.
+* Operability in Turbot environments.  Please visit https://www.turbot.com for more information.
 
 * Restriction of attaching public IP addresses for environments that require additional security.
 
@@ -212,7 +212,7 @@ As noted above, Ec2InstanceMaker is intended to reduce the administrative burden
   * These tools do not create new VPCs, subnets, Internet or NAT gateways, routes, or Transit Gateways.
   * They do not modify Route53 configurations, change default routes, or otherwise impact or deploy any infrastructure that is not explicitly documented or easily inferred by reviewing the code.
 
-* **Ec2InstanceMaker creates generic IAM roles, policies, and instance templates that are individualized as much as possible for each instance or instance family.  By default, Ec2InstanceMaker-spawned instances cannot spwan children.**
+* **Ec2InstanceMaker creates generic IAM roles, policies, and instance templates that are individualized as much as possible for each instance or instance family.  By default, Ec2InstanceMaker-spawned instances cannot spawn children.**
   * These JSON templates are located in the templates/ subdirectory and contain all required IAM permissions to work with the AWS services listed below:
     * EC2
     * AutoScaling
@@ -227,7 +227,7 @@ As noted above, Ec2InstanceMaker is intended to reduce the administrative burden
   * If you run into permissions problems building instances or provisioning storage resources, it's usually because of an IAM issue.  When speaking with your DevOps professionals, the following options are suggested:
     * Set `--iam_json_policy=ExtendedEc2InstancePolicy.json` to use the included JSON policy document which permits children instances to be spawned.
     * Work with your DevOps team to construct a custom IAM role that provides appropriate permissions for your environment, then include it by setting `--iam_role=$ROLE_NAME` when invoking `make_instance.py.`  Please refer to the EXAMPLE_USE_CASES document for additional guidance.
-  * DevOps teams should also be aware that additional granular control over the IAM namespace can be realized by setting `--iam_name_prefix` to a chosen value.  This makes it eaiser to incorporate Ec2InstanceMaker into environments that perfer to have users assume a set of standard roles to perform tasks in the AWS environment.
+  * DevOps teams should also be aware that additional granular control over the IAM namespace can be realized by setting `--iam_name_prefix` to a chosen value.  This makes it easier to incorporate Ec2InstanceMaker into environments that prefer to have users assume a set of standard roles to perform tasks in the AWS environment.
 
 For example:
 ```
@@ -591,7 +591,7 @@ $ ./access_instance.py -N dev01
 Access the new instance via Remote Desktop with this information:
 
 +------+---------------+---------------+----------------------------------+
-| Item | Instance Name |   IP Address  |      Adminstrator Password       |
+| Item | Instance Name |   IP Address  |      Administrator Password      |
 +------+---------------+---------------+----------------------------------+
 |  1   |     dev01     | 34.201.49.101 | K?Uf.@Roy-?D-W-?GPDW@4_BaT%=?EiD |
 +------+---------------+---------------+----------------------------------+
@@ -665,7 +665,7 @@ $ ./access_instance.py -N dev01
 Access the new instance family members with Windows Remote Desktop:
 
 +---------------+---------------+----------------------------------+
-| Instance Name |   IP Address  |      Adminstrator Password       |
+| Instance Name |   IP Address  |      Administrator Password      |
 +---------------+---------------+----------------------------------+
 |    dev01-0    | 3.210.201.142 | GTm.%A8%NARIe$&ax=sWojSRKxU.LIRB |
 |    dev01-1    |  3.216.27.77  | uMP)sOvC2w7WXLi3h3L2%9VjI5Ovwo7c |

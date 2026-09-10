@@ -56,7 +56,7 @@ t2.micro instances with larger unencrypted gp2 EBS root volumes.  A sampling of 
 
 ## Spawning Child Instances from Ec2InstanceMaker-created Instances
 
-Ec2InstanceMaker creates generic IAM roles, policies, and instance templates that are individualized as much as possible for each instance or instance family.  However, by default, Ec2InstanceMaker-spawned instances cannot spwan children.
+Ec2InstanceMaker creates generic IAM roles, policies, and instance templates that are individualized as much as possible for each instance or instance family.  However, by default, Ec2InstanceMaker-spawned instances cannot spawn children.
 
 `ExtendedEc2InstancePolicy.json` (found in the templates/ subdirectory) can be used to allow Ec2InstanceMaker-spawned instances to create children.
 
@@ -125,7 +125,7 @@ Reconnect to dev01 by running this command:
 
 ## Using a Custom AMI:
 
-DevOps teams may want to further control what AWS API calls that can be made by Ec2InceMaker-spawned instances, including the limiting or granting of the ability to create child instances with more granular permisisons, through the use of ccentralized IAM roles.
+DevOps teams may want to further control what AWS API calls that can be made by Ec2InstanceMaker-spawned instances, including the limiting or granting of the ability to create child instances with more granular permissions, through the use of centralized IAM roles.
 
 If you are encountering issues with "doing" things using these instances, please work with your DevOps team to create appropriate IAM role.
 
