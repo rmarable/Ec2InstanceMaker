@@ -662,7 +662,13 @@ it buys:
    resources. It also closes a real defect — `_change_power_state()` used
    to act on `find_managed_instances()` results the caller never saw.
 4. **Scoped AWS credentials** are the only thing that holds against a
-   fully injected model. `iam/` now ships the documents for this:
+   fully injected model — but note this is **shipped, not applied**, and
+   deliberately so. `iam/` is inert unless an operator creates the
+   policies themselves, and for a personal account with a single operator
+   it is reasonably skipped; `iam/README.md` and README.md's "Optional:
+   running the MCP server under a scoped IAM role" both say when it is
+   and isn't worth the apparatus. Don't wire it into any build path. The
+   documents are:
    `McpServerTrustPolicy.json` (who may assume the role, MFA required),
    `McpServerPolicy.json` (what it may do), and
    `CreatedRoleBoundary.json` (a permissions boundary applied to every
@@ -670,8 +676,9 @@ it buys:
    `ExtendedEc2InstancePolicy.json`'s IAM grants from escalating).
    `verify_mcp_credentials.py` checks a live identity against them via
    `iam:SimulatePrincipalPolicy` — simulation only, nothing is created or
-   deleted. README.md's "Running the MCP server under a scoped IAM role"
-   is the setup procedure.
+   deleted. Run against an ordinary admin identity it will report that
+   almost everything is allowed; that is it measuring an unscoped
+   identity correctly, not a defect.
 
    Naming trap worth knowing: `templates/*Ec2InstancePolicy.json` is what
    a **built instance** gets; `iam/McpServerPolicy.json` is what the
