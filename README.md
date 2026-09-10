@@ -18,9 +18,9 @@ See [DISCLAIMER.md](DISCLAIMER.md) for the full disclaimer, including the AI tra
 
 Ec2InstanceMaker is a source-available command line wrapper toolkit that eases the
 automation, creation, and destruction of Amazon Elastic Compute Cloud (EC2)
-instance fleets.  This tool is designed to enable anyone to leverage cloud
-computing at scale without requiring deep infrastructure knowledge or
-extensive experience with the AWS stack.
+instance fleets.  This tool lets anyone build and manage EC2 instances
+without deep infrastructure knowledge or extensive experience with the
+AWS stack.
 
 You can find more information about EC2 and EC2 Spot by visiting:
 
@@ -82,7 +82,7 @@ Graviton -- AWS does not publish Windows AMIs for ARM64 -- so Windows
 `base_os` values are restricted to x86_64 instance types.)
 
 
-* Custom AMI support to enable deployment of standardized cloud computing environments.  Please see "Working with Custom AMIs" below for more details on how to leverage these options which include:
+* Custom AMI support to enable deployment of standardized cloud computing environments.  Please see "Working with Custom AMIs" below for more details on how to use these options, which include:
   * Spawning of new instances from previously built user-supplied "custom AMIs."
   * Creation of new "golden images" using EC2 instances spawned from Ec2InstanceMaker as the source.
   * Easy inclusion of user customization scripts within the Ec2InstanceMaker provisioning process.
@@ -198,7 +198,7 @@ freshly created virtual Python environment.
 
 ## Note to DevOps Teams
 
-As noted above, Ec2InstanceMaker is intended to reduce the administrative burden required for DevOps teams to support the diverse compute and storage needs of their stakeholders; conversely, it can empower scientists, engineers, statisticians, and analysts to compute at scale without needing to get assistnace from their Devops team.
+As noted above, Ec2InstanceMaker is intended to reduce the administrative burden required for DevOps teams to support the diverse compute and storage needs of their stakeholders; conversely, it also lets scientists, engineers, statisticians, and analysts build compute resources without needing help from their DevOps team.
 
 * **Ec2InstanceMaker supports the use of private IP addresses for environments that require enhanced security.**
   * Deployment of public IP addresses can be disabled by setting `--public_ip=false`.
@@ -337,10 +337,10 @@ single API call.  Those two actions have been removed.
   * Scope the blast radius with `--iam_name_prefix`, and prefer supplying your
 own policy document over these templates for production use.
 
-  * **build_instance.j2** permits the operator to leverage Terraform's
+  * **build_instance.j2** permits the operator to use Terraform's
 post-install hook to perform further configuration of EC2 instances using a
 shell script.
-  * **instance_userdata.j2** will allow the operator to leverage EC2 instance
+  * **instance_userdata.j2** will allow the operator to use EC2 instance
 userdata to perform additional configuration.  Please reference:
 
 https://docs.aws.amazon.com/AWSEC2/latest/WindowsGuide/ec2-instance-metadata.html#instancedata-add-user-data
@@ -705,7 +705,7 @@ Stop request sent for: i-0123456789abcdef0
 field already recorded in `./vars_files/<instance_name>.yml`.
 
 `-A terminate` does not just stop the instance's billing meter — it
-delegates entirely to `kill-instance.<instance_name>.sh` (see "Destroying
+delegates entirely to `kill-instance.<instance_name>.sh` (see "Terminating
 Instances" below), so it gets the full teardown (security group, IAM,
 SNS, CloudWatch Logs, local state), not a bare `TerminateInstances` call
 that would leave those resources behind. This only works from the repo
@@ -744,7 +744,7 @@ $ ./manage_instance.py -l -r us-east-1
 +-------+---------------------+---------------+---------+----------------+------+
 ```
 
-### Destroying Instances
+### Terminating Instances
 
 **kill-instance.$INSTANCE_NAME.sh** is a personalized script designed to
 terminate specific EC2 instances, EC2 security groups, IAM entities, and any
@@ -834,7 +834,7 @@ template gets (`instance_name`, `ec2_user`, `region`, `base_os`,
 `package_manager`, etc.). See `custom_user_scripts/README.md` for the full
 explanation, worked examples, and exactly which variables are available.
 
-This provides operators and DevOps professionals with a powerful mechanism for quickly building and distributing "golden" AMI images that can be widely distributed throughout an enterprise, or for customized images that can be specifically tailored by individuals or teams.  Please see "Working with Custom AMIs" and "Building New AMIs with the build-ami Script" for additional details.
+This gives operators and DevOps professionals a quick way to build and distribute "golden" AMI images across an enterprise, or customized images tailored by individuals or teams.  Please see "Working with Custom AMIs" and "Building New AMIs with the build-ami Script" for additional details.
 
 **Neither hook applies to Windows instances today** — this is a known,
 documented gap, not an oversight. Additional customization of Windows
@@ -863,7 +863,7 @@ Ec2InstanceMaker supports building new instances from custom AMIs by using the `
 
 ## Building New AMIs Using the build-ami Script ##
 
-Ec2InstanceMaker provides a customized build script for each instance_serial_number which permits the operator to create and register a new AMI image.  By including custom code in the `build-instance.j2` template, users now have a powerful mechanism for quickly customizing AMIs without requiring DevOps assistance.  Conversely, DevOps professionals now have a means to disseminate curated "golden" AMIs throughout their environment.
+Ec2InstanceMaker provides a customized build script for each instance_serial_number which permits the operator to create and register a new AMI image.  By including custom code in the `build-instance.j2` template, users can quickly customize AMIs without requiring DevOps assistance.  Conversely, DevOps professionals can share curated "golden" AMIs throughout their environment.
 
 To build a new AMI:
 ```
