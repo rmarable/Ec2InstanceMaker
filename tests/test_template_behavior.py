@@ -458,10 +458,12 @@ class TestAccessInstanceWindowsRdpTunnel:
 
 class TestInstanceUserdataSsmAgentInstall:
     """RHEL/Rocky's standard AMIs don't preinstall the SSM Agent (unlike
-    AL2023/Ubuntu/AlmaLinux/Windows -- verified against AWS's own docs),
-    so access_instance.py's SSM Session Manager connection would silently
-    never register on those four base_os values without this cloud-init
-    install step.
+    AL2023/AlmaLinux/Windows/most Ubuntu releases -- verified against AWS's
+    own docs), so access_instance.py's SSM Session Manager connection would
+    silently never register on those base_os values without this cloud-init
+    install step. Ubuntu 26.04 is a separate case: AWS's preinstalled-agent
+    list stops at 25.04, so 26.04 needs the same forced install, but via
+    Canonical's snap package -- Ubuntu has no RPM equivalent.
     """
 
     def test_rhel_and_rocky_get_the_install_step(self):
@@ -473,6 +475,18 @@ class TestInstanceUserdataSsmAgentInstall:
     def test_other_base_os_values_do_not_get_it(self):
         rendered = render({"base_os": "al2023"})["instance_userdata.j2"]
         assert "amazon-ssm-agent" not in rendered
+
+    def test_ubuntu2404_does_not_get_it(self):
+        # 24.04 is on AWS's preinstalled-agent list; only 26.04 needs the
+        # forced install.
+        rendered = render({"base_os": "ubuntu2404"})["instance_userdata.j2"]
+        assert "amazon-ssm-agent" not in rendered
+
+    def test_ubuntu2604_gets_the_snap_install_step(self):
+        rendered = render({"base_os": "ubuntu2604"})["instance_userdata.j2"]
+        assert "snap install amazon-ssm-agent --classic" in rendered
+        assert "snap start amazon-ssm-agent" in rendered
+        assert "amazon-ssm-agent.rpm" not in rendered
 
     def test_arm64_uses_the_arm64_package(self):
         rendered = render({"base_os": "rocky9", "architecture": "arm64"})["instance_userdata.j2"]

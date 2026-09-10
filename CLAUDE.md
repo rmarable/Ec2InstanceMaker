@@ -470,9 +470,16 @@ the SSM Agent running on the instance — the instance's IAM role needs the
 `AllowAccessToSSM` statement's `ssmmessages:*`/`ec2messages:*`/
 `ssm:UpdateInstanceInformation` actions (present in all three
 `*Ec2InstancePolicy.json` tiers). RHEL 9/10 and Rocky Linux 9/10's standard
-AMIs don't preinstall the SSM Agent (unlike AL2023/Ubuntu/AlmaLinux/Windows,
-per AWS's own docs) — `instance_userdata.j2` installs and enables it via
-cloud-init for those four `base_os` values.
+AMIs don't preinstall the SSM Agent (unlike AL2023/AlmaLinux/Windows/most
+Ubuntu releases, per AWS's own docs) — `instance_userdata.j2` installs and
+enables it via cloud-init for those four `base_os` values, `dnf install`ing
+the RPM AWS publishes and enabling it via `systemctl`. Ubuntu 26.04 is a
+fifth, separate case: AWS's preinstalled-agent list tops out at 25.04, so
+26.04 needs the same forced install, but Ubuntu has no RPM equivalent —
+AWS's own Ubuntu install docs specify Canonical's snap package instead
+(`snap install amazon-ssm-agent --classic`, then `snap start
+amazon-ssm-agent`), which needs no architecture branching since snap
+resolves that itself.
 
 **CloudWatch Agent logging** is on by default (`--enable_cloudwatch_logs`,
 default `true`) — installed via the same prelogin cloud-init mechanism as

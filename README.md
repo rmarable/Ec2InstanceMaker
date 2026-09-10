@@ -651,7 +651,9 @@ start-session` fails without it. The instance's SSM Agent must also be
 registered, which normally happens automatically at boot for every
 `base_os` this toolkit supports — `rhel9`, `rhel10`, `rocky9`, and
 `rocky10`'s standard AMIs don't preinstall it, so Ec2InstanceMaker
-installs and enables it via cloud-init for those four specifically.
+installs and enables it via cloud-init for those four specifically, and
+`ubuntu2604` is a fifth case (AWS's preinstalled-agent list stops at
+25.04) installed the same way via Canonical's snap package instead.
 
 `$ ./access_instance.py -N fam01 -m 3`
 

@@ -19,6 +19,9 @@ bootcmd:
 {% if base_os in ('rhel9', 'rhel10', 'rocky9', 'rocky10') %}
 {% set _ = runcmd_items.append('dnf install -y https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/linux_' + ('arm64' if architecture == 'arm64' else 'amd64') + '/amazon-ssm-agent.rpm') %}
 {% set _ = runcmd_items.append('systemctl enable --now amazon-ssm-agent') %}
+{% elif base_os == 'ubuntu2604' %}
+{% set _ = runcmd_items.append('snap install amazon-ssm-agent --classic') %}
+{% set _ = runcmd_items.append('snap start amazon-ssm-agent') %}
 {% endif %}
 {% if enable_cloudwatch_logs == 'true' %}
 {% if base_os in ('al2023', 'alinux2') %}
