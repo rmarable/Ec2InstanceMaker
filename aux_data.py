@@ -493,6 +493,15 @@ def get_ami_info(ec2client: EC2Client, base_os: str, architecture: str) -> str:
         # message.
         refer_to_docs_and_quit("AWS API error while looking up an AMI for base_os " + base_os + ": " + str(e))
     amis = sorted(ami_information["Images"], key=lambda x: x["CreationDate"], reverse=True)
+    if not amis:
+        # check_custom_ami() has handled this case correctly for ages; this
+        # function did not, so a base_os whose AMI pattern matches nothing
+        # in the target region produced a raw IndexError traceback -- and it
+        # fires in phase 2, after the security group already exists.
+        refer_to_docs_and_quit(
+            "No " + base_os + " AMI was found for architecture " + architecture + " in this region."
+            " The image may not be published there, or the owner may have deregistered it. Try another region, or pass --custom_ami."
+        )
     return amis[0]["ImageId"]
 
 

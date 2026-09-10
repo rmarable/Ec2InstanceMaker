@@ -73,7 +73,7 @@ write_files:
   - path: /opt/ec2instancemaker/custom_user_prelogin_script.{{ script.name }}.sh
     permissions: '0755'
     content: |
-      {{ script.content | indent(6) }}
+{{ script.content | trim | indent(6, first=True) }}
 {% endfor %}
 {% endif %}
 {% if runcmd_items %}

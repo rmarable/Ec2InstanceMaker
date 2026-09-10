@@ -147,7 +147,15 @@ def list_all_managed_instances(ec2_client: EC2Client, region: str, refer_to_docs
 def check_spot_lifecycle_conflict(instances: list[InstanceTypeDef], action: Action, refer_to_docs_and_quit: QuitFn) -> None:
     if action not in ("start", "stop"):
         return
-    spot_instance_ids = [instance["InstanceId"] for instance in instances if instance.get("InstanceLifecycle") == "spot"]
+    # Two independent signals, because relying on InstanceLifecycle alone
+    # fails *open*: the key is simply absent for on-demand instances, so
+    # anything unexpected (a missing field, a value AWS changes later) reads
+    # as on-demand and the stop is allowed -- and a one-time Spot Instance
+    # that gets stopped can never be restarted. DEFAULT_EC2_TEMPLATE.j2 tags
+    # spot instances EC2RequestType=spot via its create-tags local-exec and
+    # does not set that tag on the on-demand path, so its presence is a
+    # positive spot signal rather than an absence.
+    spot_instance_ids = [str(instance["InstanceId"]) for instance in instances if instance.get("InstanceLifecycle") == "spot" or tag_value(instance, "EC2RequestType") == "spot"]
     if spot_instance_ids:
         refer_to_docs_and_quit(
             action.capitalize()

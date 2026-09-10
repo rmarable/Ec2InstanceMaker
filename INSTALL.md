@@ -34,7 +34,7 @@ $ git clone https://github.com/rmarable/Ec2InstanceMaker.git
 
 * Install the Command Line Tools for Xcode:
 ```
-$ sudo installer -pkg /Library/Developer/CommandLineTools/Packages/macOS_SDK_headers_for_macOS_10.14.pkg -target /
+$ xcode-select --install
 ```
 
 * Install Homebrew:

@@ -19,6 +19,7 @@ import argparse
 import atexit
 import csv
 import os
+import socket
 import subprocess
 import sys
 import tempfile
@@ -161,7 +162,8 @@ csv_file.close()
 csv_file = open(csvTempFile, 'a')
 
 {% if is_windows %}
-for w, x, y, z in zip(menuCount(1, len(ec2_InstanceName.split(','))), ec2_InstanceName.split(','), ec2_IpAddress.split(','), windows_AdministratorPassword.split(',')):
+windows_menu_items = len(ec2_InstanceName.split(','))
+for w, x, y, z in zip(menuCount(1, windows_menu_items), ec2_InstanceName.split(','), ec2_IpAddress.split(','), windows_AdministratorPassword.split(',')):
     element = str(w) + ',' + x + ',' + y + ',' + z + '\n'
     csv_file.write(element)
 csv_file.close()
@@ -184,10 +186,23 @@ print('')
 
 if menu_index == 0:
     print('Select an instance to access using Remote Desktop:')
+    # int(input()) used to be guarded only for KeyboardInterrupt, so any
+    # non-numeric entry raised ValueError and exited with a traceback --
+    # while leaving the decrypted-password temp CSV behind, before the
+    # atexit handler existed. An out-of-range choice silently indexed the
+    # wrong family member, and a negative one indexed from the end.
     try:
         menuchoice = int(input())
     except KeyboardInterrupt:
         print('')
+        sys.exit(1)
+    except ValueError:
+        print('')
+        print('That is not a number.')
+        sys.exit(1)
+    if menuchoice < 1 or menuchoice > windows_menu_items:
+        print('')
+        print('Please choose a number between 1 and ' + str(windows_menu_items) + '.')
         sys.exit(1)
     print('')
 else:
@@ -204,7 +219,15 @@ rdp_instance_name = ec2_InstanceName.split(',')[rdp_target_index]
 # instead of exposing port 3389 to any CIDR. Point a Remote Desktop client
 # at localhost on rdp_local_port once the tunnel is up; Ctrl+C closes it.
 
-rdp_local_port = '13389'
+# A hardcoded port meant two concurrent tunnels collided: the second
+# `aws ssm start-session` failed while the first was still bound, and an
+# operator reconnecting to localhost:13389 reached the *first* instance
+# while this script's output claimed it had opened a tunnel to the second.
+# Pick a free port instead, and print the one actually used.
+_rdp_socket = socket.socket()
+_rdp_socket.bind(('127.0.0.1', 0))
+rdp_local_port = str(_rdp_socket.getsockname()[1])
+_rdp_socket.close()
 print('Opening a Remote Desktop tunnel to: ' + rdp_instance_name)
 print('Connect your Remote Desktop client to: localhost:' + rdp_local_port)
 print('Press Ctrl+C to close the tunnel when finished.')
@@ -234,8 +257,14 @@ print('')
 
 {% else %}
 # Compute the number of instances deployed with this instance_name.
+#
+# This was len(ec2_IpAddress) -- the *character* length of the comma-joined
+# IP string, not the number of instances. It only appeared to work because
+# zip() below stops at the shortest sequence, so the oversized range was
+# silently truncated. Any other use of the value, or a bounds check against
+# it, would have been wrong.
 
-ec2_menu_items = len(ec2_IpAddress)
+ec2_menu_items = len(ec2_IpAddress.split(','))
 
 # Append the instance state data to the temporary CSV header file.
 

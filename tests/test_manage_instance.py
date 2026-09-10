@@ -331,3 +331,36 @@ class TestTerminateViaKillScript:
             manage_instance.terminate_via_kill_script("dev01", True, quit_fn, run_kill_script=run_mock)
         lock_mock.assert_called_once_with("dev01", quit_fn)
         run_mock.assert_not_called()
+
+
+class TestSpotLifecycleDoesNotFailOpen:
+    """InstanceLifecycle is simply absent for on-demand instances, so
+    checking only that key meant anything unexpected -- a missing field, a
+    value AWS changes later -- read as on-demand and the stop was allowed.
+    A one-time Spot Instance that gets stopped can never be restarted, so
+    failing open here is the expensive direction.
+    """
+
+    def _instance(self, instance_id, lifecycle=None, request_type=None):
+        instance = {"InstanceId": instance_id, "Tags": [{"Key": "Name", "Value": "dev01"}]}
+        if lifecycle:
+            instance["InstanceLifecycle"] = lifecycle
+        if request_type:
+            instance["Tags"].append({"Key": "EC2RequestType", "Value": request_type})
+        return instance
+
+    def test_lifecycle_field_still_blocks(self):
+        with pytest.raises(SystemExit):
+            manage_instance.check_spot_lifecycle_conflict([self._instance("i-1", lifecycle="spot")], "stop", _quitting_mock())
+
+    def test_the_tag_blocks_even_when_the_lifecycle_field_is_missing(self):
+        # DEFAULT_EC2_TEMPLATE.j2 sets EC2RequestType=spot via create-tags on
+        # the spot path only, so its presence is a positive spot signal.
+        with pytest.raises(SystemExit):
+            manage_instance.check_spot_lifecycle_conflict([self._instance("i-1", request_type="spot")], "stop", _quitting_mock())
+
+    def test_a_genuine_ondemand_instance_is_unaffected(self):
+        manage_instance.check_spot_lifecycle_conflict([self._instance("i-1", request_type="ondemand")], "stop", _quitting_mock())
+
+    def test_reboot_is_still_allowed_against_spot(self):
+        manage_instance.check_spot_lifecycle_conflict([self._instance("i-1", lifecycle="spot")], "reboot", _quitting_mock())

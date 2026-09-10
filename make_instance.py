@@ -78,9 +78,11 @@ from instance_builder import (
     setup_keypair,
     validate_and_resize_ebs_volumes,
     validate_az_and_region,
+    validate_custom_ami_format,
     validate_ec2_keypair_format,
     validate_email_format,
     validate_free_text_field,
+    validate_iam_name_lengths,
     validate_iam_name_prefix_format,
     validate_instance_name_and_owner_format,
     write_serial_number_file,
@@ -107,6 +109,20 @@ QuitFn = Callable[[str], NoReturn]
 # argparse layer also covers mcp_server.build_instance, which reaches
 # run_build() by building an argv list rather than by calling the phase
 # functions directly.
+
+
+def _non_negative_float(value: str) -> float:
+    # A negative buffer *lowers* the bid below the market price, so the Spot
+    # request can never be fulfilled -- --spot_buffer -1 produced a bid of
+    # exactly 0.0. The build then waits forever for capacity that will not
+    # arrive.
+    try:
+        parsed = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value!r} is not a number") from None
+    if parsed < 0:
+        raise argparse.ArgumentTypeError(f"must not be negative (got {parsed})")
+    return parsed
 
 
 def _positive_int(value: str) -> int:
@@ -227,7 +243,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--public_ip", "-p", choices=["true", "false"], help="Attach a public IP address to the instance(s) (default = true)", required=False, default="true")
     parser.add_argument("--security_group", "-S", help="Primary security group name for the EC2 instance (default = ec2instancemaker_sg)", required=False, default="ec2instancemaker_sg")
     parser.add_argument(
-        "--spot_buffer", help="pricing buffer to protect from Spot market fluctuations: spot_price = spot_price + spot_price*spot_buffer", type=float, required=False, default=round((1 / pi), 8)
+        "--spot_buffer",
+        help="pricing buffer to protect from Spot market fluctuations: spot_price = spot_price + spot_price*spot_buffer",
+        type=_non_negative_float,
+        required=False,
+        default=round((1 / pi), 8),
     )
     parser.add_argument(
         "--ssh_allowed_ips",
@@ -509,7 +529,7 @@ def resolve_network_and_compute(
     # an InstanceParameters field) -- discarded here too, not a behavior
     # change.
     spot_price, _ = resolve_request_type_pricing(
-        settings.request_type, ec2_client, settings.instance_type, is_windows, settings.az, spot_buffer, debug_mode, fetch_spot_price_raw, compute_buffered_spot_price, p_val
+        settings.request_type, ec2_client, settings.instance_type, is_windows, settings.az, spot_buffer, debug_mode, fetch_spot_price_raw, compute_buffered_spot_price, p_val, refer_to_docs_and_quit
     )
     print("")
 
@@ -1112,6 +1132,8 @@ def run_build(argv: list[str] | None, refer_to_docs_and_quit: QuitFn, ctrlc_abor
     validate_instance_name_and_owner_format(instance_name, instance_owner, refer_to_docs_and_quit)
     validate_ec2_keypair_format(ec2_keypair, refer_to_docs_and_quit)
     validate_iam_name_prefix_format(iam_name_prefix, refer_to_docs_and_quit)
+    validate_iam_name_lengths(iam_name_prefix, instance_name, refer_to_docs_and_quit)
+    validate_custom_ami_format(custom_ami, refer_to_docs_and_quit)
     validate_email_format(instance_owner_email, refer_to_docs_and_quit)
     validate_free_text_field(instance_owner_department, "instance_owner_department", refer_to_docs_and_quit)
     validate_free_text_field(project_id, "project_id", refer_to_docs_and_quit)

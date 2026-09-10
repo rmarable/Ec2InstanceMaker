@@ -105,4 +105,4 @@ repos:
         entry: python3 scripts/lint_templates.py
         language: system
         pass_filenames: false
-        files: ^(templates/|template_engine\.py)
+        files: ^(templates/|custom_user_scripts/|scripts/lint_templates\.py|template_engine\.py)

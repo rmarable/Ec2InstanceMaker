@@ -65,6 +65,11 @@ Create the parent instance which will have permission to spawn children through 
 
 `$ ./make_instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=alinux2 --iam_json_policy=ExtendedEc2InstancePolicy.json`
 
+Note that the child instance above is built with a *different*
+`instance_name` (`child01`, not `dev01`).  Two instances sharing a `Name`
+tag would both match `manage_instance.py -N dev01`, so a stop or terminate
+aimed at the parent would take the child with it.
+
 Access the parent, clone the parent repository, setup the Ec2InstanceMaker environment, and launch a child instance:
 ```
 $ ./access_instance.py -N dev01
@@ -86,7 +91,7 @@ Resolving deltas: 100% (156/156), done.
 ...
 <output snipped>
 ...
-[ec2-user@ip-172-31-45-18 ~]$ ./make_instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N dev01 --base_os=alinux2
+[ec2-user@ip-172-31-45-18 ~]$ ./make_instance.py -A us-east-1a -O rmarable -E rodney.marable@gmail.com -N child01 --base_os=alinux2
 ...
 <output snipped>
 ...

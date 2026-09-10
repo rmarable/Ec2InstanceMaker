@@ -44,6 +44,34 @@ SSH_KEYPAIR_FILE="{{ ssh_keypair_file }}"
 SNS_TOPIC_ARN="{{ sns_arn }}"
 CLOUDWATCH_LOG_GROUP="{{ cloudwatch_log_group }}"
 
+# Refuse to run two teardowns of the same instance at once.
+#
+# Two concurrent runs would both `terraform destroy` against the same local
+# state and both `rm -rf` the same directory. mkdir is atomic on every
+# POSIX filesystem, which matters because flock(1) is not available on
+# macOS, where operators actually run this.
+#
+# Note the honest limitation: this does NOT interoperate with
+# instance_builder.instance_lock(), which is fcntl.flock on a different
+# file. It stops two kill scripts racing each other; it does not stop a
+# directly-invoked kill script racing a concurrent `make_instance.py`. The
+# path that is guarded against that is `manage_instance.py -A terminate`
+# (and the MCP destroy_instance tool), which takes the Python lock around
+# this script.
+
+TEARDOWN_LOCK_DIR="$SRC_TREE_DIR/active_instances/{{ instance_name }}.teardown.lock"
+if ! mkdir "$TEARDOWN_LOCK_DIR" 2>/dev/null
+then
+	echo "*** ERROR ***"
+	echo "Another teardown of {{ instance_name }} is already running, or one exited uncleanly."
+	echo "If you are certain nothing else is running, remove this directory and retry:"
+	echo ""
+	echo "	rmdir \"$TEARDOWN_LOCK_DIR\""
+	echo ""
+	exit 1
+fi
+trap 'rmdir "$TEARDOWN_LOCK_DIR" 2>/dev/null' EXIT
+
 # Number of teardown steps that failed. Local state is deleted only if this
 # is still zero when the script finishes.
 

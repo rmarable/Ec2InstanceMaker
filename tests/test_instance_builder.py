@@ -692,7 +692,7 @@ class TestSpotPrice:
     def test_fetch_spot_price_raw_uses_windows_product_description(self):
         ec2_client = MagicMock()
         ec2_client.describe_spot_price_history.return_value = {"SpotPriceHistory": [{"SpotPrice": "0.0464"}]}
-        price = instance_builder.fetch_spot_price_raw(ec2_client, "m5.large", is_windows=True, az="us-east-1a")
+        price = instance_builder.fetch_spot_price_raw(ec2_client, "m5.large", is_windows=True, az="us-east-1a", refer_to_docs_and_quit=_quitting_mock())
         assert price == 0.0464
         kwargs = ec2_client.describe_spot_price_history.call_args.kwargs
         assert kwargs["ProductDescriptions"] == ["Windows"]
@@ -700,7 +700,7 @@ class TestSpotPrice:
     def test_fetch_spot_price_raw_uses_linux_product_description(self):
         ec2_client = MagicMock()
         ec2_client.describe_spot_price_history.return_value = {"SpotPriceHistory": [{"SpotPrice": "0.0116"}]}
-        price = instance_builder.fetch_spot_price_raw(ec2_client, "m5.large", is_windows=False, az="us-east-1a")
+        price = instance_builder.fetch_spot_price_raw(ec2_client, "m5.large", is_windows=False, az="us-east-1a", refer_to_docs_and_quit=_quitting_mock())
         assert price == 0.0116
         kwargs = ec2_client.describe_spot_price_history.call_args.kwargs
         assert kwargs["ProductDescriptions"] == ["Linux/UNIX"]
@@ -1488,13 +1488,24 @@ class TestWriteSerialNumberFile:
         assert "dev01.000000010926" in content
         assert "make_instance.py -N dev01" in content
 
-    def test_no_op_when_file_already_exists(self, tmp_path, monkeypatch):
+    def test_a_stale_file_from_a_previous_attempt_is_overwritten(self, tmp_path, monkeypatch):
+        # This used to return early when the file existed, so after a failed
+        # build a retry left the *previous* attempt's datestamp and command
+        # line in place while the build ran under a freshly-minted serial.
+        # build_ami.j2 reads this file, so it was reporting the wrong build.
+        # instance_lock() and the duplicate-build guard already prevent two
+        # live builds of the same instance_name, so overwriting is safe.
         monkeypatch.chdir(tmp_path)
         (tmp_path / "active_instances").mkdir()
         serial_file = tmp_path / "active_instances" / "dev01.serial"
-        serial_file.write_text("original content\n")
-        instance_builder.write_serial_number_file(str(serial_file), "dev01", "000000010926", ["make_instance.py"])
-        assert serial_file.read_text() == "original content\n"
+        serial_file.write_text("dev01.999999999999\nmake_instance.py --stale\n")
+
+        instance_builder.write_serial_number_file(str(serial_file), "dev01", "000000010926", ["make_instance.py", "-N", "dev01"])
+
+        contents = serial_file.read_text()
+        assert "000000010926" in contents
+        assert "999999999999" not in contents
+        assert "--stale" not in contents
 
 
 class TestResolveEbsOptimizedSupport:
@@ -1518,7 +1529,7 @@ class TestResolveRequestTypePricing:
         compute_buffered_spot_price = MagicMock()
         p_val = MagicMock()
         spot_price, spot_buffer = instance_builder.resolve_request_type_pricing(
-            "ondemand", MagicMock(), "t3.micro", False, "us-east-1a", 0.318, "false", fetch_spot_price_raw, compute_buffered_spot_price, p_val
+            "ondemand", MagicMock(), "t3.micro", False, "us-east-1a", 0.318, "false", fetch_spot_price_raw, compute_buffered_spot_price, p_val, _quitting_mock()
         )
         assert spot_price == "UNDEFINED"
         assert spot_buffer == "UNDEFINED"
@@ -1530,12 +1541,13 @@ class TestResolveRequestTypePricing:
         compute_buffered_spot_price = MagicMock(return_value=0.01518)
         p_val = MagicMock()
         ec2_client = MagicMock()
+        quit_fn = _quitting_mock()
         spot_price, spot_buffer = instance_builder.resolve_request_type_pricing(
-            "spot", ec2_client, "t3.micro", False, "us-east-1a", 0.318, "false", fetch_spot_price_raw, compute_buffered_spot_price, p_val
+            "spot", ec2_client, "t3.micro", False, "us-east-1a", 0.318, "false", fetch_spot_price_raw, compute_buffered_spot_price, p_val, quit_fn
         )
         assert spot_price == 0.01518
         assert spot_buffer == 0.318
-        fetch_spot_price_raw.assert_called_once_with(ec2_client, "t3.micro", False, "us-east-1a")
+        fetch_spot_price_raw.assert_called_once_with(ec2_client, "t3.micro", False, "us-east-1a", quit_fn)
         compute_buffered_spot_price.assert_called_once_with(0.0116, 0.318)
 
 
@@ -1595,3 +1607,159 @@ class TestBuildWindowsPasswordTable:
         assert "dev01-1" in rendered
         assert "10.0.0.2" in rendered
         assert "pw-two" in rendered
+
+
+class TestEbsValidationGaps:
+    """The io1 message said "between 100 and 16,000" while the check only
+    rejected 0 and >16000, so iops=1 and iops=-5 passed validation and were
+    refused by AWS later -- which is exactly the opaque failure this
+    function exists to pre-empt, and by then a security group and keypair
+    already exist.
+    """
+
+    def _validate(self, **overrides):
+        kwargs = {
+            "ebs_root_volume_size": 8,
+            "ebs_device_volume_size": 0,
+            "ebs_root_volume_type": "gp2",
+            "ebs_device_volume_type": "gp2",
+            "ebs_root_volume_iops": 0,
+            "ebs_device_volume_iops": 0,
+            "is_windows": False,
+            "refer_to_docs_and_quit": _quitting_mock(),
+        }
+        kwargs.update(overrides)
+        return instance_builder.validate_and_resize_ebs_volumes(**kwargs)
+
+    @pytest.mark.parametrize("iops", [1, 99, -5, 0])
+    def test_io1_iops_below_the_minimum_is_refused(self, iops):
+        with pytest.raises(SystemExit):
+            self._validate(ebs_root_volume_type="io1", ebs_root_volume_iops=iops)
+
+    def test_io1_ratio_above_50_iops_per_gb_is_refused(self):
+        # 16000 IOPS on an 8 GB volume is a 2000:1 ratio; AWS caps io1 at 50:1.
+        with pytest.raises(SystemExit):
+            self._validate(ebs_root_volume_type="io1", ebs_root_volume_iops=16000, ebs_root_volume_size=8)
+
+    def test_io1_at_exactly_50_iops_per_gb_is_allowed(self):
+        self._validate(ebs_root_volume_type="io1", ebs_root_volume_iops=400, ebs_root_volume_size=8)
+
+    def test_st1_is_refused_as_a_root_volume(self):
+        # EC2 cannot boot from a throughput-optimized volume.
+        with pytest.raises(SystemExit):
+            self._validate(ebs_root_volume_type="st1", ebs_root_volume_size=200)
+
+    def test_st1_below_its_minimum_size_is_refused(self):
+        with pytest.raises(SystemExit):
+            self._validate(ebs_device_volume_type="st1", ebs_device_volume_size=8)
+
+    def test_negative_sizes_are_refused(self):
+        with pytest.raises(SystemExit):
+            self._validate(ebs_root_volume_size=-1)
+
+    def test_the_zero_device_sentinel_still_works(self):
+        # 0 means "no secondary volume configured" throughout the suite.
+        assert self._validate(ebs_device_volume_size=0) == (8, 0)
+
+
+class TestSpotPriceEmptyHistory:
+    def test_no_spot_history_quits_cleanly_instead_of_indexerror(self):
+        ec2_client = MagicMock()
+        ec2_client.describe_spot_price_history.return_value = {"SpotPriceHistory": []}
+        quit_fn = _quitting_mock()
+
+        with pytest.raises(SystemExit):
+            instance_builder.fetch_spot_price_raw(ec2_client, "m5.large", False, "us-east-1a", quit_fn)
+        assert "Spot" in quit_fn.call_args.args[0]
+
+
+class TestIamNameLengths:
+    """derive_iam_names() builds "<prefix>-role-<name>-<14 digits>", so the
+    role name is len(prefix) + len(instance_name) + 21 against IAM's 64
+    character limit. A 28-character instance_name overflows it with the
+    default prefix, and it fails at create_role in phase 3 -- after the
+    security group, keypair and log group already exist.
+    """
+
+    def test_a_name_that_would_overflow_the_iam_limit_is_refused(self):
+        quit_fn = _quitting_mock()
+        with pytest.raises(SystemExit):
+            instance_builder.validate_iam_name_lengths("Ec2InstanceMaker", "my-really-long-instance-name", quit_fn)
+        assert "64" in quit_fn.call_args.args[0]
+
+    def test_the_longest_workable_name_is_still_allowed(self):
+        # 16 + 27 + 21 == 64 exactly.
+        instance_builder.validate_iam_name_lengths("Ec2InstanceMaker", "a" * 27, _quitting_mock())
+
+    def test_one_character_more_is_refused(self):
+        with pytest.raises(SystemExit):
+            instance_builder.validate_iam_name_lengths("Ec2InstanceMaker", "a" * 28, _quitting_mock())
+
+    def test_a_longer_prefix_shrinks_the_name_budget(self):
+        with pytest.raises(SystemExit):
+            instance_builder.validate_iam_name_lengths("SomeVeryLongDevOpsPrefix", "a" * 27, _quitting_mock())
+
+    def test_the_computed_role_name_actually_fits(self):
+        # Tie the bound to the real name derivation rather than a constant.
+        instance_name = "a" * 27
+        instance_builder.validate_iam_name_lengths("Ec2InstanceMaker", instance_name, _quitting_mock())
+        role_name, _, _ = instance_builder.derive_iam_names("Ec2InstanceMaker", instance_name + "-12345678901234")
+        assert len(role_name) == 64
+
+
+class TestCustomAmiFormat:
+    """--custom_ami is passed to describe_images as an "image-id" *filter
+    value*, and EC2 filter values support "*"/"?" wildcards -- so 'ami-*'
+    would match every AMI the account owns and check_custom_ami() would
+    silently return the newest, quietly building from an image nobody
+    chose.
+    """
+
+    @pytest.mark.parametrize("value", ["ami-*", "ami-?bcdef012", "*", "ami-", "not-an-ami", "ami-0123456789abcdef0 extra"])
+    def test_wildcards_and_junk_are_refused(self, value):
+        with pytest.raises(SystemExit):
+            instance_builder.validate_custom_ami_format(value, _quitting_mock())
+
+    @pytest.mark.parametrize("value", ["ami-0123456789abcdef0", "ami-12345678"])
+    def test_real_ami_ids_are_accepted(self, value):
+        instance_builder.validate_custom_ami_format(value, _quitting_mock())
+
+    def test_the_undefined_sentinel_is_the_no_op(self):
+        instance_builder.validate_custom_ami_format("UNDEFINED", _quitting_mock())
+
+
+class TestAvailabilityZoneIsActuallyChecked:
+    def test_a_nonexistent_az_in_a_real_region_is_refused(self):
+        # This only ever checked that the *region endpoint* resolved, so
+        # "us-east-1z" passed and surfaced later as "does not contain any
+        # valid subnets" -- which points at the wrong problem.
+        ec2_client = MagicMock()
+        ec2_client.describe_availability_zones.return_value = {"AvailabilityZones": [{"ZoneName": "us-east-1a"}, {"ZoneName": "us-east-1b"}]}
+        quit_fn = _quitting_mock()
+
+        with pytest.raises(SystemExit):
+            instance_builder.validate_az_and_region(ec2_client, "us-east-1z", quit_fn)
+
+    def test_a_real_az_passes(self):
+        ec2_client = MagicMock()
+        ec2_client.describe_availability_zones.return_value = {"AvailabilityZones": [{"ZoneName": "us-east-1a"}]}
+        quit_fn = _quitting_mock()
+
+        instance_builder.validate_az_and_region(ec2_client, "us-east-1a", quit_fn)
+
+        quit_fn.assert_not_called()
+
+
+class TestWindowsPasswordRetrievalFailureIsReported:
+    def test_a_failed_aws_call_is_not_reported_as_try_again_shortly(self):
+        # returncode was ignored and stderr went to DEVNULL, so expired
+        # credentials or a missing .pem produced empty stdout and was
+        # reported as "not yet available -- try again shortly", advice that
+        # would never come true.
+        failed = MagicMock()
+        failed.returncode = 255
+        failed.stdout = b""
+        with patch("subprocess.run", MagicMock(return_value=failed)):
+            result = instance_builder.decrypt_windows_admin_passwords("./instance_data/dev01/", "kp", "i-abc123")
+        assert "FAILED" in result
+        assert "try again shortly" not in result

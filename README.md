@@ -362,6 +362,12 @@ https://docs.aws.amazon.com/AWSEC2/latest/WindowsGuide/ec2-instance-metadata.htm
 
 ### Using make_instance.py
 
+> The flag listing below is a snapshot for reading convenience and has
+> drifted from the code before.  `./make_instance.py --help` is
+> authoritative; "Naming and input rules" above covers the validation the
+> help text does not describe.
+
+
 **make_instance.py** builds EC2 instances for a wide variety of use cases.
 
 ```
@@ -384,7 +390,7 @@ usage: make_instance.py [-h] --az AZ --instance_name INSTANCE_NAME
                         [--ec2_keypair EC2_KEYPAIR]
                         [--enable_placement_group {true,false}]
                         [--hyperthreading {true,false}]
-                        [--iam_json_policy IAM_JSON_POLICY]
+                        [--iam_json_policy {MinimalEc2InstancePolicy.json,GenericEc2InstancePolicy.json,ExtendedEc2InstancePolicy.json}]
                         [--iam_name_prefix IAM_NAME_PREFIX]
                         [--iam_role IAM_ROLE]
                         [--instance_owner_department INSTANCE_OWNER_DEPARTMENT]
@@ -458,7 +464,7 @@ options:
                         using the "cluster" strategy (default = false)
   --hyperthreading {true,false}, -H {true,false}
                         enable Intel Hyperthreading (default = true)
-  --iam_json_policy IAM_JSON_POLICY, -J IAM_JSON_POLICY
+  --iam_json_policy {MinimalEc2InstancePolicy.json,GenericEc2InstancePolicy.json,ExtendedEc2InstancePolicy.json}, -J ...
                         Use a pre-existing JSON policy document in the
                         /templates subdirectory to set permissions for
                         iam_role (default = GenericEc2InstancePolicy.json
@@ -1112,6 +1118,45 @@ It exits non-zero if any check fails, so it works as a pre-flight.
   as the policy being wrong rather than the check being wrong.
 
 ## Troubleshooting
+
+### Common runtime failures
+
+**`SessionManagerPlugin is not found`** when running `access_instance.py`.
+The Session Manager plugin is a separate install from the AWS CLI itself.
+See the link in INSTALL.md's prerequisites.
+
+**The build hangs or times out waiting for SSM.**  `ssm_provision.<name>.sh`
+waits for the instance's SSM Agent to register before it can run
+`build_instance.sh`.  If it never does, the usual causes are: the instance
+has no route to the SSM endpoints (a private subnet with no NAT gateway and
+no VPC endpoints), or the IAM role is missing the `AllowAccessToSSM`
+statement.  RHEL and Rocky Linux do not preinstall the agent -- the toolkit
+installs it via cloud-init for those, so check
+`/var/log/cloud-init-output.log` on the instance.
+
+**`Found an existing ./vars_files/<name>.yml`.**  A previous build of that
+name did not complete.  Run `./kill-instance.<name>.sh` first -- see
+"Recovering from a failed build" above, and do not simply delete the
+vars_file.
+
+**`Another build or teardown of <name> is already in progress`.**  Exactly
+what it says: another `make_instance.py`, `manage_instance.py -A terminate`,
+or MCP call holds the lock for that instance name.  If nothing is actually
+running, a previous process died without releasing it; the message names
+the lock file.
+
+**`instance_name must start with a lowercase letter...`** and friends.  See
+"Naming and input rules" above.  The most common surprise is
+`--instance_owner`, which rejects a typical ActiveDirectory username like
+`RMarable` despite the flag's help text describing it as one.
+
+**Teardown reported failures and preserved local state.**  That is by
+design -- the kill script no longer deletes the Terraform state when a
+deletion fails, so it can be re-run.  Fix the underlying error and run
+`./kill-instance.<name>.sh` again; steps that already succeeded report
+"already gone" and are skipped.
+
+### Missing prerequisites
 
 * Python version 3.12 or greater is required by this software.  Additionally,
 you must install the required libraries in requirements.txt.  If any of these

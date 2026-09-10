@@ -11,7 +11,7 @@
 # Define the Terraform version to deploy.
 # https://www.terraform.io/downloads.html
 
-TERRAFORM_VERSION=0.12.9
+TERRAFORM_VERSION=1.9.8
 
 ################################################################################
 #           	No more user-configurable options exist below here!            #
@@ -34,8 +34,19 @@ fi
 echo ""
 echo "Installing Terraform..."
 cd "$SCRATCH_DIR" || exit 1
-wget https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip
-unzip -o terraform_${TERRAFORM_VERSION}_linux_amd64.zip
+# Pick the archive matching this machine's CPU, rather than assuming
+# x86_64. This script is meant to be run *on* a built instance, and
+# Ec2InstanceMaker supports Graviton (arm64) instance types, where the
+# amd64 archive this used to hardcode simply does not run.
+
+case "$(uname -m)" in
+	x86_64)		TERRAFORM_ARCH=amd64 ;;
+	aarch64|arm64)	TERRAFORM_ARCH=arm64 ;;
+	*)		echo "Unsupported CPU architecture: $(uname -m)"; exit 1 ;;
+esac
+
+wget "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_${TERRAFORM_ARCH}.zip"
+unzip -o "terraform_${TERRAFORM_VERSION}_linux_${TERRAFORM_ARCH}.zip"
 sudo cp terraform /usr/local/bin
 sudo chmod 0755 /usr/local/bin/terraform
 

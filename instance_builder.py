@@ -77,10 +77,20 @@ def validate_az_and_region(ec2_client: EC2Client, az: str, illegal_az_msg: QuitF
     import botocore
 
     try:
-        ec2_client.describe_availability_zones()
+        zone_information = ec2_client.describe_availability_zones()
     except ValueError:
         illegal_az_msg(az)
+        return
     except botocore.exceptions.EndpointConnectionError:
+        illegal_az_msg(az)
+        return
+    # This used to check only that the *region endpoint* resolved, never
+    # that the AZ existed -- so "us-east-1z" sailed through here and
+    # surfaced much later as an empty describe_subnets result, reported as
+    # "does not contain any valid subnets", which points at the wrong
+    # problem entirely.
+    zone_names = [str(zone["ZoneName"]) for zone in zone_information.get("AvailabilityZones", [])]
+    if zone_names and az not in zone_names:
         illegal_az_msg(az)
 
 
@@ -149,10 +159,39 @@ def validate_and_resize_ebs_volumes(
             ebs_root_volume_size = 30
         if ebs_device_volume_size <= 30:
             ebs_device_volume_size = 30
-    if ebs_root_volume_type == "io1" and ((ebs_root_volume_iops == 0) or (ebs_root_volume_iops > 16000)):
-        refer_to_docs_and_quit("ebs_root_volume_iops must be set to a value between 100 and 16,000!")
-    if ebs_device_volume_type == "io1" and ((ebs_device_volume_iops == 0) or (ebs_device_volume_iops > 16000)):
-        refer_to_docs_and_quit("ebs_device_volume_iops must be set to a value between 100 and 16,000!")
+    # These checks used to say "between 100 and 16,000" while only rejecting
+    # 0 and >16000 -- so iops=1 and iops=-5 both sailed through and failed
+    # later inside AWS with exactly the opaque error this function exists to
+    # pre-empt, by which point a security group and keypair already exist.
+    for label, volume_type, volume_iops, volume_size in (
+        ("ebs_root_volume", ebs_root_volume_type, ebs_root_volume_iops, ebs_root_volume_size),
+        ("ebs_device_volume", ebs_device_volume_type, ebs_device_volume_iops, ebs_device_volume_size),
+    ):
+        if volume_size < 0:
+            refer_to_docs_and_quit(label + "_size may not be negative!")
+        if label == "ebs_root_volume" and volume_size < 1:
+            refer_to_docs_and_quit("ebs_root_volume_size must be at least 1 GB!")
+        if volume_type == "io1" and (volume_iops < 100 or volume_iops > 16000):
+            refer_to_docs_and_quit(label + "_iops must be set to a value between 100 and 16,000!")
+        # 0 is the "no secondary volume configured" sentinel for the device
+        # volume, so the remaining size-dependent checks only apply once a
+        # volume actually exists.
+        if volume_size == 0:
+            continue
+        if volume_type == "st1" and volume_size < 125:
+            refer_to_docs_and_quit(label + "_size must be at least 125 GB for an st1 volume -- that is AWS's minimum for the type.")
+        if volume_type != "io1":
+            continue
+        # io1 caps provisioned IOPS at 50 per GiB. Without this, something
+        # like iops=16000 on an 8 GB volume (a 2000:1 ratio) validates here
+        # and is refused by EC2 at apply time.
+        if volume_iops > volume_size * 50:
+            refer_to_docs_and_quit(
+                label + "_iops of " + str(volume_iops) + " exceeds 50 IOPS per GB, which is AWS's io1 limit. A " + str(volume_size) + " GB volume allows at most " + str(volume_size * 50) + " IOPS."
+            )
+    # EC2 cannot boot from a throughput-optimized volume.
+    if ebs_root_volume_type == "st1":
+        refer_to_docs_and_quit("ebs_root_volume_type may not be st1 -- EC2 does not support st1 as a root device. Use gp2 or io1.")
     return ebs_root_volume_size, ebs_device_volume_size
 
 
@@ -410,13 +449,21 @@ def resolve_ami(
 # Purpose: look up the most recent EC2 Spot price for instance_type/az.
 
 
-def fetch_spot_price_raw(ec2_client: EC2Client, instance_type: str, is_windows: bool, az: str) -> float:
+def fetch_spot_price_raw(ec2_client: EC2Client, instance_type: str, is_windows: bool, az: str, refer_to_docs_and_quit: QuitFn) -> float:
     product_description = "Windows" if is_windows else "Linux/UNIX"
     # See the matching cast in aux_data.get_instance_type_info() -- same
     # reasoning: instance_type stays a plain str so a new AWS instance
     # family works without waiting on a boto3-stubs update.
     prices = ec2_client.describe_spot_price_history(InstanceTypes=[cast(InstanceTypeType, instance_type)], MaxResults=1, ProductDescriptions=[product_description], AvailabilityZone=az)
-    return float(prices["SpotPriceHistory"][0]["SpotPrice"])
+    history = prices["SpotPriceHistory"]
+    if not history:
+        # Empty means AWS offers no Spot capacity for this instance type in
+        # this AZ. That used to be an IndexError traceback.
+        refer_to_docs_and_quit(
+            "No Spot price history for " + instance_type + " (" + product_description + ") in " + az + "."
+            " AWS does not offer this instance type as a Spot Instance there -- pick another instance type or AZ, or use --request_type=ondemand."
+        )
+    return float(history[0]["SpotPrice"])
 
 
 # Function: compute_buffered_spot_price()
@@ -557,6 +604,7 @@ def fetch_windows_instance_details(instance_data_dir: str, refer_to_docs_and_qui
 # a real password) tells the operator to wait and retry.
 
 _WINDOWS_PASSWORD_NOT_YET_AVAILABLE = "(not yet available -- Windows password generation can take several minutes after launch; try again shortly)"
+_WINDOWS_PASSWORD_RETRIEVAL_FAILED = "(retrieval FAILED -- `aws ec2 get-password-data` returned an error; check your credentials, IAM permissions, and that the keypair .pem is present)"
 
 
 def decrypt_windows_admin_passwords(instance_data_dir: str, ec2_keypair: str, instance_ids_csv: str) -> str:
@@ -572,10 +620,18 @@ def decrypt_windows_admin_passwords(instance_data_dir: str, ec2_keypair: str, in
             stderr=subprocess.DEVNULL,
             cwd=instance_data_dir,
         )
-        password = jq("..|.PasswordData?").transform(text=password_tf.stdout.decode("utf-8"), text_output=True)
-        password = password.replace('"', "").strip()
-        if not password or password == "null":
-            password = _WINDOWS_PASSWORD_NOT_YET_AVAILABLE
+        if password_tf.returncode != 0:
+            # The return code was ignored and stderr sent to DEVNULL, so a
+            # failed call (expired credentials, no permission, a missing
+            # .pem) produced empty stdout and was reported as "not yet
+            # available -- try again shortly", which is advice that will
+            # never come true.
+            password = _WINDOWS_PASSWORD_RETRIEVAL_FAILED
+        else:
+            password = jq("..|.PasswordData?").transform(text=password_tf.stdout.decode("utf-8"), text_output=True)
+            password = password.replace('"', "").strip()
+            if not password or password == "null":
+                password = _WINDOWS_PASSWORD_NOT_YET_AVAILABLE
         passwords.append(password)
     return ",".join(passwords)
 
@@ -1005,6 +1061,57 @@ def validate_email_format(instance_owner_email: str, refer_to_docs_and_quit: Qui
 # `terraform apply` into an actionable message before anything is created.
 
 
+# Function: validate_iam_name_lengths()
+# Purpose: refuse an instance_name that would generate an IAM role name
+# longer than AWS accepts.
+#
+# derive_iam_names() builds "<prefix>-role-<instance_serial_number>", and
+# instance_serial_number is "<instance_name>-<14-digit timestamp>". So the
+# role name is len(prefix) + len(instance_name) + 21, against IAM's 64
+# character limit for a role name. A perfectly reasonable
+# instance_name of 28 characters overflows it with the default prefix --
+# and it fails at create_role in phase 3, after the security group,
+# keypair and CloudWatch log group already exist, with an AWS-side error
+# that does not obviously point at the name being too long.
+
+
+_IAM_ROLE_NAME_MAX = 64
+_SERIAL_AND_SEPARATORS_LENGTH = 21
+
+
+# Function: validate_custom_ami_format()
+# Purpose: --custom_ami is passed to describe_images as an "image-id"
+# *filter value*, and EC2 filter values support "*"/"?" wildcards. So
+# --custom_ami 'ami-*' would match every AMI the account owns and
+# check_custom_ami() would silently return the newest one -- a build
+# quietly using an image nobody selected.
+
+
+def validate_custom_ami_format(custom_ami: str, refer_to_docs_and_quit: QuitFn) -> None:
+    if custom_ami == "UNDEFINED":
+        return
+    if not re.fullmatch(r"ami-[0-9a-f]{8}([0-9a-f]{9})?", custom_ami):
+        refer_to_docs_and_quit('"' + custom_ami + '" is not a valid AMI id! Expected the form ami-0123456789abcdef0 (no wildcards).')
+
+
+def validate_iam_name_lengths(iam_name_prefix: str, instance_name: str, refer_to_docs_and_quit: QuitFn) -> None:
+    budget = _IAM_ROLE_NAME_MAX - _SERIAL_AND_SEPARATORS_LENGTH
+    if len(iam_name_prefix) + len(instance_name) > budget:
+        refer_to_docs_and_quit(
+            "instance_name and iam_name_prefix are too long together: they generate an IAM role name of "
+            + str(len(iam_name_prefix) + len(instance_name) + _SERIAL_AND_SEPARATORS_LENGTH)
+            + " characters, and AWS allows "
+            + str(_IAM_ROLE_NAME_MAX)
+            + ".\n\nShorten one of them so that len(instance_name) + len(iam_name_prefix) <= "
+            + str(budget)
+            + " (currently "
+            + str(len(instance_name))
+            + " + "
+            + str(len(iam_name_prefix))
+            + ")."
+        )
+
+
 def validate_vpc_name_format(vpc_name: str, vpc_id: str, refer_to_docs_and_quit: QuitFn) -> None:
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]{0,63}", vpc_name):
         refer_to_docs_and_quit(
@@ -1144,7 +1251,9 @@ def ensure_state_directories(instance_data_dir: str) -> None:
 def instance_lock(instance_name: str, refer_to_docs_and_quit: QuitFn) -> Iterator[None]:
     os.makedirs("./active_instances", exist_ok=True)
     lock_path = "./active_instances/" + instance_name + ".lock"
-    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR)
+    # 0o644, not the 0o755 a default umask produces for a mode-less
+    # os.open() -- a lock file is not an executable.
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
     try:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -1227,8 +1336,12 @@ def abort_if_vars_file_exists(vars_file_path: str, argv: list[str], instance_nam
 
 
 def write_serial_number_file(instance_serial_number_file: str, instance_name: str, instance_serial_datestamp: str, argv: list[str]) -> None:
-    if os.path.isfile(instance_serial_number_file):
-        return
+    # This used to return early when the file already existed, which left a
+    # *previous* failed attempt's datestamp and command line in place while
+    # the current build used a freshly-minted serial. build_ami.j2 reads
+    # this file, so it would have been reporting the wrong build. The
+    # duplicate-build guard and instance_lock() already prevent two live
+    # builds of the same instance_name, so overwriting is safe here.
     with open(instance_serial_number_file, "w") as fh:
         print(f"{instance_name}.{instance_serial_datestamp}", file=fh)
     with open(instance_serial_number_file, "a") as fh:
@@ -1271,15 +1384,16 @@ def resolve_request_type_pricing(
     az: str,
     spot_buffer: float,
     debug_mode: BoolStr,
-    fetch_spot_price_raw: Callable[[EC2Client, str, bool, str], float],
+    fetch_spot_price_raw: Callable[[EC2Client, str, bool, str, QuitFn], float],
     compute_buffered_spot_price: Callable[[float, float], float],
     p_val: Callable[[str, str], None],
+    refer_to_docs_and_quit: QuitFn,
 ) -> tuple[str, str] | tuple[float, float]:
     if request_type == "ondemand":
         print("")
         print("Selected: ondemand (NOTE: spot instances are **MUCH** cheaper!)")
         return "UNDEFINED", "UNDEFINED"
-    spot_price_raw = fetch_spot_price_raw(ec2_client, instance_type, is_windows, az)
+    spot_price_raw = fetch_spot_price_raw(ec2_client, instance_type, is_windows, az, refer_to_docs_and_quit)
     spot_price = compute_buffered_spot_price(spot_price_raw, spot_buffer)
     p_val("spot_price_raw", debug_mode)
     p_val("spot_price_buffer", debug_mode)
