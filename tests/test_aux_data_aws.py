@@ -152,7 +152,7 @@ class TestGetAmiInfo:
         arch_filter = next(f for f in filters if f["Name"] == "architecture")
         assert arch_filter["Values"] == ["arm64"]
 
-    def test_aws_api_error_quits_instead_of_propagating_raw(self):
+    def test_aws_api_error_quits_instead_of_propagating_raw(self, capsys):
         # Regression test: get_ami_info() used to have no error handling at
         # all -- a real AWS API problem (throttling, AccessDenied) propagated
         # as a raw, unhandled ClientError/traceback instead of the clean
@@ -162,6 +162,12 @@ class TestGetAmiInfo:
         ec2_client.describe_images.side_effect = _client_error("RequestLimitExceeded")
         with pytest.raises(SystemExit):
             aux_data.get_ami_info(ec2_client, "al2023", "x86_64")
+        # get_ami_info() has three exits (unknown base_os, API error, no
+        # matching AMI). This must be the API-error one, and it must carry
+        # the underlying AWS code rather than swallowing it.
+        out = capsys.readouterr().out
+        assert "AWS API error" in out
+        assert "RequestLimitExceeded" in out
 
 
 class TestAddInboundSecurityGroupRule:

@@ -216,7 +216,7 @@ class TestBuildInstance:
 
     def test_invalid_instance_name_rejected_before_confirm_check(self):
         run_build_mock = MagicMock()
-        with patch("mcp_server.run_build", run_build_mock), pytest.raises(ToolError):
+        with patch("mcp_server.run_build", run_build_mock), pytest.raises(ToolError, match="instance_name"):
             mcp_server.build_instance(az="us-east-2a", instance_name="../../etc/passwd", instance_owner="tester", instance_owner_email="tester@example.com", confirm=False)
         run_build_mock.assert_not_called()
 
@@ -266,7 +266,7 @@ class TestInstanceNameValidationAcrossTools:
     PATH_TRAVERSAL_NAME = "../../../../tmp/evil"
 
     def test_get_build_record_rejects_path_traversal(self):
-        with pytest.raises(ToolError):
+        with pytest.raises(ToolError, match="instance_name"):
             mcp_server.get_build_record(self.PATH_TRAVERSAL_NAME)
 
     def test_get_instance_status_rejects_path_traversal_before_any_aws_call(self):
@@ -293,7 +293,7 @@ class TestInstanceNameValidationAcrossTools:
         # validate_instance_name_format() enforces the same
         # [a-z][a-z0-9-]* rule the CLI does -- not just a traversal
         # blocklist, the same allowlist manage_instance.py main() applies.
-        with pytest.raises(ToolError):
+        with pytest.raises(ToolError, match="lowercase"):
             mcp_server.get_build_record("Dev01")
 
 

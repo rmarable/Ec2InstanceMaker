@@ -277,6 +277,9 @@ def print_debug_parameters(params: InstanceParameters) -> None:
     print("aws_ami = " + str(params.aws_ami))
     print("az = " + params.az)
     print("base_os = " + params.base_os)
+    print("is_windows = " + str(params.is_windows))
+    print("package_manager = " + str(params.package_manager))
+    print("awscli_preinstalled = " + str(params.awscli_preinstalled))
     if params.count > 1:
         print("count = " + str(params.count))
     print("ebs_encryption = " + str(params.ebs_encryption))
@@ -307,6 +310,7 @@ def print_debug_parameters(params: InstanceParameters) -> None:
     print("prod_devel = " + params.prod_level)
     if params.project_id != "UNDEFINED":
         print("project_id = " + params.project_id)
+    print("iam_name_prefix = " + params.iam_name_prefix)
     if params.ec2_iam_instance_profile:
         print("preserve_iam_role = " + params.preserve_iam_role)
         print("preserve_security_group = " + params.preserve_security_group)
@@ -315,6 +319,7 @@ def print_debug_parameters(params: InstanceParameters) -> None:
         print("ec2_iam_instance_profile = " + params.ec2_iam_instance_profile)
         print("ec2_iam_instance_role = " + params.ec2_iam_instance_role)
     print("public_ip = " + params.public_ip)
+    print("ssh_allowed_ips = " + params.ssh_allowed_ips)
     print("region = " + params.region)
     print("security_group_name = " + str(params.security_group_name))
     print("spot_price = " + str(params.spot_price))
@@ -324,7 +329,19 @@ def print_debug_parameters(params: InstanceParameters) -> None:
     print("vpc_name = " + params.vpc_name)
     print("vpc_security_group_ids = " + params.vpc_security_group_ids)
     print("sns_topic_arn = " + params.sns_topic_arn)
+    print("sns_datestamp = " + params.sns_datestamp)
+    print("sns_timestamp = " + params.sns_timestamp)
+    print("enable_cloudwatch_logs = " + params.enable_cloudwatch_logs)
+    if params.enable_cloudwatch_logs == "true":
+        print("cloudwatch_log_group = " + params.cloudwatch_log_group)
+        print("log_retention_days = " + str(params.log_retention_days))
+        print("preserve_cloudwatch_logs = " + params.preserve_cloudwatch_logs)
+    print("custom_user_prelogin_scripts = " + ", ".join(params.custom_user_prelogin_scripts))
+    print("custom_user_postboot_scripts = " + ", ".join(params.custom_user_postboot_scripts))
+    print("instance_data_dir = " + params.instance_data_dir)
+    print("debug_mode = " + params.debug_mode)
     print("DEPLOYMENT_DATE = " + params.DEPLOYMENT_DATE)
+    print("DEPLOYMENT_DATE_TAG = " + params.DEPLOYMENT_DATE_TAG)
     print("TERRAFORM_VERSION = " + params.TERRAFORM_VERSION)
 
 

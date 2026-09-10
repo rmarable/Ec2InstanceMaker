@@ -83,25 +83,35 @@ class TestBaseOsInstanceCheck:
         # Should not raise.
         aux_data.base_os_instance_check("al2023", "m5.large", "x86_64", "false")
 
-    def test_windows_arm64_rejected(self):
+    def test_windows_arm64_rejected(self, capsys):
         # Regression test: generic Windows+Graviton rejection added this
         # session, replacing the old a1.-only exclusion that missed every
         # other Graviton family (m6g, c6g, c8g, etc.).
+        #
+        # base_os_instance_check() has three distinct failure exits, so
+        # asserting only that it exited would pass even if a change made it
+        # reject this for entirely the wrong reason.
         with pytest.raises(SystemExit):
             aux_data.base_os_instance_check("windows2022", "m6g.xlarge", "arm64", "false")
+        assert "does not support AWS Graviton" in capsys.readouterr().out
 
     def test_windows_x86_64_passes(self):
         aux_data.base_os_instance_check("windows2022", "m5.xlarge", "x86_64", "false")
 
-    def test_windows_f1_rejected(self):
+    def test_windows_f1_rejected(self, capsys):
         with pytest.raises(SystemExit):
             aux_data.base_os_instance_check("windows2019", "f1.2xlarge", "x86_64", "false")
+        out = capsys.readouterr().out
+        assert "does not support EC2 instance type f1.2xlarge" in out
+        # Specifically NOT the Graviton branch, which is the neighbouring exit.
+        assert "Graviton" not in out
 
-    def test_unrecognized_base_os_exits_cleanly(self):
+    def test_unrecognized_base_os_exits_cleanly(self, capsys):
         # Regression test: this used to raise a raw KeyError instead of a
         # clean, user-facing error.
         with pytest.raises(SystemExit):
             aux_data.base_os_instance_check("centos7", "t3.micro", "x86_64", "false")
+        assert "is not a recognized base_os" in capsys.readouterr().out
 
     @pytest.mark.parametrize(
         "base_os",

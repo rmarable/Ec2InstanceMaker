@@ -415,9 +415,10 @@ class TestMainCliWiring:
 
         assert terminate.call_args.args[1] is True
 
-    def test_list_all_requires_a_region(self):
+    def test_list_all_requires_a_region(self, capsys):
         with pytest.raises(SystemExit):
             manage_instance.main(["-l"])
+        assert "--region/-r is required" in capsys.readouterr().out
 
     def test_list_all_lists_without_an_instance_name(self, monkeypatch):
         self._patch(monkeypatch)
@@ -440,9 +441,10 @@ class TestMainCliWiring:
         ec2_client.start_instances.assert_not_called()
         ec2_client.stop_instances.assert_not_called()
 
-    def test_instance_name_is_required_for_a_power_action(self):
+    def test_instance_name_is_required_for_a_power_action(self, capsys):
         with pytest.raises(SystemExit):
             manage_instance.main(["-A", "start"])
+        assert "--instance_name/-N is required" in capsys.readouterr().out
 
     def test_action_is_required(self):
         # -A/-S/-l are a required mutually exclusive group, so argparse
@@ -490,23 +492,28 @@ class TestMainCliWiring:
 
         ec2_client.reboot_instances.assert_called_once_with(InstanceIds=["i-ondemand01"])
 
-    def test_an_aws_error_during_the_action_is_reported_cleanly(self, monkeypatch):
+    def test_an_aws_error_during_the_action_is_reported_cleanly(self, monkeypatch, capsys):
         ec2_client = MagicMock()
         ec2_client.start_instances.side_effect = ClientError({"Error": {"Code": "UnauthorizedOperation", "Message": "nope"}}, "StartInstances")
         self._patch(monkeypatch, client=ec2_client)
 
         with pytest.raises(SystemExit):
             manage_instance.main(["-N", "dev01", "-A", "start", "-c"])
+        # The raw botocore error must be surfaced, not swallowed.
+        out = capsys.readouterr().out
+        assert "AWS API error" in out
+        assert "UnauthorizedOperation" in out
 
-    def test_a_spot_instance_blocks_start_before_any_aws_call(self, monkeypatch):
+    def test_a_spot_instance_blocks_start_before_any_aws_call(self, monkeypatch, capsys):
         ec2_client = self._patch(monkeypatch, instances=[SPOT_INSTANCE])
 
         with pytest.raises(SystemExit):
             manage_instance.main(["-N", "dev01", "-A", "start", "-c"])
 
         ec2_client.start_instances.assert_not_called()
+        assert "Spot Instances" in capsys.readouterr().out
 
-    def test_an_invalid_instance_name_is_refused_before_any_aws_call(self, monkeypatch):
+    def test_an_invalid_instance_name_is_refused_before_any_aws_call(self, monkeypatch, capsys):
         find = MagicMock()
         monkeypatch.setattr(manage_instance, "find_managed_instances", find)
 
@@ -514,3 +521,4 @@ class TestMainCliWiring:
             manage_instance.main(["-N", "../etc/passwd", "-A", "start", "-c"])
 
         find.assert_not_called()
+        assert "instance_name" in capsys.readouterr().out

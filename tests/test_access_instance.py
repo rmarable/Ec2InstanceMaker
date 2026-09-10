@@ -71,3 +71,68 @@ class TestDispatchToInstanceAccessScript:
         quit_fn.assert_called_once()
         exists_mock.assert_not_called()
         run_mock.assert_not_called()
+
+
+class TestParseArgs:
+    def test_menu_index_defaults_to_zero(self):
+        args = access_instance.parse_args(["-N", "dev01"])
+        assert args.instance_name == "dev01"
+        assert args.menu_index == 0
+
+    def test_menu_index_is_parsed_as_an_integer(self):
+        assert access_instance.parse_args(["-N", "dev01", "-m", "3"]).menu_index == 3
+
+    def test_instance_name_is_required(self):
+        with pytest.raises(SystemExit) as exc:
+            access_instance.parse_args([])
+        assert exc.value.code == 2
+
+    def test_a_non_numeric_menu_index_is_an_argparse_error(self):
+        with pytest.raises(SystemExit) as exc:
+            access_instance.parse_args(["-N", "dev01", "-m", "three"])
+        assert exc.value.code == 2
+
+
+class TestMain:
+    """main() is the wiring between parse_args, the name validation and the
+    dispatch. It had no coverage: the pieces were tested, the order they
+    run in was not -- and the order is the security-relevant part, since
+    validation has to happen before instance_name reaches a filesystem path
+    or a subprocess.
+    """
+
+    def test_validates_the_name_before_dispatching(self, monkeypatch, capsys):
+        dispatch = MagicMock()
+        monkeypatch.setattr(access_instance, "dispatch_to_instance_access_script", dispatch)
+
+        with pytest.raises(SystemExit):
+            access_instance.main(["-N", "../../etc/passwd"])
+
+        dispatch.assert_not_called()
+        assert "instance_name" in capsys.readouterr().out
+
+    def test_propagates_the_dispatch_exit_code(self, monkeypatch):
+        monkeypatch.setattr(access_instance, "dispatch_to_instance_access_script", MagicMock(return_value=7))
+
+        with pytest.raises(SystemExit) as exc:
+            access_instance.main(["-N", "dev01"])
+
+        assert exc.value.code == 7
+
+    def test_a_successful_dispatch_exits_zero(self, monkeypatch):
+        monkeypatch.setattr(access_instance, "dispatch_to_instance_access_script", MagicMock(return_value=0))
+
+        with pytest.raises(SystemExit) as exc:
+            access_instance.main(["-N", "dev01"])
+
+        assert exc.value.code == 0
+
+    def test_menu_index_is_forwarded_to_the_dispatch(self, monkeypatch):
+        dispatch = MagicMock(return_value=0)
+        monkeypatch.setattr(access_instance, "dispatch_to_instance_access_script", dispatch)
+
+        with pytest.raises(SystemExit):
+            access_instance.main(["-N", "dev01", "-m", "2"])
+
+        assert dispatch.call_args.args[0] == "dev01"
+        assert dispatch.call_args.args[1] == 2

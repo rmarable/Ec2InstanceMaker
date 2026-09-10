@@ -102,6 +102,7 @@ class TestValidateAndResizeEbsVolumes:
         assert (root, device) == (8, 0)
 
     def test_root_over_16tb_quits(self):
+        quit_fn = _quitting_mock()
         with pytest.raises(SystemExit):
             instance_builder.validate_and_resize_ebs_volumes(
                 ebs_root_volume_size=16001,
@@ -111,10 +112,12 @@ class TestValidateAndResizeEbsVolumes:
                 ebs_root_volume_iops=0,
                 ebs_device_volume_iops=0,
                 is_windows=False,
-                refer_to_docs_and_quit=_quitting_mock(),
+                refer_to_docs_and_quit=quit_fn,
             )
+        assert "Maximum allowed EBS volume size" in quit_fn.call_args.args[0]
 
     def test_device_over_16tb_quits(self):
+        quit_fn = _quitting_mock()
         with pytest.raises(SystemExit):
             instance_builder.validate_and_resize_ebs_volumes(
                 ebs_root_volume_size=8,
@@ -124,8 +127,9 @@ class TestValidateAndResizeEbsVolumes:
                 ebs_root_volume_iops=0,
                 ebs_device_volume_iops=0,
                 is_windows=False,
-                refer_to_docs_and_quit=_quitting_mock(),
+                refer_to_docs_and_quit=quit_fn,
             )
+        assert "secondary EBS device volume size" in quit_fn.call_args.args[0]
 
     def test_windows_bumps_undersized_volumes_to_30gb(self):
         root, device = instance_builder.validate_and_resize_ebs_volumes(
@@ -167,6 +171,7 @@ class TestValidateAndResizeEbsVolumes:
         assert (root, device) == (8, 0)
 
     def test_io1_requires_root_iops_in_range(self):
+        quit_fn = _quitting_mock()
         with pytest.raises(SystemExit):
             instance_builder.validate_and_resize_ebs_volumes(
                 ebs_root_volume_size=8,
@@ -176,8 +181,9 @@ class TestValidateAndResizeEbsVolumes:
                 ebs_root_volume_iops=0,
                 ebs_device_volume_iops=100,
                 is_windows=False,
-                refer_to_docs_and_quit=_quitting_mock(),
+                refer_to_docs_and_quit=quit_fn,
             )
+        assert "ebs_root_volume_iops" in quit_fn.call_args.args[0]
 
     def test_io1_root_iops_above_the_maximum_is_refused(self):
         # The mirror of test_io1_requires_device_iops_in_range below. Only
@@ -185,6 +191,7 @@ class TestValidateAndResizeEbsVolumes:
         # range, so deleting "or ebs_root_volume_iops > 16000" from the
         # root check broke nothing in the suite -- confirmed by mutation
         # testing during an adversarial review.
+        quit_fn = _quitting_mock()
         with pytest.raises(SystemExit):
             instance_builder.validate_and_resize_ebs_volumes(
                 ebs_root_volume_size=8,
@@ -194,10 +201,12 @@ class TestValidateAndResizeEbsVolumes:
                 ebs_root_volume_iops=16001,
                 ebs_device_volume_iops=100,
                 is_windows=False,
-                refer_to_docs_and_quit=_quitting_mock(),
+                refer_to_docs_and_quit=quit_fn,
             )
+        assert "ebs_root_volume_iops" in quit_fn.call_args.args[0]
 
     def test_io1_requires_device_iops_in_range(self):
+        quit_fn = _quitting_mock()
         with pytest.raises(SystemExit):
             instance_builder.validate_and_resize_ebs_volumes(
                 ebs_root_volume_size=8,
@@ -207,14 +216,16 @@ class TestValidateAndResizeEbsVolumes:
                 ebs_root_volume_iops=100,
                 ebs_device_volume_iops=16001,
                 is_windows=False,
-                refer_to_docs_and_quit=_quitting_mock(),
+                refer_to_docs_and_quit=quit_fn,
             )
+        assert "ebs_device_volume_iops" in quit_fn.call_args.args[0]
 
     def test_device_io1_is_validated_independently_of_root_type(self):
         # Regression test: this used to gate the device IOPS check on
         # ebs_root_volume_type alone, so a non-io1 root paired with an io1
         # *device* volume never validated (or required) the device's IOPS
         # at all. root_volume_type is deliberately "gp2" (never io1) here.
+        quit_fn = _quitting_mock()
         with pytest.raises(SystemExit):
             instance_builder.validate_and_resize_ebs_volumes(
                 ebs_root_volume_size=8,
@@ -224,8 +235,9 @@ class TestValidateAndResizeEbsVolumes:
                 ebs_root_volume_iops=0,
                 ebs_device_volume_iops=0,
                 is_windows=False,
-                refer_to_docs_and_quit=_quitting_mock(),
+                refer_to_docs_and_quit=quit_fn,
             )
+        assert "ebs_device_volume_iops" in quit_fn.call_args.args[0]
 
     def test_root_io1_does_not_require_device_iops_when_device_is_not_io1(self):
         # The inverse regression: an io1 root paired with a non-io1 device
@@ -389,7 +401,12 @@ class TestVpcNameIsNotAttackerControlled:
             '"quoted"',
             "${var.evil}",
             "a" * 65,
-            "",
+            # NB: "" is deliberately not in this list. An empty Name tag
+            # takes the missing-Name-tag exit rather than the identifier
+            # one, and is covered by test_a_vpc_with_no_tags_at_all below.
+            # The message assertion here is what surfaced that -- before
+            # it, this case passed for a reason other than the one the
+            # test name claims.
         ],
     )
     def test_an_unusable_name_tag_is_refused_before_anything_is_created(self, payload):
@@ -399,6 +416,9 @@ class TestVpcNameIsNotAttackerControlled:
         with pytest.raises(SystemExit):
             instance_builder.resolve_vpc_and_subnet(ec2_client, "vpc_default", "us-east-1a", quit_fn)
         quit_fn.assert_called_once()
+        # resolve_vpc_and_subnet has three distinct exits; this must be
+        # the identifier one, not "undefined VPC" or missing-Name-tag.
+        assert "Terraform provider alias" in quit_fn.call_args.args[0]
 
     @pytest.mark.parametrize("name", ["vpc_default", "prod-vpc", "_internal", "VPC1"])
     def test_legitimate_name_tags_still_work(self, name):
@@ -1739,6 +1759,8 @@ class TestAvailabilityZoneIsActuallyChecked:
 
         with pytest.raises(SystemExit):
             instance_builder.validate_az_and_region(ec2_client, "us-east-1z", quit_fn)
+        # Must be the AZ-does-not-exist exit, not the endpoint-error one.
+        assert quit_fn.call_args.args[0] == "us-east-1z"
 
     def test_a_real_az_passes(self):
         ec2_client = MagicMock()
