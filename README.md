@@ -1121,6 +1121,22 @@ If you observe this error while attempting to build an EC2 instance, please
 follow the guidelines provided in the message output to subscribe to the OS
 channel through the AWS Marketplace.
 
+* Even after subscribing, openSUSE Leap 16.0 may still refuse a specific
+`--instance_type` with `UnsupportedOperation`:
+
+```
+Error: creating EC2 Instance: operation error EC2: RunInstances, https response error StatusCode: 400, api error UnsupportedOperation: The instance configuration for this AWS Marketplace product is not supported. Please see the AWS Marketplace site for more information about supported instance types, regions, and operating systems.
+```
+
+AWS Marketplace products can restrict which instance types they're priced/
+sold for, independent of the AMI's own architecture support -- confirmed
+live: `c7a.large` (a newer 7th-gen AMD type) was refused this way, while
+`m5.large` on the identical AMI succeeded immediately. AWS does not publish
+this restriction anywhere queryable (no API, nothing on the listing page),
+so Ec2InstanceMaker cannot validate it up front -- if you hit this, retry
+with a well-established general-purpose family (`m5`/`m6i`/`c5`/`t3`)
+rather than a brand-new one.
+
 * Ec2InstanceMaker supports attaching a secondary EBS volume during the build
 (`--ebs_device_volume_size`/`--ebs_device_volume_type`/`--ebs_device_volume_iops`),
 which is encrypted along with the root volume when `--ebs_encryption=true`.
