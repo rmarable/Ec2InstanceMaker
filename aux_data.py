@@ -56,6 +56,8 @@ BASE_OS_FAMILIES: dict[str, dict[str, Any]] = {
     "ubuntu2404": {"is_windows": False, "package_manager": "apt", "ec2_user": "ubuntu", "awscli_preinstalled": False},
     "ubuntu2604": {"is_windows": False, "package_manager": "apt", "ec2_user": "ubuntu", "awscli_preinstalled": False},
     "opensuse16": {"is_windows": False, "package_manager": "zypper", "ec2_user": "ec2-user", "awscli_preinstalled": False},
+    "debian12": {"is_windows": False, "package_manager": "apt", "ec2_user": "admin", "awscli_preinstalled": False},
+    "debian13": {"is_windows": False, "package_manager": "apt", "ec2_user": "admin", "awscli_preinstalled": False},
     "windows2019": {"is_windows": True, "package_manager": None, "ec2_user": "Administrator", "awscli_preinstalled": None},
     "windows2022": {"is_windows": True, "package_manager": None, "ec2_user": "Administrator", "awscli_preinstalled": None},
     "windows2025": {"is_windows": True, "package_manager": None, "ec2_user": "Administrator", "awscli_preinstalled": None},
@@ -98,6 +100,8 @@ def base_os_instance_check(base_os: str, instance_type: str, architecture: str, 
         "ubuntu2404": ec2_instances_unsupported_ubuntu2404,
         "ubuntu2604": ec2_instances_unsupported_ubuntu2604,
         "opensuse16": ec2_instances_unsupported_opensuse16,
+        "debian12": ec2_instances_unsupported_debian12,
+        "debian13": ec2_instances_unsupported_debian13,
         "windows2019": ec2_instances_unsupported_windows2019,
         "windows2022": ec2_instances_unsupported_windows2022,
         "windows2025": ec2_instances_unsupported_windows2025,
@@ -463,6 +467,17 @@ def ec2_placement_group_check(instance_type: str, placement_group_strategy: str,
 # relationship. Both architectures publish under one Name pattern with
 # the "x86_64"/"arm64" token embedded but easily wildcarded, same trick
 # as Rocky/Ubuntu above -- verified directly against both AMIs live.
+# Debian 12/13 are NOT Marketplace-gated (official Debian Project AMIs,
+# owner 136693071363, no ProductCodes entry). Their Name field encodes
+# architecture as "amd64"/"arm64" (same tokens as Ubuntu) sandwiched
+# between the major-version number and a build-id suffix, e.g.
+# "debian-13-amd64-20260509-2473" -- wildcarding those 3-character tokens
+# with "???64" matches both architectures under one pattern while
+# excluding the separate "debian-13-backports-amd64-*"/"-arm64-*" images,
+# which a bare "debian-13-*" pattern would incorrectly also match.
+# Verified live: both major versions publish real arm64 AMIs (no Graviton
+# restriction needed, same as opensuse16) with a standard 8GB root EBS
+# volume (no min-root-volume-size bump needed, unlike opensuse16).
 _AMI_CATALOG: dict[str, tuple[str, str]] = {
     "alinux2": ("137112412989", "amzn2-ami-hvm-2.0.*"),  # Amazon
     "al2023": ("137112412989", "al2023-ami-2023.*"),  # Amazon
@@ -475,6 +490,8 @@ _AMI_CATALOG: dict[str, tuple[str, str]] = {
     "ubuntu2404": ("099720109477", "ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-*-server-*"),  # Canonical
     "ubuntu2604": ("099720109477", "ubuntu/images/hvm-ssd-gp3/ubuntu-resolute-26.04-*-server-*"),  # Canonical
     "opensuse16": ("679593333241", "openSUSE-Leap-16-0-v*"),  # openSUSE Project
+    "debian12": ("136693071363", "debian-12-???64-*"),  # Debian Project
+    "debian13": ("136693071363", "debian-13-???64-*"),  # Debian Project
     "windows2019": ("801119661308", "Windows_Server-2019-English-Full-Base-*"),
     "windows2022": ("801119661308", "Windows_Server-2022-English-Full-Base-*"),
     "windows2025": ("801119661308", "Windows_Server-2025-English-Full-Base-*"),
@@ -635,6 +652,8 @@ ec2_instances_unsupported_rocky10 = null_list
 ec2_instances_unsupported_ubuntu2404 = null_list
 ec2_instances_unsupported_ubuntu2604 = null_list
 ec2_instances_unsupported_opensuse16 = null_list
+ec2_instances_unsupported_debian12 = null_list
+ec2_instances_unsupported_debian13 = null_list
 ec2_instances_unsupported_windows2019 = ["a1.", "f1."]
 ec2_instances_unsupported_windows2022 = ["a1.", "f1."]
 ec2_instances_unsupported_windows2025 = ["a1.", "f1."]

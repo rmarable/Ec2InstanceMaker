@@ -64,6 +64,8 @@ interface:
   * Ubuntu 24.04LTS
   * Ubuntu 26.04LTS
   * openSUSE Leap 16.0
+  * Debian 12 (Bookworm)
+  * Debian 13 (Trixie)
   * Windows Server 2019
   * Windows Server 2022
   * Windows Server 2025
@@ -364,7 +366,7 @@ $ ./make_instance.py -h
 usage: make_instance.py [-h] --az AZ --instance_name INSTANCE_NAME
                         --instance_owner INSTANCE_OWNER --instance_owner_email
                         INSTANCE_OWNER_EMAIL
-                        [--base_os {al2023,alinux2,alma9,alma10,rhel9,rhel10,rocky9,rocky10,ubuntu2404,ubuntu2604,windows2019,windows2022,windows2025}]
+                        [--base_os {al2023,alinux2,alma9,alma10,rhel9,rhel10,rocky9,rocky10,ubuntu2404,ubuntu2604,opensuse16,debian12,debian13,windows2019,windows2022,windows2025}]
                         [--count COUNT] [--custom_ami CUSTOM_AMI]
                         [--custom_user_scripts CUSTOM_USER_SCRIPTS]
                         [--debug_mode {true,false}]
@@ -391,7 +393,8 @@ usage: make_instance.py [-h] --az AZ --instance_name INSTANCE_NAME
                         [--placement_group_strategy {cluster,spread}]
                         [--preserve_ami {true,false}]
                         [--preserve_cloudwatch_logs {true,false}]
-                        [--project_id PROJECT_ID] [--public_ip PUBLIC_IP]
+                        [--rollback_on_failure {true,false}]
+                        [--project_id PROJECT_ID] [--public_ip {true,false}]
                         [--security_group SECURITY_GROUP]
                         [--spot_buffer SPOT_BUFFER]
                         [--ssh_allowed_ips SSH_ALLOWED_IPS]
@@ -410,7 +413,7 @@ options:
                         (REQUIRED)
   --instance_owner_email INSTANCE_OWNER_EMAIL, -E INSTANCE_OWNER_EMAIL
                         Email address of the instance_owner (REQUIRED)
-  --base_os {al2023,alinux2,alma9,alma10,rhel9,rhel10,rocky9,rocky10,ubuntu2404,ubuntu2604,windows2019,windows2022,windows2025}, -B {al2023,alinux2,alma9,alma10,rhel9,rhel10,rocky9,rocky10,ubuntu2404,ubuntu2604,windows2019,windows2022,windows2025}
+  --base_os {al2023,alinux2,alma9,alma10,rhel9,rhel10,rocky9,rocky10,ubuntu2404,ubuntu2604,opensuse16,debian12,debian13,windows2019,windows2022,windows2025}, -B {al2023,alinux2,alma9,alma10,rhel9,rhel10,rocky9,rocky10,ubuntu2404,ubuntu2604,opensuse16,debian12,debian13,windows2019,windows2022,windows2025}
                         instance base operating system (default = al2023
                         a.k.a. Amazon Linux 2023)
   --count COUNT, -C COUNT
@@ -453,7 +456,7 @@ options:
                         using the "cluster" strategy (default = false)
   --hyperthreading {true,false}, -H {true,false}
                         enable Intel Hyperthreading (default = true)
-  --iam_json_policy {MinimalEc2InstancePolicy.json,GenericEc2InstancePolicy.json,ExtendedEc2InstancePolicy.json}, -J ...
+  --iam_json_policy {MinimalEc2InstancePolicy.json,GenericEc2InstancePolicy.json,ExtendedEc2InstancePolicy.json}, -J {MinimalEc2InstancePolicy.json,GenericEc2InstancePolicy.json,ExtendedEc2InstancePolicy.json}
                         Use a pre-existing JSON policy document in the
                         /templates subdirectory to set permissions for
                         iam_role (default = GenericEc2InstancePolicy.json
@@ -488,9 +491,12 @@ options:
   --preserve_cloudwatch_logs {true,false}
                         Preserve the CloudWatch Logs group when the
                         instance(s) are terminated (default = false)
+  --rollback_on_failure {true,false}
+                        Automatically tear down anything this build created if
+                        any phase fails (default = false)
   --project_id PROJECT_ID, -P PROJECT_ID
                         Project name or ID number (default = UNDEFINED)
-  --public_ip PUBLIC_IP, -p PUBLIC_IP
+  --public_ip {true,false}, -p {true,false}
                         Attach a public IP address to the instance(s) (default
                         = true)
   --security_group SECURITY_GROUP, -S SECURITY_GROUP
@@ -653,11 +659,13 @@ CLI](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manage
 must be installed locally (separate from the AWS CLI itself) — `aws ssm
 start-session` fails without it. The instance's SSM Agent must also be
 registered, which normally happens automatically at boot for every
-`base_os` this toolkit supports — `rhel9`, `rhel10`, `rocky9`, and
-`rocky10`'s standard AMIs don't preinstall it, so Ec2InstanceMaker
-installs and enables it via cloud-init for those four specifically, and
-`ubuntu2604` is a fifth case (AWS's preinstalled-agent list stops at
-25.04) installed the same way via Canonical's snap package instead.
+`base_os` this toolkit supports — `rhel9`, `rhel10`, `rocky9`, `rocky10`,
+and `opensuse16`'s standard AMIs don't preinstall it, so Ec2InstanceMaker
+installs and enables it via cloud-init for those five specifically;
+`ubuntu2604` is a sixth case (AWS's preinstalled-agent list stops at
+25.04) installed the same way via Canonical's snap package instead; and
+`debian12`/`debian13` are a seventh case, installed via AWS's published
+`.deb` package (Debian's official AMI doesn't ship the agent either).
 
 `$ ./access_instance.py -N fam01 -m 3`
 

@@ -470,14 +470,16 @@ class TestAccessInstanceWindowsRdpTunnel:
 
 
 class TestInstanceUserdataSsmAgentInstall:
-    """RHEL/Rocky/openSUSE's standard AMIs don't preinstall the SSM Agent
-    (unlike AL2023/AlmaLinux/Windows/most Ubuntu releases -- verified
+    """RHEL/Rocky/openSUSE/Debian's standard AMIs don't preinstall the SSM
+    Agent (unlike AL2023/AlmaLinux/Windows/most Ubuntu releases -- verified
     against AWS's own docs), so access_instance.py's SSM Session Manager
     connection would silently never register on those base_os values
     without this cloud-init install step. Ubuntu 26.04 is a separate case:
     AWS's preinstalled-agent list stops at 25.04, so 26.04 needs the same
     forced install, but via Canonical's snap package -- Ubuntu has no RPM
-    equivalent.
+    equivalent. Debian is a third case again: AWS publishes a .deb for it,
+    but (unlike dnf/rpm) dpkg can't install directly from a URL, so it has
+    to be curl'd to a temp file first, then dpkg -i'd.
     """
 
     def test_rhel_and_rocky_get_the_install_step(self):
@@ -493,6 +495,15 @@ class TestInstanceUserdataSsmAgentInstall:
         assert "amazon-ssm-agent.rpm" in rendered
         assert "systemctl enable --now amazon-ssm-agent" in rendered
         assert "dnf install" not in rendered
+
+    def test_debian_gets_the_install_step_via_dpkg_not_apt_get(self):
+        # Debian's official AMI has no amazon-ssm-agent apt package -- unlike
+        # the ubuntu2604 branch below, this must dpkg -i a downloaded .deb.
+        for base_os in ("debian12", "debian13"):
+            rendered = render({"base_os": base_os, "package_manager": "apt"})["instance_userdata.j2"]
+            assert "amazon-ssm-agent.deb" in rendered
+            assert "dpkg -i" in rendered
+            assert "systemctl enable --now amazon-ssm-agent" in rendered
 
     def test_other_base_os_values_do_not_get_it(self):
         rendered = render({"base_os": "al2023"})["instance_userdata.j2"]
@@ -518,6 +529,15 @@ class TestInstanceUserdataSsmAgentInstall:
     def test_x86_64_uses_the_amd64_package(self):
         rendered = render({"base_os": "rocky9", "architecture": "x86_64"})["instance_userdata.j2"]
         assert "linux_amd64/amazon-ssm-agent.rpm" in rendered
+
+    def test_debian_arm64_uses_the_debian_arm64_package(self):
+        rendered = render({"base_os": "debian13", "package_manager": "apt", "architecture": "arm64"})["instance_userdata.j2"]
+        assert "debian_arm64/amazon-ssm-agent.deb" in rendered
+        assert "debian_amd64" not in rendered
+
+    def test_debian_x86_64_uses_the_debian_amd64_package(self):
+        rendered = render({"base_os": "debian13", "package_manager": "apt", "architecture": "x86_64"})["instance_userdata.j2"]
+        assert "debian_amd64/amazon-ssm-agent.deb" in rendered
 
 
 class TestInstanceUserdataAwsCliInstall:
@@ -600,9 +620,9 @@ class TestCloudWatchAgentInstall:
     """The CloudWatch Agent's install method genuinely differs by OS family
     (verified against AWS's live docs, not recalled) -- AL2023/AmazonLinux2
     have it in their own yum repo, RHEL/Rocky/AlmaLinux/openSUSE need the
-    "redhat" S3-hosted rpm, Ubuntu needs the "ubuntu" S3-hosted deb. Getting
-    the wrong one silently means no logs ship on 9 of the 14 supported
-    base_os values.
+    "redhat" S3-hosted rpm, Ubuntu/Debian need the "ubuntu" S3-hosted deb.
+    Getting the wrong one silently means no logs ship on most of the 16
+    supported base_os values.
     """
 
     def test_al2023_installs_via_yum_repo(self):
@@ -637,6 +657,40 @@ class TestCloudWatchAgentInstall:
         rendered = render({"base_os": "ubuntu2404", "package_manager": "apt", "architecture": "x86_64"})["instance_userdata.j2"]
         assert "amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb" in rendered
         assert "dpkg -i -E -G /tmp/amazon-cloudwatch-agent.deb" in rendered
+
+    def test_debian_reuses_the_ubuntu_deb(self):
+        # No confirmed AWS-hosted "debian"-specific package path exists --
+        # same reasoning as opensuse16 reusing the "redhat" rpm above.
+        rendered = render({"base_os": "debian13", "package_manager": "apt", "architecture": "x86_64"})["instance_userdata.j2"]
+        assert "amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb" in rendered
+        assert "dpkg -i -E -G /tmp/amazon-cloudwatch-agent.deb" in rendered
+
+    def test_debian_installs_and_enables_rsyslog(self):
+        # Debian's official AMI does not ship rsyslog, so /var/log/syslog
+        # never exists -- confirmed by a real live build (see
+        # planning_docs/DEBIAN-PLANNING.md's live-test findings) -- which
+        # means the CloudWatch Agent's syslog log source would silently
+        # ship nothing without this.
+        for base_os in ("debian12", "debian13"):
+            rendered = render({"base_os": base_os, "package_manager": "apt"})["instance_userdata.j2"]
+            assert "apt-get install -y rsyslog" in rendered
+            assert "systemctl enable --now rsyslog" in rendered
+
+    def test_debian_rsyslog_installed_before_cloudwatch_agent(self):
+        rendered = render({"base_os": "debian13", "package_manager": "apt"})["instance_userdata.j2"]
+        rsyslog_idx = rendered.index("apt-get install -y rsyslog")
+        agent_idx = rendered.index("dpkg -i -E -G /tmp/amazon-cloudwatch-agent.deb")
+        assert rsyslog_idx < agent_idx
+
+    def test_debian_rsyslog_not_installed_when_cloudwatch_logs_disabled(self):
+        # Nothing else in this toolkit needs /var/log/syslog to exist, so
+        # skip the install entirely rather than doing needless work.
+        rendered = render({"base_os": "debian13", "package_manager": "apt", "enable_cloudwatch_logs": "false"})["instance_userdata.j2"]
+        assert "rsyslog" not in rendered
+
+    def test_other_base_os_values_do_not_get_rsyslog(self):
+        rendered = render({"base_os": "ubuntu2404", "package_manager": "apt"})["instance_userdata.j2"]
+        assert "rsyslog" not in rendered
 
     def test_agent_config_applied_after_install(self):
         rendered = render({"base_os": "al2023"})["instance_userdata.j2"]

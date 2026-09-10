@@ -107,7 +107,7 @@ CI installs it the same way (`.github/workflows/lint.yml`).
   `{% %}`/`{{ }}` syntax. This script renders every template (via
   `template_engine.py`, the same code `make_instance.py` calls) with a
   set of synthetic contexts chosen to hit the major conditional branches
-  (currently 15 — every `base_os` value covered at least once, plus
+  (currently 17 — every `base_os` value covered at least once, plus
   ondemand/spot, single/family, EBS encryption, placement groups, a
   secondary EBS device volume, and a Graviton/arm64 instance_type), then
   lints the
@@ -132,11 +132,11 @@ CI installs it the same way (`.github/workflows/lint.yml`).
   A real `terraform init` costs ~8s of subprocess overhead even with a
   warm plugin cache (confirmed by timing it directly) — since every
   scenario's `provider_aws.tf` renders an identical `required_providers`
-  block, only the first of the 15 scenarios actually runs `terraform
+  block, only the first of the 17 scenarios actually runs `terraform
   init`; every other scenario copies that one's already-initialized
   `.terraform/` + `.terraform.lock.hcl` instead (`lint_terraform_dir()`'s
   `cached_init_dir` parameter) rather than re-resolving the same,
-  already-cached provider from scratch 14 more times. The remaining 14
+  already-cached provider from scratch 16 more times. The remaining 16
   scenarios (independent of each other and of the one used for the real
   init) run concurrently via a `ThreadPoolExecutor` — `subprocess.run`
   releases the GIL for the actual wait, which is nearly all the
@@ -148,7 +148,7 @@ CI installs it the same way (`.github/workflows/lint.yml`).
   to HCL2 canonical formatting (no legacy `"${...}"` wrapping around a whole
   attribute value, `=` columns aligned per contiguous attribute run) so every
   rendered `.tf` file is fmt-clean with no rewrite needed. If you touch either
-  template, re-run `scripts/lint_templates.py` across all 15 `CONTEXTS`
+  template, re-run `scripts/lint_templates.py` across all 17 `CONTEXTS`
   scenarios and keep it that way — don't reintroduce misalignment.
 
 ## Which document owns what
@@ -309,6 +309,22 @@ Marketplace product ("openSUSE Leap (ARM)"), so both listings need a
 one-time subscription before launch (see README.md's Troubleshooting
 section) even though they share one catalog entry here.
 
+`debian12`/`debian13` were added the same way and verified live the same
+way — both are official Debian Project AMIs, owner `136693071363`, NOT
+Marketplace-gated (no `ProductCodes` entry, unlike Rocky/openSUSE16). Name
+pattern `debian-1{2,3}-???64-*`: Debian's AMI names embed the architecture
+token between the major version and a build-id suffix (e.g.
+`debian-13-amd64-20260509-2473`), and the `???` wildcard matches both
+`amd`/`arm` while deliberately excluding the separate
+`debian-13-backports-amd64-*`/`-arm64-*` images a bare `debian-13-*`
+pattern would incorrectly also match. Both publish real arm64 AMIs (no
+Graviton restriction, same as opensuse16) with a standard 8GB root EBS
+volume (unlike opensuse16, no root-volume-size floor was needed). Simpler
+addition than opensuse16 in one respect: `debian12`/`debian13` reuse the
+existing `"apt"` `package_manager` value (same as Ubuntu) rather than
+introducing a new one, so none of the `build_instance.j2`/AWS CLI-install
+`elif`-chain work below was needed for them.
+
 `BASE_OS_FAMILIES` / `get_base_os_family(base_os)` is the single source of
 truth for `is_windows`, `package_manager` (`"yum"`/`"apt"`/`"zypper"`/
 `None`), `ec2_user`, and `awscli_preinstalled`. Before this existed, each of
@@ -336,7 +352,18 @@ not rely on an `else` catching it correctly. `opensuse16`'s SSM Agent
 install reuses the RHEL/Rocky RPM but via `rpm -i` directly (no `dnf` on
 openSUSE); its CloudWatch Agent install reuses the "redhat" S3-hosted RPM
 outright (no confirmed separate "suse" package path exists, and the RPM
-itself has no RHEL-specific dependencies).
+itself has no RHEL-specific dependencies). `debian12`/`debian13`'s
+CloudWatch Agent install needed no new branch at all — they fall through
+the existing `package_manager == 'apt'` case (the same "ubuntu" S3-hosted
+`.deb` Ubuntu already uses) automatically. Their SSM Agent install *did*
+need a new branch, since Debian's official AMI doesn't ship it
+preinstalled either: unlike `dnf`/`rpm`, `dpkg` can't install directly
+from a URL, so this one downloads the AWS-published `.deb`
+(`.../latest/debian_amd64/` or `debian_arm64/amazon-ssm-agent.deb` — same
+S3 bucket/path shape as the existing RPM branches, just a different OS
+segment) to a temp file first, then `dpkg -i`s it — one shared
+`elif base_os in ('debian12', 'debian13')` branch, since the install path
+is keyed on OS family and architecture, not Debian major version.
 
 **`instance_builder.py`** holds the build-flow logic extracted out of
 `make_instance.py`'s original ~1200-line, function-free linear script (see

@@ -42,6 +42,8 @@ class TestGetBaseOsFamily:
             ("ubuntu2404", "ubuntu"),
             ("ubuntu2604", "ubuntu"),
             ("opensuse16", "ec2-user"),
+            ("debian12", "admin"),
+            ("debian13", "admin"),
             ("windows2019", "Administrator"),
             ("windows2022", "Administrator"),
             ("windows2025", "Administrator"),
@@ -57,7 +59,7 @@ class TestGetBaseOsFamily:
     def test_is_windows_matches_base_os_name(self, base_os, expected_is_windows):
         assert aux_data.get_base_os_family(base_os)["is_windows"] == expected_is_windows
 
-    @pytest.mark.parametrize("base_os", ["ubuntu2404", "ubuntu2604"])
+    @pytest.mark.parametrize("base_os", ["ubuntu2404", "ubuntu2604", "debian12", "debian13"])
     def test_apt_family(self, base_os):
         assert aux_data.get_base_os_family(base_os)["package_manager"] == "apt"
 
@@ -73,7 +75,7 @@ class TestGetBaseOsFamily:
     def test_awscli_preinstalled_only_on_amazon_linux(self, base_os):
         assert aux_data.get_base_os_family(base_os)["awscli_preinstalled"] is True
 
-    @pytest.mark.parametrize("base_os", ["alma9", "alma10", "rhel9", "rhel10", "rocky9", "rocky10", "ubuntu2404", "ubuntu2604", "opensuse16"])
+    @pytest.mark.parametrize("base_os", ["alma9", "alma10", "rhel9", "rhel10", "rocky9", "rocky10", "ubuntu2404", "ubuntu2604", "opensuse16", "debian12", "debian13"])
     def test_awscli_not_preinstalled_elsewhere_on_linux(self, base_os):
         assert aux_data.get_base_os_family(base_os)["awscli_preinstalled"] is False
 
@@ -110,6 +112,13 @@ class TestBaseOsInstanceCheck:
         # the windows-only Graviton rejection above.
         aux_data.base_os_instance_check("opensuse16", "m6g.large", "arm64", "false")
 
+    def test_debian_graviton_passes(self):
+        # Debian 12/13 both publish real arm64 AMIs (verified live, see
+        # aux_data.py's _AMI_CATALOG comment), so neither is restricted the
+        # way Windows is.
+        aux_data.base_os_instance_check("debian12", "m6g.large", "arm64", "false")
+        aux_data.base_os_instance_check("debian13", "m6g.large", "arm64", "false")
+
     def test_windows_f1_rejected(self, capsys):
         with pytest.raises(SystemExit):
             aux_data.base_os_instance_check("windows2019", "f1.2xlarge", "x86_64", "false")
@@ -139,13 +148,15 @@ class TestBaseOsInstanceCheck:
             "ubuntu2404",
             "ubuntu2604",
             "opensuse16",
+            "debian12",
+            "debian13",
             "windows2019",
             "windows2022",
             "windows2025",
         ],
     )
     def test_every_supported_base_os_has_no_restrictions_on_a_generic_instance(self, base_os):
-        # None of the 14 current base_os values have documented instance-type
+        # None of the 16 current base_os values have documented instance-type
         # restrictions beyond the generic Windows/Graviton rule, so a boring
         # x86_64 instance type should always pass.
         aux_data.base_os_instance_check(base_os, "m5.large", "x86_64", "false")

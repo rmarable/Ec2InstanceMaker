@@ -27,8 +27,17 @@ bootcmd:
 {% elif base_os == 'ubuntu2604' %}
 {% set _ = runcmd_items.append('snap install amazon-ssm-agent --classic') %}
 {% set _ = runcmd_items.append('snap start amazon-ssm-agent') %}
+{% elif base_os in ('debian12', 'debian13') %}
+{% set _ = runcmd_items.append('curl "https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/debian_' + ('arm64' if architecture == 'arm64' else 'amd64') + '/amazon-ssm-agent.deb" -o "/tmp/amazon-ssm-agent.deb"') %}
+{% set _ = runcmd_items.append('dpkg -i /tmp/amazon-ssm-agent.deb') %}
+{% set _ = runcmd_items.append('rm -f /tmp/amazon-ssm-agent.deb') %}
+{% set _ = runcmd_items.append('systemctl enable --now amazon-ssm-agent') %}
 {% endif %}
 {% if enable_cloudwatch_logs == 'true' %}
+{% if base_os in ('debian12', 'debian13') %}
+{% set _ = runcmd_items.append('apt-get install -y rsyslog') %}
+{% set _ = runcmd_items.append('systemctl enable --now rsyslog') %}
+{% endif %}
 {% if base_os in ('al2023', 'alinux2') %}
 {% set _ = runcmd_items.append('yum install -y amazon-cloudwatch-agent') %}
 {% elif package_manager in ('yum', 'zypper') %}

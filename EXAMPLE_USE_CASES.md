@@ -47,6 +47,12 @@ see README.md's Troubleshooting section.
 
 `$ ./make_instance.py -N dev14 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=opensuse16`
 
+### Debian 12 (Bookworm)
+`$ ./make_instance.py -N dev15 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=debian12`
+
+### Debian 13 (Trixie)
+`$ ./make_instance.py -N dev16 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=debian13`
+
 ### Windows Server 2022
 `$ ./make_instance.py -N dev09 -O rmarable -E rodney.marable@gmail.com -A us-east-1b -T t3a.micro --base_os=windows2022`
 
