@@ -97,6 +97,7 @@ class TestValidateAndResizeEbsVolumes:
             ebs_root_volume_iops=0,
             ebs_device_volume_iops=0,
             is_windows=False,
+            base_os="al2023",
             refer_to_docs_and_quit=_quitting_mock(),
         )
         assert (root, device) == (8, 0)
@@ -112,6 +113,7 @@ class TestValidateAndResizeEbsVolumes:
                 ebs_root_volume_iops=0,
                 ebs_device_volume_iops=0,
                 is_windows=False,
+                base_os="al2023",
                 refer_to_docs_and_quit=quit_fn,
             )
         assert "Maximum allowed EBS volume size" in quit_fn.call_args.args[0]
@@ -127,6 +129,7 @@ class TestValidateAndResizeEbsVolumes:
                 ebs_root_volume_iops=0,
                 ebs_device_volume_iops=0,
                 is_windows=False,
+                base_os="al2023",
                 refer_to_docs_and_quit=quit_fn,
             )
         assert "secondary EBS device volume size" in quit_fn.call_args.args[0]
@@ -140,6 +143,7 @@ class TestValidateAndResizeEbsVolumes:
             ebs_root_volume_iops=0,
             ebs_device_volume_iops=0,
             is_windows=True,
+            base_os="windows2022",
             refer_to_docs_and_quit=_quitting_mock(),
         )
         assert (root, device) == (30, 30)
@@ -153,6 +157,7 @@ class TestValidateAndResizeEbsVolumes:
             ebs_root_volume_iops=0,
             ebs_device_volume_iops=0,
             is_windows=True,
+            base_os="windows2022",
             refer_to_docs_and_quit=_quitting_mock(),
         )
         assert (root, device) == (100, 50)
@@ -166,9 +171,59 @@ class TestValidateAndResizeEbsVolumes:
             ebs_root_volume_iops=0,
             ebs_device_volume_iops=0,
             is_windows=False,
+            base_os="al2023",
             refer_to_docs_and_quit=_quitting_mock(),
         )
         assert (root, device) == (8, 0)
+
+    def test_opensuse16_bumps_undersized_root_to_10gb(self):
+        # Regression test for a real RunInstances failure found via a live
+        # build: openSUSE Leap 16.0's AMI snapshot is 10 GB, so the
+        # toolkit's generic 8 GB Linux default fails with
+        # InvalidBlockDeviceMapping. Unlike Windows, only the root volume is
+        # bumped -- the device volume has no such AMI-snapshot constraint.
+        root, device = instance_builder.validate_and_resize_ebs_volumes(
+            ebs_root_volume_size=8,
+            ebs_device_volume_size=0,
+            ebs_root_volume_type="gp2",
+            ebs_device_volume_type="gp2",
+            ebs_root_volume_iops=0,
+            ebs_device_volume_iops=0,
+            is_windows=False,
+            base_os="opensuse16",
+            refer_to_docs_and_quit=_quitting_mock(),
+        )
+        assert (root, device) == (10, 0)
+
+    def test_opensuse16_does_not_shrink_a_larger_root_volume(self):
+        root, _ = instance_builder.validate_and_resize_ebs_volumes(
+            ebs_root_volume_size=20,
+            ebs_device_volume_size=0,
+            ebs_root_volume_type="gp2",
+            ebs_device_volume_type="gp2",
+            ebs_root_volume_iops=0,
+            ebs_device_volume_iops=0,
+            is_windows=False,
+            base_os="opensuse16",
+            refer_to_docs_and_quit=_quitting_mock(),
+        )
+        assert root == 20
+
+    def test_opensuse16_does_not_bump_the_device_volume(self):
+        # A secondary/device volume is not restored from the AMI snapshot,
+        # so it has no minimum-size constraint here.
+        _, device = instance_builder.validate_and_resize_ebs_volumes(
+            ebs_root_volume_size=10,
+            ebs_device_volume_size=1,
+            ebs_root_volume_type="gp2",
+            ebs_device_volume_type="gp2",
+            ebs_root_volume_iops=0,
+            ebs_device_volume_iops=0,
+            is_windows=False,
+            base_os="opensuse16",
+            refer_to_docs_and_quit=_quitting_mock(),
+        )
+        assert device == 1
 
     def test_io1_requires_root_iops_in_range(self):
         quit_fn = _quitting_mock()
@@ -181,6 +236,7 @@ class TestValidateAndResizeEbsVolumes:
                 ebs_root_volume_iops=0,
                 ebs_device_volume_iops=100,
                 is_windows=False,
+                base_os="al2023",
                 refer_to_docs_and_quit=quit_fn,
             )
         assert "ebs_root_volume_iops" in quit_fn.call_args.args[0]
@@ -201,6 +257,7 @@ class TestValidateAndResizeEbsVolumes:
                 ebs_root_volume_iops=16001,
                 ebs_device_volume_iops=100,
                 is_windows=False,
+                base_os="al2023",
                 refer_to_docs_and_quit=quit_fn,
             )
         assert "ebs_root_volume_iops" in quit_fn.call_args.args[0]
@@ -216,6 +273,7 @@ class TestValidateAndResizeEbsVolumes:
                 ebs_root_volume_iops=100,
                 ebs_device_volume_iops=16001,
                 is_windows=False,
+                base_os="al2023",
                 refer_to_docs_and_quit=quit_fn,
             )
         assert "ebs_device_volume_iops" in quit_fn.call_args.args[0]
@@ -235,6 +293,7 @@ class TestValidateAndResizeEbsVolumes:
                 ebs_root_volume_iops=0,
                 ebs_device_volume_iops=0,
                 is_windows=False,
+                base_os="al2023",
                 refer_to_docs_and_quit=quit_fn,
             )
         assert "ebs_device_volume_iops" in quit_fn.call_args.args[0]
@@ -250,6 +309,7 @@ class TestValidateAndResizeEbsVolumes:
             ebs_root_volume_iops=100,
             ebs_device_volume_iops=0,
             is_windows=False,
+            base_os="al2023",
             refer_to_docs_and_quit=_quitting_mock(),
         )
         assert (root, device) == (8, 0)
@@ -263,6 +323,7 @@ class TestValidateAndResizeEbsVolumes:
             ebs_root_volume_iops=100,
             ebs_device_volume_iops=100,
             is_windows=False,
+            base_os="al2023",
             refer_to_docs_and_quit=_quitting_mock(),
         )
         assert (root, device) == (8, 0)
@@ -277,6 +338,7 @@ class TestValidateAndResizeEbsVolumes:
             ebs_root_volume_iops=0,
             ebs_device_volume_iops=0,
             is_windows=False,
+            base_os="al2023",
             refer_to_docs_and_quit=_quitting_mock(),
         )
         assert (root, device) == (8, 0)
@@ -1646,6 +1708,7 @@ class TestEbsValidationGaps:
             "ebs_root_volume_iops": 0,
             "ebs_device_volume_iops": 0,
             "is_windows": False,
+            "base_os": "al2023",
             "refer_to_docs_and_quit": _quitting_mock(),
         }
         kwargs.update(overrides)

@@ -538,6 +538,7 @@ def resolve_network_and_compute(
         ebs.root_volume_iops,
         ebs.device_volume_iops,
         is_windows,
+        settings.base_os,
         refer_to_docs_and_quit,
     )
 

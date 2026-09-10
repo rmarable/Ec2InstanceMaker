@@ -127,9 +127,10 @@ def generate_sns_timestamps(now: DateTime | None = None) -> tuple[str, str]:
 
 # Function: validate_and_resize_ebs_volumes()
 # Purpose: enforce the 16 TB EBS size ceiling, bump undersized root/device
-# volumes up to AWS's recommended 30 GB minimum for Windows Server, and
-# validate provisioned-IOPS bounds for whichever of the root/device volumes
-# is actually "io1" -- root_volume_type and device_volume_type are
+# volumes up to AWS's recommended 30 GB minimum for Windows Server (and the
+# root volume specifically up to openSUSE Leap 16.0's AMI snapshot minimum),
+# and validate provisioned-IOPS bounds for whichever of the root/device
+# volumes is actually "io1" -- root_volume_type and device_volume_type are
 # independently selectable CLI flags, so each must be checked against its
 # own type, not the other's (a real bug found during an adversarial
 # review: this used to gate both IOPS checks on ebs_root_volume_type alone,
@@ -137,7 +138,17 @@ def generate_sns_timestamps(now: DateTime | None = None) -> tuple[str, str]:
 # bounds validated -- or an IOPS value at all, since
 # DEFAULT_EC2_TEMPLATE.j2's device ebs_block_device had the identical bug,
 # fixed alongside this).
-# Returns the (possibly Windows-adjusted) root/device volume sizes.
+# Returns the (possibly adjusted) root/device volume sizes.
+
+# openSUSE Leap 16.0's published AMI (see aux_data.py's _AMI_CATALOG) is
+# built from a snapshot AWS itself sized at 10 GB -- RunInstances hard-fails
+# with InvalidBlockDeviceMapping if the root volume requested is smaller
+# than the snapshot it's restored from. Found via a real, live build attempt
+# using this toolkit's own Linux default (8 GB); unlike Windows's 30 GB
+# recommendation, this is a hard AWS constraint of this one AMI, not a
+# general recommendation, so only the root volume is bumped, not the device
+# volume too.
+_OPENSUSE16_MIN_ROOT_VOLUME_SIZE = 10
 
 
 def validate_and_resize_ebs_volumes(
@@ -148,6 +159,7 @@ def validate_and_resize_ebs_volumes(
     ebs_root_volume_iops: int,
     ebs_device_volume_iops: int,
     is_windows: bool,
+    base_os: str,
     refer_to_docs_and_quit: QuitFn,
 ) -> tuple[int, int]:
     if ebs_root_volume_size > 16000:
@@ -159,6 +171,8 @@ def validate_and_resize_ebs_volumes(
             ebs_root_volume_size = 30
         if ebs_device_volume_size <= 30:
             ebs_device_volume_size = 30
+    if base_os == "opensuse16" and ebs_root_volume_size < _OPENSUSE16_MIN_ROOT_VOLUME_SIZE:
+        ebs_root_volume_size = _OPENSUSE16_MIN_ROOT_VOLUME_SIZE
     # These checks used to say "between 100 and 16,000" while only rejecting
     # 0 and >16000 -- so iops=1 and iops=-5 both sailed through and failed
     # later inside AWS with exactly the opaque error this function exists to
