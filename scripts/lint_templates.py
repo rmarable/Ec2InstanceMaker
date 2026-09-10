@@ -72,7 +72,7 @@ CONTEXTS: dict[str, dict[str, Any]] = {
         "count": 1,
         "custom_user_prelogin_scripts": ["default"],
         "custom_user_postboot_scripts": ["default"],
-        "enable_cloudwatch_logs": "true",
+        "enable_cloudwatch_logs": "false",
         "preserve_cloudwatch_logs": "false",
         "cloudwatch_log_group": "/ec2instancemaker/dev01",
         "debug_mode": "false",
@@ -129,7 +129,7 @@ CONTEXTS: dict[str, dict[str, Any]] = {
         "enable_cloudwatch_logs": "true",
         "preserve_cloudwatch_logs": "false",
         "cloudwatch_log_group": "/ec2instancemaker/dev02",
-        "debug_mode": "false",
+        "debug_mode": "true",
         "ebs_encryption": "false",
         "ebs_optimized": "true",
         "ebs_root_volume_size": 8,
@@ -160,7 +160,7 @@ CONTEXTS: dict[str, dict[str, Any]] = {
         "project_id": "UNDEFINED",
         "preserve_security_group": "false",
         "preserve_iam_role": "false",
-        "public_ip": "true",
+        "public_ip": "false",
         "region": "us-east-1",
         "spot_price": "UNDEFINED",
         "vpc_security_group_ids": "sg-0a1b2c3d4e5f60789",
@@ -264,10 +264,10 @@ CONTEXTS: dict[str, dict[str, Any]] = {
         "instance_serial_number": "45678901234567_us-east-1",
         "instance_serial_number_file": "./active_instances/dev03.serial",
         "placement_group_strategy": "UNDEFINED",
-        "preserve_ami": "true",
+        "preserve_ami": "false",
         "project_id": "UNDEFINED",
         "preserve_security_group": "false",
-        "preserve_iam_role": "false",
+        "preserve_iam_role": "true",
         "public_ip": "true",
         "region": "us-east-1",
         "spot_price": "UNDEFINED",
@@ -289,7 +289,7 @@ CONTEXTS: dict[str, dict[str, Any]] = {
         "custom_user_prelogin_scripts": ["default"],
         "custom_user_postboot_scripts": ["default"],
         "enable_cloudwatch_logs": "true",
-        "preserve_cloudwatch_logs": "false",
+        "preserve_cloudwatch_logs": "true",
         "cloudwatch_log_group": "/ec2instancemaker/fam03",
         "debug_mode": "false",
         "ebs_encryption": "false",
@@ -319,7 +319,7 @@ CONTEXTS: dict[str, dict[str, Any]] = {
         "instance_serial_number_file": "./active_instances/fam03.serial",
         "placement_group_strategy": "UNDEFINED",
         "preserve_ami": "true",
-        "project_id": "UNDEFINED",
+        "project_id": "apollo-17",
         "preserve_security_group": "false",
         "preserve_iam_role": "false",
         "public_ip": "true",
@@ -340,7 +340,7 @@ CONTEXTS: dict[str, dict[str, Any]] = {
         "package_manager": "apt",
         "awscli_preinstalled": False,
         "count": 3,
-        "custom_user_prelogin_scripts": ["default"],
+        "custom_user_prelogin_scripts": ["default", "motd"],
         "custom_user_postboot_scripts": ["default"],
         "enable_cloudwatch_logs": "true",
         "preserve_cloudwatch_logs": "false",
@@ -511,8 +511,8 @@ CONTEXTS: dict[str, dict[str, Any]] = {
         "package_manager": "yum",
         "awscli_preinstalled": False,
         "count": 1,
-        "custom_user_prelogin_scripts": ["default"],
-        "custom_user_postboot_scripts": ["default"],
+        "custom_user_prelogin_scripts": [],
+        "custom_user_postboot_scripts": [],
         "enable_cloudwatch_logs": "true",
         "preserve_cloudwatch_logs": "false",
         "cloudwatch_log_group": "/ec2instancemaker/dev12",
@@ -685,7 +685,7 @@ CONTEXTS: dict[str, dict[str, Any]] = {
         "ebs_root_volume_type": "gp2",
         "ebs_root_volume_iops": 0,
         "ebs_device_volume_size": 20,
-        "ebs_device_volume_type": "gp2",
+        "ebs_device_volume_type": "io1",
         "ebs_device_volume_iops": 0,
         "instance_type": "t3.micro",
         "ec2_keypair": "fam05-key",
@@ -853,13 +853,30 @@ def lint_python(path: str) -> tuple[bool, str]:
     result = subprocess.run(["ruff", "check", "--isolated", "--select=F821,F822,F823,E9", path], capture_output=True, text=True)
     if result.returncode != 0:
         return False, result.stdout + result.stderr
-    # The pre-commit bandit hook only ever scans the 4 hand-written top-level
-    # .py files -- it never sees generated code, which is exactly where
-    # shell=True + concatenated/interpolated data is most likely to end up
-    # (e.g. the SSH/get-password-data commands access_instance.j2 renders).
-    # Run the same -ll (Medium/High only) check here so that class of bug
-    # doesn't have a blind spot.
-    result = subprocess.run(["bandit", "-c", os.path.join(REPO_ROOT, "pyproject.toml"), "-ll", path], capture_output=True, text=True)
+    # The pre-commit bandit hook never sees generated code, which is exactly
+    # where shell=True plus interpolated data is most likely to end up (e.g.
+    # the terraform/get-password-data commands access_instance.j2 renders).
+    #
+    # Note the severity threshold: this deliberately does NOT use the -ll
+    # (Medium and High only) that the pre-commit hook uses. bandit rates
+    # subprocess-with-shell=True on a *literal* string as B602 Low, so -ll
+    # skipped every one of the four such calls in the rendered access
+    # script -- the precise thing this check exists to catch. Low is
+    # tolerable here because the corpus is small and machine-generated;
+    # the repo's own source keeps -ll, where Low is dominated by the
+    # inherent "this toolkit shells out to terraform/aws/jq" findings.
+    #
+    # B404 (import subprocess), B607 (partial executable path) and B603
+    # (list-form subprocess call) are excluded for that same inherent
+    # reason: every generated script shells out to terraform/aws/jq
+    # resolved from PATH, by design, and B603 fires on the *safe* list form
+    # this repo deliberately uses. B602 -- shell=True -- is the one that
+    # actually matters here and stays enabled.
+    result = subprocess.run(
+        ["bandit", "-c", os.path.join(REPO_ROOT, "pyproject.toml"), "--severity-level", "low", "--skip", "B404,B603,B607", path],
+        capture_output=True,
+        text=True,
+    )
     return result.returncode == 0, result.stdout + result.stderr
 
 

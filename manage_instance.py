@@ -238,7 +238,12 @@ def terminate_via_kill_script(
         return run_kill_script(["bash", kill_script]).returncode
 
 
-def main() -> NoReturn:
+def main(argv: list[str] | None = None) -> NoReturn:
+    # argv is a parameter for the same reason make_instance.main() takes
+    # one: so the CLI wiring below -- the mutually-exclusive action
+    # dispatch, the -c confirmation bypass, the --region requirement for
+    # --list-all, and the terminate delegation -- can be exercised without
+    # a subprocess. It had no direct test coverage at all before that.
     parser = argparse.ArgumentParser(description="manage_instance.py: start, stop, reboot, terminate, check status, or list Ec2InstanceMaker-built EC2 instances")
     parser.add_argument("--instance_name", "-N", help="name of the EC2 instance or family (required for all actions except --list-all)", required=False, default=None)
     parser.add_argument("--region", "-r", help="AWS region (default: read from ./vars_files/<instance_name>.yml; required for --list-all)", required=False, default=None)
@@ -249,7 +254,7 @@ def main() -> NoReturn:
     action_group.add_argument("--status", "-S", action="store_const", dest="action", const="status", help="report the status (including whether it's Spot) of --instance_name")
     action_group.add_argument("--list-all", "-l", action="store_const", dest="action", const="list-all", help="list every Ec2InstanceMaker-managed instance in --region")
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     instance_name: str | None = args.instance_name
     # argparse's own choices/const values are the only ones action can ever
     # hold, but argparse itself has no way to express that statically --

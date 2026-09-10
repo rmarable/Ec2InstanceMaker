@@ -364,3 +364,153 @@ class TestSpotLifecycleDoesNotFailOpen:
 
     def test_reboot_is_still_allowed_against_spot(self):
         manage_instance.check_spot_lifecycle_conflict([self._instance("i-1", lifecycle="spot")], "reboot", _quitting_mock())
+
+
+ONDEMAND_INSTANCE = {
+    "InstanceId": "i-ondemand01",
+    "InstanceType": "t3.micro",
+    "State": {"Name": "running"},
+    "Tags": [{"Key": "Name", "Value": "dev01"}],
+}
+SPOT_INSTANCE = {
+    "InstanceId": "i-spot01",
+    "InstanceType": "t3.micro",
+    "State": {"Name": "running"},
+    "InstanceLifecycle": "spot",
+    "Tags": [{"Key": "Name", "Value": "dev01"}],
+}
+
+
+class TestMainCliWiring:
+    """main() is 89 lines of CLI wiring and had no direct coverage at all.
+    Every function it calls was well tested; the dispatch between them was
+    not -- so the -c bypass, the --region requirement for --list-all, and
+    the terminate delegation were only ever exercised through
+    mcp_server.py's parallel wrappers, which do not share this code.
+    """
+
+    def _patch(self, monkeypatch, instances=None, client=None):
+        ec2_client = client or MagicMock()
+        monkeypatch.setattr(manage_instance.boto3, "client", MagicMock(return_value=ec2_client))
+        monkeypatch.setattr(manage_instance, "resolve_region", MagicMock(return_value="us-east-1"))
+        monkeypatch.setattr(manage_instance, "find_managed_instances", MagicMock(return_value=instances if instances is not None else [ONDEMAND_INSTANCE]))
+        return ec2_client
+
+    def test_terminate_delegates_to_the_kill_script_and_returns_its_code(self, monkeypatch):
+        terminate = MagicMock(return_value=3)
+        monkeypatch.setattr(manage_instance, "terminate_via_kill_script", terminate)
+
+        with pytest.raises(SystemExit) as exc:
+            manage_instance.main(["-N", "dev01", "-A", "terminate"])
+
+        assert exc.value.code == 3
+        terminate.assert_called_once_with("dev01", False, manage_instance.refer_to_docs_and_quit)
+
+    def test_terminate_passes_the_auto_confirm_bypass_through(self, monkeypatch):
+        terminate = MagicMock(return_value=0)
+        monkeypatch.setattr(manage_instance, "terminate_via_kill_script", terminate)
+
+        with pytest.raises(SystemExit):
+            manage_instance.main(["-N", "dev01", "-A", "terminate", "-c"])
+
+        assert terminate.call_args.args[1] is True
+
+    def test_list_all_requires_a_region(self):
+        with pytest.raises(SystemExit):
+            manage_instance.main(["-l"])
+
+    def test_list_all_lists_without_an_instance_name(self, monkeypatch):
+        self._patch(monkeypatch)
+        listed = MagicMock(return_value=[ONDEMAND_INSTANCE])
+        monkeypatch.setattr(manage_instance, "list_all_managed_instances", listed)
+
+        with pytest.raises(SystemExit) as exc:
+            manage_instance.main(["-l", "-r", "us-east-1"])
+
+        assert exc.value.code == 0
+        listed.assert_called_once()
+
+    def test_status_prints_and_exits_without_touching_power_state(self, monkeypatch):
+        ec2_client = self._patch(monkeypatch)
+
+        with pytest.raises(SystemExit) as exc:
+            manage_instance.main(["-N", "dev01", "-S"])
+
+        assert exc.value.code == 0
+        ec2_client.start_instances.assert_not_called()
+        ec2_client.stop_instances.assert_not_called()
+
+    def test_instance_name_is_required_for_a_power_action(self):
+        with pytest.raises(SystemExit):
+            manage_instance.main(["-A", "start"])
+
+    def test_action_is_required(self):
+        # -A/-S/-l are a required mutually exclusive group, so argparse
+        # exits 2 rather than running anything.
+        with pytest.raises(SystemExit) as exc:
+            manage_instance.main(["-N", "dev01"])
+        assert exc.value.code == 2
+
+    def test_start_with_auto_confirm_skips_the_prompt(self, monkeypatch):
+        ec2_client = self._patch(monkeypatch)
+        # input() would block forever if the bypass did not work.
+        monkeypatch.setattr("builtins.input", MagicMock(side_effect=AssertionError("prompted despite -c")))
+
+        with pytest.raises(SystemExit) as exc:
+            manage_instance.main(["-N", "dev01", "-A", "start", "-c"])
+
+        assert exc.value.code == 0
+        ec2_client.start_instances.assert_called_once_with(InstanceIds=["i-ondemand01"])
+
+    def test_declining_the_prompt_aborts_without_calling_aws(self, monkeypatch):
+        ec2_client = self._patch(monkeypatch)
+        monkeypatch.setattr("builtins.input", MagicMock(return_value="no"))
+
+        with pytest.raises(SystemExit) as exc:
+            manage_instance.main(["-N", "dev01", "-A", "stop"])
+
+        assert exc.value.code == 1
+        ec2_client.stop_instances.assert_not_called()
+
+    def test_confirming_the_prompt_proceeds(self, monkeypatch):
+        ec2_client = self._patch(monkeypatch)
+        monkeypatch.setattr("builtins.input", MagicMock(return_value="  YES  "))
+
+        with pytest.raises(SystemExit) as exc:
+            manage_instance.main(["-N", "dev01", "-A", "stop"])
+
+        assert exc.value.code == 0
+        ec2_client.stop_instances.assert_called_once()
+
+    def test_reboot_is_dispatched_to_reboot_instances(self, monkeypatch):
+        ec2_client = self._patch(monkeypatch)
+
+        with pytest.raises(SystemExit):
+            manage_instance.main(["-N", "dev01", "-A", "reboot", "-c"])
+
+        ec2_client.reboot_instances.assert_called_once_with(InstanceIds=["i-ondemand01"])
+
+    def test_an_aws_error_during_the_action_is_reported_cleanly(self, monkeypatch):
+        ec2_client = MagicMock()
+        ec2_client.start_instances.side_effect = ClientError({"Error": {"Code": "UnauthorizedOperation", "Message": "nope"}}, "StartInstances")
+        self._patch(monkeypatch, client=ec2_client)
+
+        with pytest.raises(SystemExit):
+            manage_instance.main(["-N", "dev01", "-A", "start", "-c"])
+
+    def test_a_spot_instance_blocks_start_before_any_aws_call(self, monkeypatch):
+        ec2_client = self._patch(monkeypatch, instances=[SPOT_INSTANCE])
+
+        with pytest.raises(SystemExit):
+            manage_instance.main(["-N", "dev01", "-A", "start", "-c"])
+
+        ec2_client.start_instances.assert_not_called()
+
+    def test_an_invalid_instance_name_is_refused_before_any_aws_call(self, monkeypatch):
+        find = MagicMock()
+        monkeypatch.setattr(manage_instance, "find_managed_instances", find)
+
+        with pytest.raises(SystemExit):
+            manage_instance.main(["-N", "../etc/passwd", "-A", "start", "-c"])
+
+        find.assert_not_called()

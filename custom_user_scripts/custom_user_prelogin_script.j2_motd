@@ -1,0 +1,35 @@
+#!/bin/bash
+#
+################################################################################
+# Name:		custom_user_prelogin_script.{{ instance_name }}.sh
+# Author:	{{ instance_owner_email }}
+#
+# Purpose:	PRE-LOGIN custom user script -- example "motd" module
+#
+# This is a worked example of the pre-login hook. It runs via cloud-init,
+# as root, before an operator can log in, so it should stay fast: anything
+# slow here delays everything else on the instance.
+#
+# Select it with:  --custom_user_scripts motd
+# Or alongside others:  --custom_user_scripts default,motd
+#
+# Like every template in this directory it is real Jinja2 and receives the
+# same variables the toolkit's own templates get -- see
+# custom_user_scripts/README.md for the full list.
+################################################################################
+
+cat <<'MOTD' > /etc/motd
+
+  {{ instance_name }} -- built by Ec2InstanceMaker
+  ------------------------------------------------------------------
+  Owner        : {{ instance_owner }}
+  Operating OS : {{ base_os }} ({{ architecture }})
+  Region       : {{ region }}
+  Deployed     : {{ DEPLOYMENT_DATE }}
+
+  Tear this instance down from the build host with:
+    ./kill-instance.{{ instance_name }}.sh
+
+MOTD
+
+chmod 0644 /etc/motd
