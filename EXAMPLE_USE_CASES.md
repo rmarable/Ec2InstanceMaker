@@ -40,6 +40,13 @@ Requires subscribing to the "Rocky Linux 10 (Official)" AWS Marketplace listing 
 ### Ubuntu 26.04 LTS
 `$ ./make_instance.py -N dev03 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=ubuntu2604`
 
+### openSUSE Leap 16.0
+
+Requires subscribing to the "openSUSE Leap" AWS Marketplace listing first --
+see README.md's Troubleshooting section.
+
+`$ ./make_instance.py -N dev14 -O rmarable -E rodney.marable@gmail.com -A us-east-1b --base_os=opensuse16`
+
 ### Windows Server 2022
 `$ ./make_instance.py -N dev09 -O rmarable -E rodney.marable@gmail.com -A us-east-1b -T t3a.micro --base_os=windows2022`
 

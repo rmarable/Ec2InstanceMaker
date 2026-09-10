@@ -63,11 +63,15 @@ interface:
   * Rocky Linux 10
   * Ubuntu 24.04LTS
   * Ubuntu 26.04LTS
+  * openSUSE Leap 16.0
   * Windows Server 2019
   * Windows Server 2022
   * Windows Server 2025
 
-    OpenSuse and SLES may be supported in future releases.
+    openSUSE Leap 16.0's AMI is AWS Marketplace-gated, same as Rocky Linux
+    -- see "Troubleshooting" below before your first `--base_os=opensuse16`
+    build. SUSE Linux Enterprise Server (SLES) may be supported in a future
+    release.
 
 * Error checking to ensure that the selected operating system and EC2 instance
 type are compatible.
@@ -1102,10 +1106,12 @@ Please resolve this error and retry the instance build.
 Aborting...
 ```
 
-* Rocky Linux requires subscribing to the appropriate operating system
-channel in the AWS Marketplace.  (Amazon Linux, Amazon Linux 2023,
-AlmaLinux, RHEL, and Ubuntu do **not** -- their AMIs carry no AWS
-Marketplace product code and launch immediately.)
+* Rocky Linux and openSUSE Leap 16.0 require subscribing to the appropriate
+operating system channel in the AWS Marketplace -- for openSUSE, both the
+"openSUSE Leap" (x86_64) and "openSUSE Leap (ARM)" listings, since AWS
+publishes them as two separate Marketplace products.  (Amazon Linux, Amazon
+Linux 2023, AlmaLinux, RHEL, and Ubuntu do **not** -- their AMIs carry no
+AWS Marketplace product code and launch immediately.)
 
 ```
 Error: Error launching source instance: OptInRequired: In order to use this AWS Marketplace product you need to accept terms and subscribe. To do so please visit https://aws.amazon.com/marketplace/pp?sku=a1rz1wghrw6x9gn14lyded00r

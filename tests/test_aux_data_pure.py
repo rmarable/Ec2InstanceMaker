@@ -41,6 +41,7 @@ class TestGetBaseOsFamily:
             ("rocky10", "rocky"),
             ("ubuntu2404", "ubuntu"),
             ("ubuntu2604", "ubuntu"),
+            ("opensuse16", "ec2-user"),
             ("windows2019", "Administrator"),
             ("windows2022", "Administrator"),
             ("windows2025", "Administrator"),
@@ -64,11 +65,15 @@ class TestGetBaseOsFamily:
     def test_yum_family(self, base_os):
         assert aux_data.get_base_os_family(base_os)["package_manager"] == "yum"
 
+    @pytest.mark.parametrize("base_os", ["opensuse16"])
+    def test_zypper_family(self, base_os):
+        assert aux_data.get_base_os_family(base_os)["package_manager"] == "zypper"
+
     @pytest.mark.parametrize("base_os", ["al2023", "alinux2"])
     def test_awscli_preinstalled_only_on_amazon_linux(self, base_os):
         assert aux_data.get_base_os_family(base_os)["awscli_preinstalled"] is True
 
-    @pytest.mark.parametrize("base_os", ["alma9", "alma10", "rhel9", "rhel10", "rocky9", "rocky10", "ubuntu2404", "ubuntu2604"])
+    @pytest.mark.parametrize("base_os", ["alma9", "alma10", "rhel9", "rhel10", "rocky9", "rocky10", "ubuntu2404", "ubuntu2604", "opensuse16"])
     def test_awscli_not_preinstalled_elsewhere_on_linux(self, base_os):
         assert aux_data.get_base_os_family(base_os)["awscli_preinstalled"] is False
 
@@ -98,6 +103,13 @@ class TestBaseOsInstanceCheck:
     def test_windows_x86_64_passes(self):
         aux_data.base_os_instance_check("windows2022", "m5.xlarge", "x86_64", "false")
 
+    def test_opensuse16_graviton_passes(self):
+        # Unlike Windows, openSUSE Leap 16.0 publishes a real arm64 AMI (a
+        # separate "openSUSE Leap (ARM)" Marketplace listing -- verified
+        # live, see aux_data.py's _AMI_CATALOG comment), so it must NOT hit
+        # the windows-only Graviton rejection above.
+        aux_data.base_os_instance_check("opensuse16", "m6g.large", "arm64", "false")
+
     def test_windows_f1_rejected(self, capsys):
         with pytest.raises(SystemExit):
             aux_data.base_os_instance_check("windows2019", "f1.2xlarge", "x86_64", "false")
@@ -126,13 +138,14 @@ class TestBaseOsInstanceCheck:
             "rocky10",
             "ubuntu2404",
             "ubuntu2604",
+            "opensuse16",
             "windows2019",
             "windows2022",
             "windows2025",
         ],
     )
     def test_every_supported_base_os_has_no_restrictions_on_a_generic_instance(self, base_os):
-        # None of the 13 current base_os values have documented instance-type
+        # None of the 14 current base_os values have documented instance-type
         # restrictions beyond the generic Windows/Graviton rule, so a boring
         # x86_64 instance type should always pass.
         aux_data.base_os_instance_check(base_os, "m5.large", "x86_64", "false")

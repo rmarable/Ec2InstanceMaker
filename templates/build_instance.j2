@@ -26,17 +26,25 @@ then
 	sudo chown -R $EC2_USER:$EC2_USER $SRC
 	sudo chmod -R 755 $SRC
 fi
-{% if package_manager == 'yum' %}
+{% if package_manager in ('yum', 'zypper') %}
 # Wait for the cloud stuff to complete before running apt.
 # https://github.com/hashicorp/terraform/issues/1025
 
 until [[ -f /var/lib/cloud/instance/boot-finished ]]; do
   sleep 1
 done
+{% endif %}
+{% if package_manager == 'yum' %}
 
 # Update the instance via yum.
 
 sudo yum -y update
+{% elif package_manager == 'zypper' %}
+
+# Update the instance via zypper.
+
+sudo zypper --non-interactive refresh
+sudo zypper --non-interactive update
 {% else %}
 
 # Update the instance via apt.
@@ -49,6 +57,10 @@ sudo apt-get dist-upgrade -y
 # Install some critical packages via yum.
 
 sudo yum install -y git gcc zip unzip
+{% elif package_manager == 'zypper' %}
+# Install some critical packages via zypper.
+
+sudo zypper --non-interactive install git gcc make python3 unzip zip
 {% else %}
 # Use apt to install some critical packages.
 

@@ -150,7 +150,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--base_os",
         "-B",
-        choices=["al2023", "alinux2", "alma9", "alma10", "rhel9", "rhel10", "rocky9", "rocky10", "ubuntu2404", "ubuntu2604", "windows2019", "windows2022", "windows2025"],
+        choices=["al2023", "alinux2", "alma9", "alma10", "rhel9", "rhel10", "rocky9", "rocky10", "ubuntu2404", "ubuntu2604", "opensuse16", "windows2019", "windows2022", "windows2025"],
         help="instance base operating system (default = al2023 a.k.a. Amazon Linux 2023)",
         required=False,
         default="al2023",

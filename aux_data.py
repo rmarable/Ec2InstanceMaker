@@ -55,6 +55,7 @@ BASE_OS_FAMILIES: dict[str, dict[str, Any]] = {
     "rocky10": {"is_windows": False, "package_manager": "yum", "ec2_user": "rocky", "awscli_preinstalled": False},
     "ubuntu2404": {"is_windows": False, "package_manager": "apt", "ec2_user": "ubuntu", "awscli_preinstalled": False},
     "ubuntu2604": {"is_windows": False, "package_manager": "apt", "ec2_user": "ubuntu", "awscli_preinstalled": False},
+    "opensuse16": {"is_windows": False, "package_manager": "zypper", "ec2_user": "ec2-user", "awscli_preinstalled": False},
     "windows2019": {"is_windows": True, "package_manager": None, "ec2_user": "Administrator", "awscli_preinstalled": None},
     "windows2022": {"is_windows": True, "package_manager": None, "ec2_user": "Administrator", "awscli_preinstalled": None},
     "windows2025": {"is_windows": True, "package_manager": None, "ec2_user": "Administrator", "awscli_preinstalled": None},
@@ -96,6 +97,7 @@ def base_os_instance_check(base_os: str, instance_type: str, architecture: str, 
         "rocky10": ec2_instances_unsupported_rocky10,
         "ubuntu2404": ec2_instances_unsupported_ubuntu2404,
         "ubuntu2604": ec2_instances_unsupported_ubuntu2604,
+        "opensuse16": ec2_instances_unsupported_opensuse16,
         "windows2019": ec2_instances_unsupported_windows2019,
         "windows2022": ec2_instances_unsupported_windows2022,
         "windows2025": ec2_instances_unsupported_windows2025,
@@ -451,7 +453,16 @@ def ec2_placement_group_check(instance_type: str, placement_group_strategy: str,
 # dropped entirely rather than hardcoded per architecture. Ubuntu encodes
 # architecture as "amd64"/"arm64" in the path itself (not "x86_64"), so
 # that segment is wildcarded; it also publishes under hvm-ssd-gp3 (not the
-# older hvm-ssd path used by pre-23.10 releases).
+# older hvm-ssd path used by pre-23.10 releases). openSUSE Leap 16.0 IS
+# Marketplace-gated (confirmed via a ProductCodes entry on the AMI itself,
+# type "marketplace") -- the operator must subscribe to both the
+# "openSUSE Leap" (x86_64) and "openSUSE Leap (ARM)" listings before
+# launch succeeds; describe_images works either way, same as Rocky. Its
+# owner ID (679593333241) happens to match Rocky's -- this is a shared
+# AWS Marketplace AMI-hosting account, not evidence of a Rocky/openSUSE
+# relationship. Both architectures publish under one Name pattern with
+# the "x86_64"/"arm64" token embedded but easily wildcarded, same trick
+# as Rocky/Ubuntu above -- verified directly against both AMIs live.
 _AMI_CATALOG: dict[str, tuple[str, str]] = {
     "alinux2": ("137112412989", "amzn2-ami-hvm-2.0.*"),  # Amazon
     "al2023": ("137112412989", "al2023-ami-2023.*"),  # Amazon
@@ -463,6 +474,7 @@ _AMI_CATALOG: dict[str, tuple[str, str]] = {
     "rocky10": ("679593333241", "Rocky-10-EC2-Base-10.*"),  # Rocky Linux (CIQ)
     "ubuntu2404": ("099720109477", "ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-*-server-*"),  # Canonical
     "ubuntu2604": ("099720109477", "ubuntu/images/hvm-ssd-gp3/ubuntu-resolute-26.04-*-server-*"),  # Canonical
+    "opensuse16": ("679593333241", "openSUSE-Leap-16-0-v*"),  # openSUSE Project
     "windows2019": ("801119661308", "Windows_Server-2019-English-Full-Base-*"),
     "windows2022": ("801119661308", "Windows_Server-2022-English-Full-Base-*"),
     "windows2025": ("801119661308", "Windows_Server-2025-English-Full-Base-*"),
@@ -622,6 +634,7 @@ ec2_instances_unsupported_rocky9 = null_list
 ec2_instances_unsupported_rocky10 = null_list
 ec2_instances_unsupported_ubuntu2404 = null_list
 ec2_instances_unsupported_ubuntu2604 = null_list
+ec2_instances_unsupported_opensuse16 = null_list
 ec2_instances_unsupported_windows2019 = ["a1.", "f1."]
 ec2_instances_unsupported_windows2022 = ["a1.", "f1."]
 ec2_instances_unsupported_windows2025 = ["a1.", "f1."]

@@ -311,6 +311,19 @@ class TestBuildInstancePackageManagerAndAwscli:
         assert "awscli-bundle.zip" not in script
         assert "awscli-exe-linux" not in script
 
+    def test_opensuse16_uses_zypper(self):
+        # Regression test: build_instance.j2's yum-vs-apt checks used to be
+        # a binary {% if == 'yum' %}...{% else %} (implicit "else = apt"),
+        # which would have silently run apt-get on zypper-family openSUSE.
+        rendered = render({"base_os": "opensuse16", "package_manager": "zypper", "awscli_preinstalled": False})
+        script = rendered["build_instance.j2"]
+        assert "sudo zypper --non-interactive update" in script
+        assert "sudo zypper --non-interactive install git gcc make python3 unzip zip" in script
+        assert "sudo yum -y update" not in script
+        assert "sudo apt-get update" not in script
+        assert "awscli-bundle.zip" not in script
+        assert "awscli-exe-linux" not in script
+
 
 class TestAccessInstanceHardening:
     """Regression tests for the access_instance.j2 security fixes: no more
@@ -457,13 +470,14 @@ class TestAccessInstanceWindowsRdpTunnel:
 
 
 class TestInstanceUserdataSsmAgentInstall:
-    """RHEL/Rocky's standard AMIs don't preinstall the SSM Agent (unlike
-    AL2023/AlmaLinux/Windows/most Ubuntu releases -- verified against AWS's
-    own docs), so access_instance.py's SSM Session Manager connection would
-    silently never register on those base_os values without this cloud-init
-    install step. Ubuntu 26.04 is a separate case: AWS's preinstalled-agent
-    list stops at 25.04, so 26.04 needs the same forced install, but via
-    Canonical's snap package -- Ubuntu has no RPM equivalent.
+    """RHEL/Rocky/openSUSE's standard AMIs don't preinstall the SSM Agent
+    (unlike AL2023/AlmaLinux/Windows/most Ubuntu releases -- verified
+    against AWS's own docs), so access_instance.py's SSM Session Manager
+    connection would silently never register on those base_os values
+    without this cloud-init install step. Ubuntu 26.04 is a separate case:
+    AWS's preinstalled-agent list stops at 25.04, so 26.04 needs the same
+    forced install, but via Canonical's snap package -- Ubuntu has no RPM
+    equivalent.
     """
 
     def test_rhel_and_rocky_get_the_install_step(self):
@@ -471,6 +485,14 @@ class TestInstanceUserdataSsmAgentInstall:
             rendered = render({"base_os": base_os})["instance_userdata.j2"]
             assert "amazon-ssm-agent.rpm" in rendered
             assert "systemctl enable --now amazon-ssm-agent" in rendered
+
+    def test_opensuse16_gets_the_install_step_via_rpm_not_dnf(self):
+        # openSUSE has no dnf -- unlike the rhel9/rocky9 branch above, this
+        # must install the RPM directly rather than via `dnf install -y`.
+        rendered = render({"base_os": "opensuse16", "package_manager": "zypper"})["instance_userdata.j2"]
+        assert "amazon-ssm-agent.rpm" in rendered
+        assert "systemctl enable --now amazon-ssm-agent" in rendered
+        assert "dnf install" not in rendered
 
     def test_other_base_os_values_do_not_get_it(self):
         rendered = render({"base_os": "al2023"})["instance_userdata.j2"]
@@ -524,6 +546,12 @@ class TestInstanceUserdataAwsCliInstall:
         assert "apt-get install -y unzip" in rendered
         assert "yum install -y unzip" not in rendered
 
+    def test_zypper_based_os_installs_unzip_via_zypper(self):
+        rendered = render({"awscli_preinstalled": False, "package_manager": "zypper"})["instance_userdata.j2"]
+        assert "zypper --non-interactive install unzip" in rendered
+        assert "yum install -y unzip" not in rendered
+        assert "apt-get install -y unzip" not in rendered
+
 
 class TestCustomUserScriptsRendering:
     """custom_user_scripts/ replaced the old templates/custom_user_script.j2
@@ -571,10 +599,10 @@ class TestCustomUserScriptsRendering:
 class TestCloudWatchAgentInstall:
     """The CloudWatch Agent's install method genuinely differs by OS family
     (verified against AWS's live docs, not recalled) -- AL2023/AmazonLinux2
-    have it in their own yum repo, RHEL/Rocky/AlmaLinux need the "redhat"
-    S3-hosted rpm, Ubuntu needs the "ubuntu" S3-hosted deb. Getting the
-    wrong one silently means no logs ship on 8 of the 13 supported base_os
-    values.
+    have it in their own yum repo, RHEL/Rocky/AlmaLinux/openSUSE need the
+    "redhat" S3-hosted rpm, Ubuntu needs the "ubuntu" S3-hosted deb. Getting
+    the wrong one silently means no logs ship on 9 of the 14 supported
+    base_os values.
     """
 
     def test_al2023_installs_via_yum_repo(self):
@@ -596,6 +624,14 @@ class TestCloudWatchAgentInstall:
     def test_rhel_arm64_uses_arm64_rpm(self):
         rendered = render({"base_os": "rocky9", "package_manager": "yum", "architecture": "arm64"})["instance_userdata.j2"]
         assert "amazoncloudwatch-agent.s3.amazonaws.com/redhat/arm64/latest/amazon-cloudwatch-agent.rpm" in rendered
+
+    def test_opensuse16_reuses_the_redhat_rpm(self):
+        # No confirmed AWS-hosted "suse"-specific package path exists -- the
+        # "redhat" RPM is generic enough to reuse (verified: it's a
+        # self-contained agent binary + systemd unit, no RHEL-specific deps).
+        rendered = render({"base_os": "opensuse16", "package_manager": "zypper", "architecture": "x86_64"})["instance_userdata.j2"]
+        assert "amazoncloudwatch-agent.s3.amazonaws.com/redhat/amd64/latest/amazon-cloudwatch-agent.rpm" in rendered
+        assert "rpm -U /tmp/amazon-cloudwatch-agent.rpm" in rendered
 
     def test_ubuntu_installs_via_ubuntu_deb(self):
         rendered = render({"base_os": "ubuntu2404", "package_manager": "apt", "architecture": "x86_64"})["instance_userdata.j2"]
@@ -624,6 +660,10 @@ class TestCloudWatchAgentInstall:
 
         apt_rendered = render({"package_manager": "apt", "base_os": "ubuntu2404", "ec2_user": "ubuntu", "ec2_user_home": "/home/ubuntu"})["instance_userdata.j2"]
         assert "/var/log/syslog" in apt_rendered
+
+        zypper_rendered = render({"package_manager": "zypper", "base_os": "opensuse16"})["instance_userdata.j2"]
+        assert "/var/log/messages" in zypper_rendered
+        assert "/var/log/syslog" not in zypper_rendered
         assert "/var/log/messages" not in apt_rendered
 
 

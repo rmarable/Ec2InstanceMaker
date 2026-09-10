@@ -107,7 +107,7 @@ CI installs it the same way (`.github/workflows/lint.yml`).
   `{% %}`/`{{ }}` syntax. This script renders every template (via
   `template_engine.py`, the same code `make_instance.py` calls) with a
   set of synthetic contexts chosen to hit the major conditional branches
-  (currently 14 — every `base_os` value covered at least once, plus
+  (currently 15 — every `base_os` value covered at least once, plus
   ondemand/spot, single/family, EBS encryption, placement groups, a
   secondary EBS device volume, and a Graviton/arm64 instance_type), then
   lints the
@@ -134,7 +134,7 @@ CI installs it the same way (`.github/workflows/lint.yml`).
   to HCL2 canonical formatting (no legacy `"${...}"` wrapping around a whole
   attribute value, `=` columns aligned per contiguous attribute run) so every
   rendered `.tf` file is fmt-clean with no rewrite needed. If you touch either
-  template, re-run `scripts/lint_templates.py` across all 14 `CONTEXTS`
+  template, re-run `scripts/lint_templates.py` across all 15 `CONTEXTS`
   scenarios and keep it that way — don't reintroduce misalignment.
 
 ## Which document owns what
@@ -283,13 +283,22 @@ for Rocky/AlmaLinux — so those tokens are wildcarded out of the `Name`
 filter rather than hardcoded per architecture). `get_ami_info()` itself is
 data-driven — `_AMI_CATALOG` maps each `base_os` to its `(owner,
 name_pattern)` pair, and one shared `describe_images` call does the actual
-lookup; adding a 14th `base_os` means adding a catalog entry, not a new
-copy-pasted `if` block.
+lookup; adding a 15th `base_os` means adding a catalog entry, not a new
+copy-pasted `if` block. `opensuse16`'s entry was verified live against a
+real AWS account, not guessed: owner `679593333241` (a shared AWS
+Marketplace AMI-hosting account -- happens to match Rocky's owner ID by
+coincidence, not relation) with Name pattern `openSUSE-Leap-16-0-v*`
+matching exactly one AMI per architecture. Unlike Windows,
+`base_os_instance_check()` does not reject `opensuse16` + Graviton --
+openSUSE Leap 16.0 publishes a real arm64 AMI, just as a *separate*
+Marketplace product ("openSUSE Leap (ARM)"), so both listings need a
+one-time subscription before launch (see README.md's Troubleshooting
+section) even though they share one catalog entry here.
 
 `BASE_OS_FAMILIES` / `get_base_os_family(base_os)` is the single source of
-truth for `is_windows`, `package_manager` (`"yum"`/`"apt"`/`None`),
-`ec2_user`, and `awscli_preinstalled`. Before this existed, each of these
-facts was re-derived independently via `base_os` substring matching in
+truth for `is_windows`, `package_manager` (`"yum"`/`"apt"`/`"zypper"`/
+`None`), `ec2_user`, and `awscli_preinstalled`. Before this existed, each of
+these facts was re-derived independently via `base_os` substring matching in
 three unsynchronized places: a 6-branch `ec2_user` if-chain and several
 `"windows" in base_os` checks in `make_instance.py`, *and* the same
 `'windows' in base_os` / yum-vs-apt / family-OR-chain conditionals
@@ -302,7 +311,18 @@ duplicated again in Jinja across `DEFAULT_EC2_TEMPLATE.j2`,
 `{% if package_manager == 'yum' %}` instead of re-deriving the same
 substring checks a second time. When adding a new `base_os`, add one entry
 to `BASE_OS_FAMILIES` (and one to `_AMI_CATALOG` above) rather than hunting
-down every place that needs to know about it.
+down every place that needs to know about it. `package_manager` gained its
+third value (`"zypper"`, for `opensuse16`) after a real gap was found:
+`build_instance.j2`'s yum-vs-apt checks were a **binary**
+`{% if == 'yum' %} ... {% else %}` (implicit "else = apt"), which would
+have silently run `apt-get` on a zypper-based system. Both of those, plus
+`instance_userdata.j2`'s AWS CLI/unzip-install gate, are now explicit
+`elif` chains — a fourth `package_manager` value must extend the chain,
+not rely on an `else` catching it correctly. `opensuse16`'s SSM Agent
+install reuses the RHEL/Rocky RPM but via `rpm -i` directly (no `dnf` on
+openSUSE); its CloudWatch Agent install reuses the "redhat" S3-hosted RPM
+outright (no confirmed separate "suse" package path exists, and the RPM
+itself has no RHEL-specific dependencies).
 
 **`instance_builder.py`** holds the build-flow logic extracted out of
 `make_instance.py`'s original ~1200-line, function-free linear script (see
@@ -469,17 +489,18 @@ plugin for the AWS CLI installed locally (separate from the CLI itself) and
 the SSM Agent running on the instance — the instance's IAM role needs the
 `AllowAccessToSSM` statement's `ssmmessages:*`/`ec2messages:*`/
 `ssm:UpdateInstanceInformation` actions (present in all three
-`*Ec2InstancePolicy.json` tiers). RHEL 9/10 and Rocky Linux 9/10's standard
-AMIs don't preinstall the SSM Agent (unlike AL2023/AlmaLinux/Windows/most
-Ubuntu releases, per AWS's own docs) — `instance_userdata.j2` installs and
-enables it via cloud-init for those four `base_os` values, `dnf install`ing
-the RPM AWS publishes and enabling it via `systemctl`. Ubuntu 26.04 is a
-fifth, separate case: AWS's preinstalled-agent list tops out at 25.04, so
-26.04 needs the same forced install, but Ubuntu has no RPM equivalent —
-AWS's own Ubuntu install docs specify Canonical's snap package instead
-(`snap install amazon-ssm-agent --classic`, then `snap start
-amazon-ssm-agent`), which needs no architecture branching since snap
-resolves that itself.
+`*Ec2InstancePolicy.json` tiers). RHEL 9/10, Rocky Linux 9/10, and
+openSUSE Leap 16.0's standard AMIs don't preinstall the SSM Agent (unlike
+AL2023/AlmaLinux/Windows/most Ubuntu releases, per AWS's own docs) —
+`instance_userdata.j2` installs and enables it via cloud-init for those
+five `base_os` values, enabling it via `systemctl` after installing the
+RPM AWS publishes -- `dnf install`ed directly on RHEL/Rocky, but via
+`rpm -i` on openSUSE (no `dnf` there). Ubuntu 26.04 is a sixth, separate
+case: AWS's preinstalled-agent list tops out at 25.04, so 26.04 needs the
+same forced install, but Ubuntu has no RPM equivalent — AWS's own Ubuntu
+install docs specify Canonical's snap package instead (`snap install
+amazon-ssm-agent --classic`, then `snap start amazon-ssm-agent`), which
+needs no architecture branching since snap resolves that itself.
 
 **CloudWatch Agent logging** is on by default (`--enable_cloudwatch_logs`,
 default `true`) — installed via the same prelogin cloud-init mechanism as
@@ -487,10 +508,12 @@ the AWS CLI/SSM Agent above, so it's running from the earliest boot, not
 just after `build_instance.sh`. Install method genuinely differs by OS
 (verified against AWS's live docs, not assumed): `yum install
 amazon-cloudwatch-agent` on AL2023/AmazonLinux2 (it's in their own repo);
-the "redhat" S3-hosted rpm for RHEL/Rocky/AlmaLinux; the "ubuntu" S3-hosted
-deb for Ubuntu. Windows is out of scope, same as `custom_user_scripts`.
+the "redhat" S3-hosted rpm for RHEL/Rocky/AlmaLinux, reused as-is for
+openSUSE Leap 16.0 (no confirmed separate "suse" package path, and the
+RPM has no RHEL-specific dependencies); the "ubuntu" S3-hosted deb for
+Ubuntu. Windows is out of scope, same as `custom_user_scripts`.
 Ships `/var/log/cloud-init.log`, `/var/log/cloud-init-output.log`, and
-`/var/log/messages` (yum-based) or `/var/log/syslog` (apt-based) to
+`/var/log/messages` (yum/zypper-based) or `/var/log/syslog` (apt-based) to
 `/ec2instancemaker/<instance_name>` in CloudWatch Logs, one stream per
 file per `{instance_id}` (not `instance_name` — a family shares one log
 group but each real instance needs its own streams). The log group itself
