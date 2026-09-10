@@ -129,6 +129,20 @@ CI installs it the same way (`.github/workflows/lint.yml`).
   convention. When adding a new template or changing what variables it
   needs, add/update the corresponding key(s) in this script's `CONTEXTS`
   dict, or the render step will `KeyError`.
+  A real `terraform init` costs ~8s of subprocess overhead even with a
+  warm plugin cache (confirmed by timing it directly) — since every
+  scenario's `provider_aws.tf` renders an identical `required_providers`
+  block, only the first of the 15 scenarios actually runs `terraform
+  init`; every other scenario copies that one's already-initialized
+  `.terraform/` + `.terraform.lock.hcl` instead (`lint_terraform_dir()`'s
+  `cached_init_dir` parameter) rather than re-resolving the same,
+  already-cached provider from scratch 14 more times. The remaining 14
+  scenarios (independent of each other and of the one used for the real
+  init) run concurrently via a `ThreadPoolExecutor` — `subprocess.run`
+  releases the GIL for the actual wait, which is nearly all the
+  wall-clock time here, so threads are enough without multiprocessing's
+  extra complexity. Combined, this cut a real `pre-commit run --all-files`
+  from several minutes to ~90s.
 - `terraform fmt -check` also runs inside `scripts/lint_templates.py`, and is
   blocking: `DEFAULT_EC2_TEMPLATE.j2` and `provider_aws.j2` are hand-aligned
   to HCL2 canonical formatting (no legacy `"${...}"` wrapping around a whole

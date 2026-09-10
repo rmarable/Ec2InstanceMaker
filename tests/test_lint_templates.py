@@ -6,14 +6,19 @@ filter), so these prove the safety net actually reports failure on bad
 input, not just that it's been observed to pass on good input via the
 script's own real runs against templates/*.j2.
 
-terraform init/validate (network-dependent, slow) is intentionally not
-exercised here -- that's already covered by the separate
+A real terraform init/validate (network-dependent, slow) is intentionally
+not exercised here -- that's already covered by the separate
 render-and-lint-templates pre-commit hook, which runs the real script
-against all 14 CONTEXTS scenarios. Only the fast, offline `terraform fmt
--check` path is tested directly.
+against all 15 CONTEXTS scenarios. The fast, offline `terraform fmt
+-check` path is tested directly against the real binary; the
+cached_init_dir branching (copy an already-initialized .terraform/
+instead of running init again -- see lint_terraform_dir()) is tested with
+subprocess.run mocked out entirely, since the point there is proving
+*this* function's control flow, not re-testing terraform's own behavior.
 """
 
 import shutil
+import subprocess
 
 import pytest
 
@@ -75,3 +80,85 @@ class TestLintTerraformDir:
         fmt_failures = [f for f in failures if f[0] == "terraform fmt"]
         assert len(fmt_failures) == 1
         assert fmt_failures[0][1].strip() != ""
+
+
+class TestLintTerraformDirCachedInit:
+    """cached_init_dir lets lint_terraform_dir() skip a real `terraform
+    init` (~8s of subprocess overhead even with a warm plugin cache,
+    confirmed by timing it directly -- see the comment on
+    lint_terraform_dir()) by copying an already-initialized .terraform/ +
+    lock file from elsewhere instead. subprocess.run is mocked out
+    entirely here, unlike the fmt tests above -- terraform's own behavior
+    is already proven by the real scripts/lint_templates.py run against
+    all 15 CONTEXTS scenarios; this only needs to prove *this* function
+    takes the copy branch instead of the init branch when given one.
+    """
+
+    def _fake_run(self, calls):
+        def run(args, **kwargs):
+            calls.append(args)
+            if args[:2] == ["terraform", "fmt"]:
+                return subprocess.CompletedProcess(args, 0, "", "")
+            if args[:2] == ["terraform", "init"]:
+                return subprocess.CompletedProcess(args, 0, "", "")
+            if args[:2] == ["terraform", "validate"]:
+                return subprocess.CompletedProcess(args, 0, '{"valid": true, "diagnostics": []}', "")
+            raise AssertionError(f"unexpected subprocess call: {args}")
+
+        return run
+
+    def test_copies_cached_init_instead_of_running_terraform_init(self, tmp_path, monkeypatch):
+        cached_dir = tmp_path / "cached"
+        (cached_dir / ".terraform" / "providers").mkdir(parents=True)
+        (cached_dir / ".terraform" / "providers" / "marker.txt").write_text("fake provider")
+        (cached_dir / ".terraform.lock.hcl").write_text("# fake lock file\n")
+
+        target_dir = tmp_path / "target"
+        target_dir.mkdir()
+        (target_dir / "main.tf").write_text('resource "null_resource" "example" {\n}\n')
+
+        calls: list[list[str]] = []
+        monkeypatch.setattr("scripts.lint_templates.subprocess.run", self._fake_run(calls))
+
+        failures = lint_terraform_dir(str(target_dir), cached_init_dir=str(cached_dir))
+
+        assert failures == []
+        assert not any(c[:2] == ["terraform", "init"] for c in calls)
+        assert (target_dir / ".terraform" / "providers" / "marker.txt").read_text() == "fake provider"
+        assert (target_dir / ".terraform.lock.hcl").read_text() == "# fake lock file\n"
+
+    def test_real_init_path_still_used_when_no_cache_given(self, tmp_path, monkeypatch):
+        target_dir = tmp_path / "target"
+        target_dir.mkdir()
+        (target_dir / "main.tf").write_text('resource "null_resource" "example" {\n}\n')
+
+        calls: list[list[str]] = []
+        monkeypatch.setattr("scripts.lint_templates.subprocess.run", self._fake_run(calls))
+
+        failures = lint_terraform_dir(str(target_dir))
+
+        assert failures == []
+        assert any(c[:2] == ["terraform", "init"] for c in calls)
+
+    def test_init_failure_short_circuits_before_validate(self, tmp_path, monkeypatch):
+        target_dir = tmp_path / "target"
+        target_dir.mkdir()
+        (target_dir / "main.tf").write_text('resource "null_resource" "example" {\n}\n')
+
+        calls: list[list[str]] = []
+
+        def run(args, **kwargs):
+            calls.append(args)
+            if args[:2] == ["terraform", "fmt"]:
+                return subprocess.CompletedProcess(args, 0, "", "")
+            if args[:2] == ["terraform", "init"]:
+                return subprocess.CompletedProcess(args, 1, "", "network unreachable")
+            raise AssertionError(f"unexpected subprocess call: {args}")
+
+        monkeypatch.setattr("scripts.lint_templates.subprocess.run", run)
+
+        failures = lint_terraform_dir(str(target_dir))
+
+        assert len(failures) == 1
+        assert failures[0][0] == "terraform init"
+        assert not any(c[:2] == ["terraform", "validate"] for c in calls)

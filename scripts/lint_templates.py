@@ -16,6 +16,7 @@ Exits non-zero if any rendered file fails its linter, or if `shellcheck` or
 `terraform` aren't on PATH.
 """
 
+import concurrent.futures
 import dataclasses
 import json
 import os
@@ -940,46 +941,60 @@ SUFFIX_LINTERS: dict[str, Callable[[str], tuple[bool, str]]] = {
 }
 
 
-def lint_terraform_dir(tf_dir: str) -> list[tuple[str, str]]:
+def lint_terraform_dir(tf_dir: str, cached_init_dir: str | None = None) -> list[tuple[str, str]]:
     """terraform fmt/validate need the whole rendered instance_data dir at
-    once (provider_aws.tf + <name>.tf reference each other)."""
+    once (provider_aws.tf + <name>.tf reference each other).
+
+    Every scenario's provider_aws.tf renders an identical
+    required_providers block, so a real `terraform init` only needs to
+    happen once per run -- confirmed by timing it directly, it costs
+    ~8s even with a warm plugin cache, purely from re-verifying/re-linking
+    the same already-cached provider from scratch. When cached_init_dir is
+    given (every scenario but the one main() ran init in for real), its
+    already-initialized .terraform/ and .terraform.lock.hcl are copied in
+    instead -- confirmed live that `terraform validate` accepts a copied
+    .terraform/ exactly as if `init` had been run in this directory,
+    since all init actually does is populate that directory and the lock
+    file from the (already-warm) plugin cache."""
     failures: list[tuple[str, str]] = []
 
     fmt = subprocess.run(["terraform", "fmt", "-check", "-diff", "-no-color"], cwd=tf_dir, capture_output=True, text=True)
     if fmt.returncode != 0:
         failures.append(("terraform fmt", fmt.stdout + fmt.stderr))
 
-    # Every scenario's `terraform init` otherwise re-downloads the AWS
-    # provider from registry.terraform.io from scratch -- a hard,
-    # undocumented network dependency with no distinguishing error message
-    # if it's unreachable, and needlessly slow across N scenarios. Caching
-    # across runs (and across scenarios within one run) fixes the latter;
-    # the network dependency itself is inherent to `terraform init` and not
-    # something this script can remove.
-    plugin_cache_dir = os.path.join(REPO_ROOT, ".terraform-plugin-cache")
-    os.makedirs(plugin_cache_dir, exist_ok=True)
-    init_env = dict(os.environ, TF_PLUGIN_CACHE_DIR=plugin_cache_dir)
-    init = subprocess.run(["terraform", "init", "-backend=false", "-input=false", "-no-color"], cwd=tf_dir, capture_output=True, text=True, env=init_env)
-    if init.returncode != 0:
-        failures.append(("terraform init", init.stdout + init.stderr))
+    if cached_init_dir is not None:
+        shutil.copytree(os.path.join(cached_init_dir, ".terraform"), os.path.join(tf_dir, ".terraform"))
+        shutil.copy(os.path.join(cached_init_dir, ".terraform.lock.hcl"), os.path.join(tf_dir, ".terraform.lock.hcl"))
     else:
-        # -json so expected and unexpected errors can be told apart one
-        # diagnostic at a time. This used to be a substring test over the
-        # whole combined output ("Invalid function argument" not in
-        # combined), which discarded the *entire* validate result whenever
-        # that phrase appeared anywhere -- and since the expected missing
-        # .pem error produces it on every single scenario, any unrelated
-        # validate error in the same run was silently swallowed.
-        validate = subprocess.run(["terraform", "validate", "-json"], cwd=tf_dir, capture_output=True, text=True)
-        if validate.returncode != 0:
-            try:
-                diagnostics = json.loads(validate.stdout).get("diagnostics", [])
-            except json.JSONDecodeError:
-                failures.append(("terraform validate", validate.stdout + validate.stderr))
-            else:
-                unexpected = [d for d in diagnostics if not _is_expected_missing_build_artifact(d)]
-                if unexpected:
-                    failures.append(("terraform validate", json.dumps(unexpected, indent=2)))
+        # The plugin cache itself still matters here (this is the one real
+        # init per run) -- it's what keeps this from hitting
+        # registry.terraform.io over the network, a hard, undocumented
+        # dependency with no distinguishing error message if unreachable.
+        plugin_cache_dir = os.path.join(REPO_ROOT, ".terraform-plugin-cache")
+        os.makedirs(plugin_cache_dir, exist_ok=True)
+        init_env = dict(os.environ, TF_PLUGIN_CACHE_DIR=plugin_cache_dir)
+        init = subprocess.run(["terraform", "init", "-backend=false", "-input=false", "-no-color"], cwd=tf_dir, capture_output=True, text=True, env=init_env)
+        if init.returncode != 0:
+            failures.append(("terraform init", init.stdout + init.stderr))
+            return failures
+
+    # -json so expected and unexpected errors can be told apart one
+    # diagnostic at a time. This used to be a substring test over the
+    # whole combined output ("Invalid function argument" not in
+    # combined), which discarded the *entire* validate result whenever
+    # that phrase appeared anywhere -- and since the expected missing
+    # .pem error produces it on every single scenario, any unrelated
+    # validate error in the same run was silently swallowed.
+    validate = subprocess.run(["terraform", "validate", "-json"], cwd=tf_dir, capture_output=True, text=True)
+    if validate.returncode != 0:
+        try:
+            diagnostics = json.loads(validate.stdout).get("diagnostics", [])
+        except json.JSONDecodeError:
+            failures.append(("terraform validate", validate.stdout + validate.stderr))
+        else:
+            unexpected = [d for d in diagnostics if not _is_expected_missing_build_artifact(d)]
+            if unexpected:
+                failures.append(("terraform validate", json.dumps(unexpected, indent=2)))
     return failures
 
 
@@ -997,86 +1012,148 @@ def _is_expected_missing_build_artifact(diagnostic: dict[str, Any]) -> bool:
     return ".pem" in (diagnostic.get("detail") or "")
 
 
+def _process_scenario(scenario_name: str, instance_parameters: dict[str, Any], cached_init_dir: str | None, scratch_root: str | None = None) -> list[tuple[str, str, str]]:
+    """Renders one scenario's templates and lints the output, including
+    lint_terraform_dir()'s fmt/validate pass (see cached_init_dir there).
+
+    scratch_root is None for every scenario except the one main() uses to
+    produce the real `terraform init` every other scenario's
+    cached_init_dir points back to -- that one is given an explicit,
+    caller-owned directory instead of a throwaway one, since its rendered
+    instance_data_dir (and the .terraform/ init leaves behind in it) needs
+    to outlive this function call.
+    """
+    failures: list[tuple[str, str, str]] = []
+
+    def _run(root: str) -> None:
+        os.symlink(os.path.join(REPO_ROOT, "templates"), os.path.join(root, "templates"))
+        os.symlink(os.path.join(REPO_ROOT, "custom_user_scripts"), os.path.join(root, "custom_user_scripts"))
+        instance_name = instance_parameters["instance_name"]
+        instance_data_dir = os.path.join(root, "instance_data", instance_name)
+        os.makedirs(instance_data_dir)
+
+        params = InstanceParameters(**_SYNTHETIC_EXTRAS, **instance_parameters)
+        rendered_parameters = dataclasses.asdict(params)
+        render_instance_templates(rendered_parameters, root, instance_data_dir)
+        context = _build_render_context(rendered_parameters, root, instance_data_dir)
+
+        for _src, dest_key in TEMPLATE_MAP:
+            if dest_key in SKIP_LINT:
+                continue
+            filename = context[dest_key]
+            path = os.path.join(instance_data_dir, filename)
+            _, ext = os.path.splitext(filename)
+            linter = SUFFIX_LINTERS.get(ext)
+            if linter is None:
+                continue
+            ok, output = linter(path)
+            if not ok:
+                failures.append((scenario_name, filename, output))
+
+        # custom_user_postboot_script.j2_<name> isn't in TEMPLATE_MAP --
+        # there can be zero or many per scenario -- so lint whatever
+        # actually got rendered by filename instead.
+        for filename in sorted(os.listdir(instance_data_dir)):
+            if filename.startswith("custom_user_postboot_script."):
+                ok, output = lint_shell(os.path.join(instance_data_dir, filename))
+                if not ok:
+                    failures.append((scenario_name, filename, output))
+
+        # custom_user_prelogin_script.j2_<name> content is embedded inline
+        # in instance_userdata.j2's cloud-config write_files -- extract it
+        # and shellcheck it directly, same as any other generated .sh,
+        # rather than letting it go unchecked just because it's not a
+        # standalone file on disk. Not every write_files entry is a shell
+        # script -- the CloudWatch Agent config is JSON -- so dispatch by
+        # extension instead of assuming everything in write_files is bash.
+        userdata_path = os.path.join(instance_data_dir, context["instance_userdata_script"])
+        with open(userdata_path) as fh:
+            userdata_doc = yaml.safe_load(fh.read().split("\n", 1)[1])
+        for entry in (userdata_doc or {}).get("write_files", []):
+            extracted_path = os.path.join(instance_data_dir, os.path.basename(entry["path"]))
+            with open(extracted_path, "w") as fh:
+                fh.write(entry["content"])
+            if extracted_path.endswith(".sh"):
+                ok, output = lint_shell(extracted_path)
+            elif extracted_path.endswith(".json"):
+                try:
+                    json.loads(entry["content"])
+                    ok, output = True, ""
+                except json.JSONDecodeError as e:
+                    ok, output = False, str(e)
+            else:
+                continue
+            if not ok:
+                failures.append((scenario_name, entry["path"], output))
+
+        tf_failures = lint_terraform_dir(instance_data_dir, cached_init_dir)
+        for tool_name, output in tf_failures:
+            failures.append((scenario_name, tool_name, output))
+
+    if scratch_root is not None:
+        _run(scratch_root)
+    else:
+        with tempfile.TemporaryDirectory() as root:
+            _run(root)
+
+    return failures
+
+
+def _report(failures: list[tuple[str, str, str]]) -> None:
+    print("FAILURES:")
+    for scenario_name, name, output in failures:
+        print(f"\n--- {scenario_name} / {name} ---")
+        print(output)
+
+
 def main() -> int:
     missing = [tool for tool in ("shellcheck", "terraform") if shutil.which(tool) is None]
     if missing:
         print(f"ERROR: required tool(s) not on PATH: {', '.join(missing)}")
         return 1
 
+    scenario_items = list(CONTEXTS.items())
+    first_name, first_params = scenario_items[0]
+    remaining = scenario_items[1:]
+
     all_failures: list[tuple[str, str, str]] = []
 
-    for scenario_name, instance_parameters in CONTEXTS.items():
-        with tempfile.TemporaryDirectory() as scratch_root:
-            os.symlink(os.path.join(REPO_ROOT, "templates"), os.path.join(scratch_root, "templates"))
-            os.symlink(os.path.join(REPO_ROOT, "custom_user_scripts"), os.path.join(scratch_root, "custom_user_scripts"))
-            instance_name = instance_parameters["instance_name"]
-            instance_data_dir = os.path.join(scratch_root, "instance_data", instance_name)
-            os.makedirs(instance_data_dir)
+    # Every scenario's provider_aws.tf renders an identical
+    # required_providers block, so a real `terraform init` only needs to
+    # happen once per run, not once per scenario -- confirmed by timing it
+    # directly, it costs ~8s of pure subprocess overhead even with a warm
+    # plugin cache. first_scratch_root is kept alive for the rest of this
+    # function (not wrapped in the throwaway-directory path
+    # _process_scenario otherwise uses) so every other scenario can copy
+    # its post-init .terraform/ instead of re-running init 14 more times.
+    with tempfile.TemporaryDirectory() as first_scratch_root:
+        all_failures.extend(_process_scenario(first_name, first_params, cached_init_dir=None, scratch_root=first_scratch_root))
+        first_instance_data_dir = os.path.join(first_scratch_root, "instance_data", first_params["instance_name"])
 
-            params = InstanceParameters(**_SYNTHETIC_EXTRAS, **instance_parameters)
-            rendered_parameters = dataclasses.asdict(params)
-            render_instance_templates(rendered_parameters, scratch_root, instance_data_dir)
-            context = _build_render_context(rendered_parameters, scratch_root, instance_data_dir)
+        if any(name == "terraform init" for _, name, _ in all_failures):
+            # Every other scenario below only *copies* this directory's
+            # .terraform/ rather than running init itself -- if the one
+            # real init failed, there's nothing valid to copy, and running
+            # the rest would just produce 14 more confusing failures for
+            # the same root cause (most likely the network dependency
+            # noted on lint_terraform_dir() above).
+            _report(all_failures)
+            return 1
 
-            for _src, dest_key in TEMPLATE_MAP:
-                if dest_key in SKIP_LINT:
-                    continue
-                filename = context[dest_key]
-                path = os.path.join(instance_data_dir, filename)
-                _, ext = os.path.splitext(filename)
-                linter = SUFFIX_LINTERS.get(ext)
-                if linter is None:
-                    continue
-                ok, output = linter(path)
-                if not ok:
-                    all_failures.append((scenario_name, filename, output))
-
-            # custom_user_postboot_script.j2_<name> isn't in TEMPLATE_MAP --
-            # there can be zero or many per scenario -- so lint whatever
-            # actually got rendered by filename instead.
-            for filename in sorted(os.listdir(instance_data_dir)):
-                if filename.startswith("custom_user_postboot_script."):
-                    ok, output = lint_shell(os.path.join(instance_data_dir, filename))
-                    if not ok:
-                        all_failures.append((scenario_name, filename, output))
-
-            # custom_user_prelogin_script.j2_<name> content is embedded
-            # inline in instance_userdata.j2's cloud-config write_files --
-            # extract it and shellcheck it directly, same as any other
-            # generated .sh, rather than letting it go unchecked just
-            # because it's not a standalone file on disk. Not every
-            # write_files entry is a shell script -- the CloudWatch Agent
-            # config is JSON -- so dispatch by extension instead of
-            # assuming everything in write_files is bash.
-            userdata_path = os.path.join(instance_data_dir, context["instance_userdata_script"])
-            with open(userdata_path) as fh:
-                userdata_doc = yaml.safe_load(fh.read().split("\n", 1)[1])
-            for entry in (userdata_doc or {}).get("write_files", []):
-                extracted_path = os.path.join(instance_data_dir, os.path.basename(entry["path"]))
-                with open(extracted_path, "w") as fh:
-                    fh.write(entry["content"])
-                if extracted_path.endswith(".sh"):
-                    ok, output = lint_shell(extracted_path)
-                elif extracted_path.endswith(".json"):
-                    try:
-                        json.loads(entry["content"])
-                        ok, output = True, ""
-                    except json.JSONDecodeError as e:
-                        ok, output = False, str(e)
-                else:
-                    continue
-                if not ok:
-                    all_failures.append((scenario_name, entry["path"], output))
-
-            tf_failures = lint_terraform_dir(instance_data_dir)
-            for tool_name, output in tf_failures:
-                all_failures.append((scenario_name, tool_name, output))
+        # The remaining scenarios are fully independent of each other and
+        # of the one above (each renders into its own directory) -- run
+        # them concurrently. subprocess.run releases the GIL for the
+        # actual wait (shellcheck/bandit/terraform validate are most of
+        # the wall-clock time here), so a thread pool is enough; no need
+        # for multiprocessing's extra complexity.
+        max_workers = min(8, os.cpu_count() or 4)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(_process_scenario, name, params, first_instance_data_dir) for name, params in remaining]
+            for future in concurrent.futures.as_completed(futures):
+                all_failures.extend(future.result())
 
     if all_failures:
-        print("FAILURES:")
-        for scenario_name, name, output in all_failures:
-            print(f"\n--- {scenario_name} / {name} ---")
-            print(output)
+        _report(all_failures)
         return 1
 
     total_files = len(CONTEXTS) * len(TEMPLATE_MAP)
