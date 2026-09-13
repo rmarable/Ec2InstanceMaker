@@ -47,6 +47,14 @@ Running Ec2InstanceMaker locally on a Windows machine is **not** supported,
 although it should work in theory with appropriately configured Python and
 Bash-Cygwin environments.
 
+Ec2InstanceMaker can also optionally install and run
+[RockySurf](https://github.com/amroja-biz/rockysurf) -- a third-party,
+open-source browser-based coding environment -- on a built Linux
+instance (`--enable_rockysurf`). This is a separate project maintained
+outside this repo; see its own
+[SECURITY.md](https://github.com/amroja-biz/rockysurf/blob/main/SECURITY.md)
+and this README's "RockySurf" section before enabling it.
+
 ## Ec2InstanceMaker Features
 
 Ec2InstanceMaker provides the following features through its command line
@@ -175,8 +183,9 @@ the toolkit-controlled `templates/` directory -- both a real pre-login
 (cloud-init) hook and a post-boot hook, selectable per build via
 `--custom_user_scripts`.
 
-* Optional RockySurf browser-based coding environment (`--enable_rockysurf`,
-default false, Linux only) -- see "RockySurf" below before enabling it.
+* Optional [RockySurf](https://github.com/amroja-biz/rockysurf) browser-based
+coding environment (`--enable_rockysurf`, default false, Linux only) --
+see "RockySurf" below before enabling it.
 
 * Operability in Turbot environments.  Please visit https://www.turbot.com for more information.
 

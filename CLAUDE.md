@@ -578,7 +578,18 @@ Agent: vendor binary via curl, not a package-manager repo) and runs
 [RockySurf](https://github.com/amroja-biz/rockysurf) — a third-party,
 open-source browser-based coding environment — as a systemd unit
 (`rockysurf.service`, `templates/instance_userdata.j2`), bound to
-`127.0.0.1:3033` only. `npx -y rockysurf@0.1.5` pins the package version
+`127.0.0.1:3033` only. Verified live against a real AWS account
+(`183295445014`) on 2026-09-13: an `alma10`/`c8g.large` (Graviton4) build
+with a fresh IAM role showed the permissions boundary actually attached
+(`aws iam get-role`'s `PermissionsBoundaryArn`, `get-policy`'s
+`PermissionsBoundaryUsageCount: 1`), IMDSv2 actually enforced
+(`describe-instances`'s `MetadataOptions.HttpTokens == "required"`),
+`rockysurf.service` actually `active` and serving `200` on
+`127.0.0.1:3033` (confirmed via `aws ssm send-command`), the documented
+`AWS-StartPortForwardingSession` tunnel actually reaching it from outside
+the instance, and `kill-instance.<name>.sh` actually deleting the
+boundary policy after the role (`get-policy` returned `NoSuchEntity`
+afterward). `npx -y rockysurf@0.1.5` pins the package version
 explicitly rather than always-latest, for supply-chain reproducibility;
 its transitive dependencies still re-resolve against the npm registry on
 every `Restart=on-failure` restart (no lockfile/`npm ci`), which is worse
@@ -586,8 +597,8 @@ than this repo's other installs (one fixed vendor artifact, fetched once)
 — `StartLimitIntervalSec=300`/`StartLimitBurst=5` bounds how often that
 can happen, but the underlying re-resolution risk is accepted, not fixed,
 pending a real vendored-install mechanism if it ever becomes a problem.
-Default is `false` deliberately — an adversarial multi-agent review (see
-CLAUDE-STATE.md) found that RockySurf is itself a cloud-provisioning
+Default is `false` deliberately — an adversarial multi-agent review found
+that RockySurf is itself a cloud-provisioning
 control plane that reads AWS credentials via the standard SDK chain, so
 on this EC2 instance it automatically inherits **the instance's own IAM
 role** via IMDS, with no separate credential step, and has no privilege
