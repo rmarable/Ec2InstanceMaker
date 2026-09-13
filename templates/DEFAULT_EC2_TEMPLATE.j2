@@ -51,6 +51,12 @@ resource "aws_spot_instance_request" "{{ instance_name }}" {
   associate_public_ip_address = "false"
 {% endif %}
   provider                    = {{ provider }}
+{% if enable_rockysurf == 'true' %}
+  metadata_options {
+    http_tokens                 = "required"
+    http_put_response_hop_limit = "1"
+  }
+{% endif %}
   root_block_device {
     volume_size = "{{ ebs_root_volume_size }}"
     volume_type = "{{ ebs_root_volume_type }}"

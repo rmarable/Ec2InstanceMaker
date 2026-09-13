@@ -175,6 +175,9 @@ the toolkit-controlled `templates/` directory -- both a real pre-login
 (cloud-init) hook and a post-boot hook, selectable per build via
 `--custom_user_scripts`.
 
+* Optional RockySurf browser-based coding environment (`--enable_rockysurf`,
+default false, Linux only) -- see "RockySurf" below before enabling it.
+
 * Operability in Turbot environments.  Please visit https://www.turbot.com for more information.
 
 * Restriction of attaching public IP addresses for environments that require additional security.
@@ -389,6 +392,7 @@ usage: make_instance.py [-h] --az AZ --instance_name INSTANCE_NAME
                         [--instance_type INSTANCE_TYPE]
                         [--prod_level {dev,test,stage,prod}]
                         [--enable_cloudwatch_logs {true,false}]
+                        [--enable_rockysurf {true,false}]
                         [--log_retention_days LOG_RETENTION_DAYS]
                         [--placement_group_strategy {cluster,spread}]
                         [--preserve_ami {true,false}]
@@ -479,6 +483,18 @@ options:
                         Install and configure the CloudWatch Agent on the
                         instance(s) to ship logs to CloudWatch Logs (default =
                         true)
+  --enable_rockysurf {true,false}
+                        Install Node.js and run RockySurf (npx -y
+                        rockysurf@0.1.5 --port 3033, loopback-only, as a
+                        systemd service) on the instance(s) for a browser-
+                        based coding environment; Linux only, ignored for
+                        Windows base_os values (default = false). RockySurf is
+                        itself a cloud-provisioning tool that inherits this
+                        instance's IAM role/credentials automatically -- see
+                        README.md's RockySurf section and
+                        https://github.com/amroja-
+                        biz/rockysurf/blob/main/SECURITY.md before enabling on
+                        a Generic/Extended --iam_json_policy instance
   --log_retention_days LOG_RETENTION_DAYS
                         Number of days to retain CloudWatch Logs for the
                         instance(s) (default = 30)
@@ -689,6 +705,77 @@ Access the new instance family members with Windows Remote Desktop:
 Reprint this table:
 ./access_instance.py -N dev01
 ```
+
+### RockySurf
+
+[RockySurf](https://github.com/amroja-biz/rockysurf) is a third-party,
+open-source browser-based coding environment. `--enable_rockysurf=true`
+(default `false`, Linux only -- silently ignored for Windows `base_os`
+values) installs Node.js and runs it as a systemd service
+(`rockysurf.service`) on the instance, bound to `127.0.0.1:3033` only --
+never exposed on the security group, and never reachable except through a
+tunnel you open yourself.
+
+**Read RockySurf's own [SECURITY.md](https://github.com/amroja-biz/rockysurf/blob/main/SECURITY.md)
+before enabling this.** RockySurf is itself a cloud-provisioning tool --
+it reads AWS credentials the same way the AWS CLI does, which on this EC2
+instance means it automatically inherits **this instance's own IAM role**
+via the instance metadata service (IMDS), with no separate credential
+step. It has no privilege separation of its own. Two things are done
+about this automatically when you enable it:
+
+* The launched instance requires IMDSv2 (`http_tokens = "required"`,
+`http_put_response_hop_limit = 1`) -- closes the unauthenticated
+IMDSv1 credential-theft path outright.
+* A dedicated IAM permissions boundary
+(`templates/RockySurfBoundaryPolicy.json`) is attached to the instance
+role, capping what it can do regardless of your `--iam_json_policy`
+tier -- denies IAM/org escalation, the EC2/Auto Scaling primitives
+RockySurf's own SECURITY.md says it uses to provision infrastructure,
+snapshot/AMI-sharing data-exfiltration primitives, and the specific
+EC2 actions (`ec2:ReplaceIamInstanceProfileAssociation` and friends)
+that would let the instance hop onto a different, more-privileged
+role. See CLAUDE.md's Architecture section for the exact list and the
+reasoning behind it. This is a deny-list layered on top of your chosen
+tier, not a replacement allow-list -- it narrows what Generic/Extended
+grant, it never widens Minimal.
+
+Because of that boundary, **`--enable_rockysurf=true` cannot be combined
+with a pre-existing `--iam_role`** -- the boundary can only be attached
+when this build creates a new role, so that combination is refused
+outright rather than silently running RockySurf with no mitigation at
+all.
+
+RockySurf's own first-run setup is an interactive web wizard (there's no
+headless/non-interactive bootstrap) -- you complete it yourself, in your
+own browser, after tunneling in. Two ways to reach it, same as this
+toolkit's other SSH/SSM options:
+
+```
+# SSM (no inbound port needed at all):
+$ aws ssm start-session --target <instance-id> \
+    --document-name AWS-StartPortForwardingSession \
+    --parameters '{"portNumber":["3033"],"localPortNumber":["3033"]}'
+
+# SSH (uses the existing security-group rule, already scoped by --ssh_allowed_ips):
+$ ssh -L 3033:localhost:3033 <ec2_user>@<public-ip>
+```
+
+Then browse to `http://localhost:3033`.
+
+A note on the systemd unit: it runs as the instance's own `ec2_user`
+(`ec2-user`/`rocky`/`ubuntu`, depending on `base_os`), not root. This
+reduces host-level blast radius (no root shell, can't rewrite another
+user's files) but is **not** a mitigation against IMDS credential theft
+specifically -- any local process, privileged or not, can reach IMDS.
+The IMDSv2 requirement above is what actually closes that path.
+
+**`kill-instance.<name>.sh` cannot tear down anything RockySurf itself
+provisions.** It only deletes what Ec2InstanceMaker tagged and tracks. If
+RockySurf creates or manages other cloud resources using this instance's
+inherited credentials, those are invisible to teardown and will not be
+deleted when you terminate the instance -- check RockySurf's own state
+before terminating an instance you enabled it on.
 
 ### Managing Instances
 
@@ -965,6 +1052,32 @@ To run read-only instead -- worth doing for any session that only needs to
 look things up -- drop `"--allow-mutating"` from that `args` array.  The
 point of the flag is that it is a launch-time decision: whichever way you
 set it, it is one the model cannot reach or revise mid-conversation.
+
+**`enable_rockysurf` on `build_instance` needs a second, narrower gate on
+top of `--allow-mutating`.** See "RockySurf" above for what this installs
+and why it's treated differently from every other `build_instance`
+parameter: it inherits the built instance's IAM credentials automatically
+and stands up a second, unscoped, AI-facing control plane. A bare
+launch-time boolean would stay silently armed for the life of the server
+process -- including for a `build_instance` call made much later, by a
+model that has been fed an injected instruction via a crafted EC2 tag or
+`vars_files/*.yml` field (see "`confirm=True` is not a security control,
+and neither is the token" below for that risk in full). So the gate is
+scoped to one instance name instead of being a toggle:
+
+```
+$ EC2INSTANCEMAKER_ALLOW_ROCKYSURF_MCP=dev01 .venv/bin/python3 mcp_server.py --allow-mutating
+```
+
+This authorizes `enable_rockysurf=true` for a `build_instance` call
+naming `instance_name="dev01"` only, for the life of that server process
+-- calling `build_instance` with `enable_rockysurf=true` and any other
+`instance_name` still raises an error naming the required value. Unset it
+(or restart the server without it) once that one build is done. Like
+`confirm`/`confirmation_token` above, the exact-name match does not by
+itself defend against an already-injected model that satisfies it in one
+shot -- only the launch-time env var, which the model cannot set or read
+back, is the real boundary here.
 
 **Every mutating tool is two-phase.**  The first call performs the lookup
 and returns exactly what would be affected -- for a power action, the

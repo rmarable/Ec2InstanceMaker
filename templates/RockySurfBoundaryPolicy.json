@@ -1,0 +1,100 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "TheMostAnInstanceRoleMayEverDo",
+            "Effect": "Allow",
+            "Action": [
+                "ec2:Describe*",
+                "s3:Get*",
+                "s3:List*",
+                "s3:PutObject",
+                "s3:DeleteObject",
+                "sqs:*",
+                "sns:Publish",
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+                "logs:DescribeLogStreams",
+                "logs:DescribeLogGroups",
+                "ssm:DescribeAssociation",
+                "ssm:ListAssociations",
+                "ssm:GetDocument",
+                "ssm:ListInstanceAssociations",
+                "ssm:UpdateAssociationStatus",
+                "ssm:UpdateInstanceInformation",
+                "ssmmessages:*",
+                "ec2messages:*",
+                "cloudwatch:PutMetricData",
+                "sts:GetCallerIdentity"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "DenyIamAndOrgEscalation",
+            "Effect": "Deny",
+            "Action": [
+                "iam:CreateRole",
+                "iam:DeleteRole",
+                "iam:PutRolePolicy",
+                "iam:DeleteRolePolicy",
+                "iam:AttachRolePolicy",
+                "iam:DetachRolePolicy",
+                "iam:CreateUser",
+                "iam:CreateAccessKey",
+                "iam:CreateLoginProfile",
+                "iam:UpdateAssumeRolePolicy",
+                "iam:PutRolePermissionsBoundary",
+                "iam:DeleteRolePermissionsBoundary",
+                "iam:CreatePolicy",
+                "iam:CreatePolicyVersion",
+                "iam:SetDefaultPolicyVersion",
+                "iam:PassRole",
+                "iam:CreateServiceLinkedRole",
+                "sts:AssumeRole",
+                "sts:GetFederationToken",
+                "organizations:*",
+                "account:*"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "DenyRockySurfProvisioningPrimitives",
+            "Effect": "Deny",
+            "Action": [
+                "ec2:RunInstances",
+                "ec2:RequestSpotInstances",
+                "ec2:TerminateInstances",
+                "ec2:CreateSecurityGroup",
+                "ec2:AuthorizeSecurityGroupIngress",
+                "ec2:AuthorizeSecurityGroupEgress",
+                "autoscaling:CreateAutoScalingGroup",
+                "autoscaling:CreateLaunchConfiguration",
+                "autoscaling:UpdateAutoScalingGroup"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "DenyDataExfiltrationPrimitives",
+            "Effect": "Deny",
+            "Action": [
+                "ec2:ModifySnapshotAttribute",
+                "ec2:ModifyImageAttribute",
+                "ec2:CopyImage"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "DenySelfPromotionPrimitives",
+            "Effect": "Deny",
+            "Action": [
+                "ec2:ReplaceIamInstanceProfileAssociation",
+                "ec2:AssociateIamInstanceProfile",
+                "ec2:DisassociateIamInstanceProfile",
+                "ec2:ModifyInstanceMetadataOptions",
+                "ec2:ModifyInstanceAttribute"
+            ],
+            "Resource": "*"
+        }
+    ]
+}

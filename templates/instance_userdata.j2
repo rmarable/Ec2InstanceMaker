@@ -51,11 +51,44 @@ bootcmd:
 {% endif %}
 {% set _ = runcmd_items.append('/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/ec2instancemaker/amazon-cloudwatch-agent.json') %}
 {% endif %}
+{% if enable_rockysurf == 'true' %}
+{% set _ = runcmd_items.append('curl -fsSL "https://nodejs.org/dist/v24.21.0/node-v24.21.0-linux-' + ('arm64' if architecture == 'arm64' else 'x64') + '.tar.xz" -o /tmp/node.tar.xz') %}
+{% set _ = runcmd_items.append('mkdir -p /opt/nodejs') %}
+{% set _ = runcmd_items.append('tar -xJf /tmp/node.tar.xz -C /opt/nodejs --strip-components=1') %}
+{% set _ = runcmd_items.append('rm -f /tmp/node.tar.xz') %}
+{% set _ = runcmd_items.append('ln -sf /opt/nodejs/bin/node /usr/local/bin/node') %}
+{% set _ = runcmd_items.append('ln -sf /opt/nodejs/bin/npm /usr/local/bin/npm') %}
+{% set _ = runcmd_items.append('ln -sf /opt/nodejs/bin/npx /usr/local/bin/npx') %}
+{% set _ = runcmd_items.append('systemctl daemon-reload') %}
+{% set _ = runcmd_items.append('systemctl enable --now rockysurf') %}
+{% endif %}
 {% for script in prelogin_custom_scripts %}
 {% set _ = runcmd_items.append('/opt/ec2instancemaker/custom_user_prelogin_script.' + script.name + '.sh') %}
 {% endfor %}
-{% if prelogin_custom_scripts or enable_cloudwatch_logs == 'true' %}
+{% if prelogin_custom_scripts or enable_cloudwatch_logs == 'true' or enable_rockysurf == 'true' %}
 write_files:
+{% if enable_rockysurf == 'true' %}
+  - path: /etc/systemd/system/rockysurf.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=RockySurf browser coding environment (Ec2InstanceMaker)
+      After=network-online.target
+      Wants=network-online.target
+      StartLimitIntervalSec=300
+      StartLimitBurst=5
+
+      [Service]
+      Type=simple
+      User={{ ec2_user }}
+      Environment=HOME=/home/{{ ec2_user }}
+      ExecStart=/usr/local/bin/npx -y rockysurf@0.1.5 --port 3033
+      Restart=on-failure
+      RestartSec=5
+
+      [Install]
+      WantedBy=multi-user.target
+{% endif %}
 {% if enable_cloudwatch_logs == 'true' %}
   - path: /opt/ec2instancemaker/amazon-cloudwatch-agent.json
     permissions: '0644'

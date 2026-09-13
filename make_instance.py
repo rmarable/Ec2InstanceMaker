@@ -232,6 +232,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="true",
     )
     parser.add_argument(
+        "--enable_rockysurf",
+        choices=["true", "false"],
+        help=(
+            "Install Node.js and run RockySurf (npx -y rockysurf@0.1.5 --port 3033, loopback-only, "
+            "as a systemd service) on the instance(s) for a browser-based coding environment; Linux "
+            "only, ignored for Windows base_os values (default = false). RockySurf is itself a "
+            "cloud-provisioning tool that inherits this instance's IAM role/credentials automatically "
+            "-- see README.md's RockySurf section and "
+            "https://github.com/amroja-biz/rockysurf/blob/main/SECURITY.md before enabling on a "
+            "Generic/Extended --iam_json_policy instance"
+        ),
+        required=False,
+        default="false",
+    )
+    parser.add_argument(
         "--log_retention_days",
         type=int,
         help="Number of days to retain CloudWatch Logs for the instance(s) (default = 30)",
@@ -335,6 +350,8 @@ def print_debug_parameters(params: InstanceParameters) -> None:
             print("ec2_iam_instance_policy = " + params.ec2_iam_instance_policy)
         print("ec2_iam_instance_profile = " + params.ec2_iam_instance_profile)
         print("ec2_iam_instance_role = " + params.ec2_iam_instance_role)
+        if params.rockysurf_boundary_policy:
+            print("rockysurf_boundary_policy = " + params.rockysurf_boundary_policy)
     print("public_ip = " + params.public_ip)
     print("ssh_allowed_ips = " + params.ssh_allowed_ips)
     print("region = " + params.region)
@@ -353,6 +370,7 @@ def print_debug_parameters(params: InstanceParameters) -> None:
         print("cloudwatch_log_group = " + params.cloudwatch_log_group)
         print("log_retention_days = " + str(params.log_retention_days))
         print("preserve_cloudwatch_logs = " + params.preserve_cloudwatch_logs)
+    print("enable_rockysurf = " + params.enable_rockysurf)
     print("custom_user_prelogin_scripts = " + ", ".join(params.custom_user_prelogin_scripts))
     print("custom_user_postboot_scripts = " + ", ".join(params.custom_user_postboot_scripts))
     print("instance_data_dir = " + params.instance_data_dir)
@@ -412,6 +430,7 @@ class BuildSettings:
     request_type: Literal["ondemand", "spot"]
     enable_placement_group: BoolStr
     enable_cloudwatch_logs: BoolStr
+    enable_rockysurf: BoolStr
     log_retention_days: int
     iam_name_prefix: str
     turbot_account: str
@@ -478,6 +497,7 @@ class IamSnsAndLoggingResolution:
     ec2_iam_instance_policy: str
     ec2_iam_instance_profile: str
     preserve_iam_role: BoolStr
+    rockysurf_boundary_policy: str
     sns_topic_arn: str
     sns_datestamp: str
     sns_timestamp: str
@@ -501,6 +521,7 @@ class BuildReport:
     kill_script: str
     build_ami_script: str
     sns_topic_arn: str
+    rockysurf_enabled: bool
 
 
 # Function: resolve_network_and_compute()
@@ -682,6 +703,7 @@ def resolve_vpc_security_and_keypair(
 def provision_iam_sns_and_logging(
     settings: BuildSettings,
     aws_clients: AwsClients,
+    aws_account_id: str,
     iam_role: str,
     iam_json_policy: str,
     refer_to_docs_and_quit: QuitFn,
@@ -692,13 +714,15 @@ def provision_iam_sns_and_logging(
     if settings.enable_cloudwatch_logs == "true":
         setup_cloudwatch_logging(aws_clients.logs_client, cloudwatch_log_group, settings.log_retention_days, refer_to_docs_and_quit)
 
-    ec2_iam_instance_role, ec2_iam_instance_policy, ec2_iam_instance_profile, preserve_iam_role = setup_iam(
+    ec2_iam_instance_role, ec2_iam_instance_policy, ec2_iam_instance_profile, preserve_iam_role, rockysurf_boundary_policy = setup_iam(
         aws_clients.iam,
         iam_role,
         settings.iam_name_prefix,
         iam_json_policy,
         settings.instance_data_dir,
         settings.instance_serial_number,
+        aws_account_id,
+        settings.enable_rockysurf,
         debug_mode,
         refer_to_docs_and_quit,
         modify_iam_policy_document,
@@ -729,6 +753,7 @@ def provision_iam_sns_and_logging(
         ec2_iam_instance_policy=ec2_iam_instance_policy,
         ec2_iam_instance_profile=ec2_iam_instance_profile,
         preserve_iam_role=preserve_iam_role,
+        rockysurf_boundary_policy=rockysurf_boundary_policy,
         sns_topic_arn=sns_topic_arn,
         sns_datestamp=sns_datestamp,
         sns_timestamp=sns_timestamp,
@@ -791,6 +816,7 @@ def render_and_apply(
         ec2_iam_instance_policy=iam_sns.ec2_iam_instance_policy,
         ec2_iam_instance_profile=iam_sns.ec2_iam_instance_profile,
         ec2_iam_instance_role=iam_sns.ec2_iam_instance_role,
+        rockysurf_boundary_policy=iam_sns.rockysurf_boundary_policy,
         enable_placement_group=settings.enable_placement_group,
         hyperthreading=options.hyperthreading,
         iam_name_prefix=settings.iam_name_prefix,
@@ -804,6 +830,7 @@ def render_and_apply(
         instance_serial_number_file=settings.instance_serial_number_file,
         cloudwatch_log_group=iam_sns.cloudwatch_log_group,
         enable_cloudwatch_logs=settings.enable_cloudwatch_logs,
+        enable_rockysurf=settings.enable_rockysurf,
         log_retention_days=settings.log_retention_days,
         placement_group_strategy=network.placement_group_strategy,
         preserve_ami=options.preserve_ami,
@@ -862,6 +889,7 @@ ec2_iam_instance_profile: {ec2_iam_instance_profile}
 ec2_iam_instance_role: {ec2_iam_instance_role}
 preserve_iam_role: {preserve_iam_role}
 preserve_security_group: {preserve_security_group}
+rockysurf_boundary_policy: {rockysurf_boundary_policy}
 
 # EC2 instance parameters
 
@@ -871,6 +899,7 @@ cloudwatch_log_group: {cloudwatch_log_group}
 enable_cloudwatch_logs: {enable_cloudwatch_logs}
 log_retention_days: {log_retention_days}
 preserve_cloudwatch_logs: {preserve_cloudwatch_logs}
+enable_rockysurf: {enable_rockysurf}
 base_os: {base_os}
 count: {count}
 instance_type: {instance_type}
@@ -968,6 +997,7 @@ kill_instance_script: kill_instance.{instance_name}.sh
         iam_sns.ec2_iam_instance_policy,
         iam_sns.ec2_iam_instance_profile,
         iam_sns.preserve_iam_role,
+        ("arn:aws:iam::" + vpc.aws_account_id + ":policy/" + iam_sns.rockysurf_boundary_policy) if iam_sns.rockysurf_boundary_policy else "",
         vpc.ec2_keypair,
         aws_clients.sns_client,
         iam_sns.sns_topic_arn,
@@ -1025,6 +1055,17 @@ def report_and_notify(
             print("Access the " + str(settings.count) + " members of the " + settings.base_os + " instance family via SSM Session Manager:")
         print(access_command)
 
+    rockysurf_enabled = not network.is_windows and settings.enable_rockysurf == "true"
+    if rockysurf_enabled:
+        print("")
+        print("RockySurf is starting on the new instance (loopback-only, port 3033).")
+        print("Run the access command above for SSH/SSM tunnel instructions to reach it at http://localhost:3033.")
+        print("")
+        print("*** RockySurf itself can create/manage cloud resources using this instance's own IAM")
+        print("*** credentials. ./kill-instance." + settings.instance_name + ".sh only deletes what Ec2InstanceMaker")
+        print("*** tagged and tracks -- anything RockySurf provisions independently is invisible to it")
+        print("*** and will NOT be torn down.")
+
     windows_instance_table = None
     if network.is_windows:
         windows_instance_table = build_windows_password_table(
@@ -1078,6 +1119,7 @@ def report_and_notify(
         kill_script=kill_script,
         build_ami_script=build_ami_script,
         sns_topic_arn=iam_sns.sns_topic_arn,
+        rockysurf_enabled=rockysurf_enabled,
     )
 
 
@@ -1133,6 +1175,7 @@ def run_build(argv: list[str] | None, refer_to_docs_and_quit: QuitFn, ctrlc_abor
     request_type = args.request_type
     instance_type = args.instance_type
     enable_cloudwatch_logs = args.enable_cloudwatch_logs
+    enable_rockysurf = args.enable_rockysurf
     log_retention_days = args.log_retention_days
     placement_group_strategy = args.placement_group_strategy
     prod_level = args.prod_level
@@ -1260,6 +1303,7 @@ def run_build(argv: list[str] | None, refer_to_docs_and_quit: QuitFn, ctrlc_abor
             request_type=request_type,
             enable_placement_group=enable_placement_group,
             enable_cloudwatch_logs=enable_cloudwatch_logs,
+            enable_rockysurf=enable_rockysurf,
             log_retention_days=log_retention_days,
             iam_name_prefix=iam_name_prefix,
             turbot_account=turbot_account,
@@ -1309,7 +1353,7 @@ def run_build(argv: list[str] | None, refer_to_docs_and_quit: QuitFn, ctrlc_abor
             # Phase 3: CloudWatch log group, IAM role/policy/profile setup, Turbot
             # environment variables, SNS topic creation/subscribe/timestamps.
 
-            iam_sns = provision_iam_sns_and_logging(settings, aws_clients, iam_role, iam_json_policy, refer_to_docs_and_quit)
+            iam_sns = provision_iam_sns_and_logging(settings, aws_clients, vpc.aws_account_id, iam_role, iam_json_policy, refer_to_docs_and_quit)
 
             return _run_remaining_phases(
                 settings,
@@ -1392,6 +1436,7 @@ def rollback_partial_build(
         iam_sns.ec2_iam_instance_policy if iam_sns else "",
         iam_sns.ec2_iam_instance_profile if iam_sns else "",
         iam_sns.preserve_iam_role if iam_sns else "true",
+        ("arn:aws:iam::" + vpc.aws_account_id + ":policy/" + iam_sns.rockysurf_boundary_policy) if (vpc and iam_sns and iam_sns.rockysurf_boundary_policy) else "",
         iam_sns.sns_topic_arn if iam_sns else "",
         iam_sns.cloudwatch_log_group if iam_sns else "",
         settings.enable_cloudwatch_logs if iam_sns else "false",

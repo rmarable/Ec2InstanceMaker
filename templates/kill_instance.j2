@@ -313,6 +313,13 @@ then
 	teardown_step "Removed IAM role {{ ec2_iam_instance_role }} from instance profile {{ ec2_iam_instance_profile }}" aws iam remove-role-from-instance-profile --instance-profile-name {{ ec2_iam_instance_profile }} --role-name {{ ec2_iam_instance_role }}
 	teardown_step "Deleted IAM EC2 instance profile: {{ ec2_iam_instance_profile }}" aws iam delete-instance-profile --instance-profile-name {{ ec2_iam_instance_profile }}
 	teardown_step "Deleted IAM EC2 role: {{ ec2_iam_instance_role }}" aws iam delete-role --role-name {{ ec2_iam_instance_role }}
+{% if enable_rockysurf == 'true' and rockysurf_boundary_policy %}
+	# Deleting the role above clears its PermissionsBoundary reference as
+	# part of that same call, so the boundary policy can only be deleted
+	# afterward -- must stay after delete-role, not merged into the block
+	# above.
+	teardown_step "Deleted RockySurf IAM permissions boundary: {{ rockysurf_boundary_policy }}" aws iam delete-policy --policy-arn arn:aws:iam::{{ aws_account_id }}:policy/{{ rockysurf_boundary_policy }}
+{% endif %}
 fi
 {% else %}
 

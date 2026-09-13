@@ -218,6 +218,7 @@ def cleanup_partial_build(
     iam_instance_policy: str,
     iam_instance_profile: str,
     preserve_iam_role: BoolStr,
+    rockysurf_boundary_policy_arn: str,
     sns_topic_arn: str,
     cloudwatch_log_group: str,
     enable_cloudwatch_logs: BoolStr,
@@ -274,6 +275,16 @@ def cleanup_partial_build(
         ]
         for action, description in iam_cleanup_steps:
             attempt(action, description, {"NoSuchEntity"})
+        # Deleting the role clears its PermissionsBoundary reference as
+        # part of that same call, so the boundary policy itself can only
+        # be deleted afterward -- must stay last in this list, after
+        # delete_role() above, not merged into iam_cleanup_steps.
+        if rockysurf_boundary_policy_arn:
+            attempt(
+                lambda: iam.delete_policy(PolicyArn=rockysurf_boundary_policy_arn),
+                "RockySurf IAM permissions boundary " + rockysurf_boundary_policy_arn,
+                {"NoSuchEntity"},
+            )
     print("")
     if preserve_security_group == "true":
         print("Preserved pre-existing EC2 security group: " + security_group_name)
@@ -333,6 +344,7 @@ def ctrlC_Abort(
     iam_instance_policy: str,
     iam_instance_profile: str,
     preserve_iam_role: BoolStr,
+    rockysurf_boundary_policy_arn: str,
     ec2_keypair: str,
     sns_client: SNSClient,
     sns_topic_arn: str,
@@ -376,6 +388,7 @@ def ctrlC_Abort(
             iam_instance_policy,
             iam_instance_profile,
             preserve_iam_role,
+            rockysurf_boundary_policy_arn,
             sns_topic_arn,
             cloudwatch_log_group,
             enable_cloudwatch_logs,

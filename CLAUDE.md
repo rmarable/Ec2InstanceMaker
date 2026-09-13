@@ -569,6 +569,136 @@ one artifact worth being able to keep past termination for a post-mortem,
 independent of `--instance_owner_department` (which is free text, not
 used for this or any other conditional behavior).
 
+**RockySurf** (`--enable_rockysurf`, default `false`, Linux only — silently
+a no-op for Windows `base_os` values, same convention as
+`custom_user_scripts`/CloudWatch) installs Node.js (official prebuilt
+tarball from nodejs.org, `curl`, no third-party apt/yum repo or `nvm`/
+NodeSource script — matches how this repo already installs AWS CLI/SSM
+Agent: vendor binary via curl, not a package-manager repo) and runs
+[RockySurf](https://github.com/amroja-biz/rockysurf) — a third-party,
+open-source browser-based coding environment — as a systemd unit
+(`rockysurf.service`, `templates/instance_userdata.j2`), bound to
+`127.0.0.1:3033` only. `npx -y rockysurf@0.1.5` pins the package version
+explicitly rather than always-latest, for supply-chain reproducibility;
+its transitive dependencies still re-resolve against the npm registry on
+every `Restart=on-failure` restart (no lockfile/`npm ci`), which is worse
+than this repo's other installs (one fixed vendor artifact, fetched once)
+— `StartLimitIntervalSec=300`/`StartLimitBurst=5` bounds how often that
+can happen, but the underlying re-resolution risk is accepted, not fixed,
+pending a real vendored-install mechanism if it ever becomes a problem.
+Default is `false` deliberately — an adversarial multi-agent review (see
+CLAUDE-STATE.md) found that RockySurf is itself a cloud-provisioning
+control plane that reads AWS credentials via the standard SDK chain, so
+on this EC2 instance it automatically inherits **the instance's own IAM
+role** via IMDS, with no separate credential step, and has no privilege
+separation of its own (arbitrary code it runs, or any SSRF in its
+dependency tree, can steal that role's credentials). Default `true` was
+considered and rejected for exactly this reason.
+
+Two independent mitigations are wired in, not just documented, whenever
+this flag is `true`:
+
+1. **IMDSv2 is required on the launched instance**
+   (`DEFAULT_EC2_TEMPLATE.j2`'s `metadata_options { http_tokens =
+   "required", http_put_response_hop_limit = 1 }`, gated on
+   `enable_rockysurf == 'true'` — the base template sets no
+   `metadata_options` at all otherwise). This is the single highest-value
+   fix: without it, IMDSv1 lets any local process read the instance
+   role's credentials with zero authentication, boundary or no boundary.
+2. **A dedicated IAM permissions boundary**
+   (`templates/RockySurfBoundaryPolicy.json`) is attached to the instance
+   role at creation time, capping what it can do regardless of which
+   `--iam_json_policy` tier was chosen. A permissions boundary only ever
+   *narrows* what the identity policy already grants (the intersection of
+   the two) — it can never grant anything new, and a boundary with only
+   `Deny` statements and no `Allow` grants nothing at all (an early draft
+   of this policy made exactly that mistake and would have broken every
+   RockySurf-enabled build; caught by the same adversarial review before
+   it shipped). The policy has one broad `Allow` base — identical to
+   `iam/CreatedRoleBoundary.json`'s `TheMostAnInstanceRoleMayEverDo`
+   statement, reused rather than re-derived — plus four `Deny` groups:
+   IAM/organizations escalation (`iam:CreateRole`, `PutRolePolicy`,
+   `AttachRolePolicy`, `PassRole`, `CreatePolicy`,
+   `PutRolePermissionsBoundary`, `CreateServiceLinkedRole`,
+   `sts:AssumeRole`, `sts:GetFederationToken`, `organizations:*`,
+   `account:*`); the EC2/Auto Scaling provisioning primitives RockySurf's
+   own SECURITY.md says it uses to create/manage cloud servers
+   (`ec2:RunInstances`, `RequestSpotInstances`, `TerminateInstances`,
+   `CreateSecurityGroup`, `AuthorizeSecurityGroupIngress/Egress`,
+   `autoscaling:CreateAutoScalingGroup/CreateLaunchConfiguration/
+   UpdateAutoScalingGroup`); data-exfiltration via snapshot/AMI sharing
+   (`ec2:ModifySnapshotAttribute`, `ModifyImageAttribute`, `CopyImage` —
+   Generic/Extended both grant the underlying create/describe actions on
+   `Resource: "*"`, so sharing a snapshot to an attacker-owned account was
+   a real, live hole in an earlier draft of this policy that only denied
+   IAM-service escalation); and self-promotion primitives found by
+   checking what Generic/Extended actually grant, not by guessing —
+   `ec2:ReplaceIamInstanceProfileAssociation` is live in both tiers today
+   and lets a compromised instance swap its own running instance's IAM
+   profile for a different, more-privileged one elsewhere in the account
+   with zero IAM API calls; `AssociateIamInstanceProfile`/
+   `DisassociateIamInstanceProfile`/`ModifyInstanceMetadataOptions`/
+   `ModifyInstanceAttribute` aren't granted by any tier today but are
+   denied anyway so a future tier change can't reopen the instance-profile-
+   swap path or let the instance weaken its own IMDSv2 requirement from
+   the inside. This is a deny-list layered on top of whichever tier was
+   chosen, not a replacement allow-list — narrows Generic/Extended, never
+   widens Minimal.
+
+   The boundary can only be attached at `iam.create_role()` time (an IAM
+   permissions boundary is passed by ARN at role creation, not attached
+   after the fact), so `setup_iam()` hard-refuses `enable_rockysurf=true`
+   combined with a pre-existing `--iam_role` — a warning-only combination
+   was considered and rejected as disproportionate, since that's exactly
+   the zero-mitigation scenario RockySurf's own SECURITY.md warns about.
+   `instance_builder.ensure_rockysurf_boundary_policy()` check-then-creates
+   the boundary the same way `ensure_iam_role_exists()`/
+   `ensure_iam_instance_profile()` already do (a managed policy's ARN for
+   a customer policy with the default path is deterministic —
+   `arn:aws:iam::<account>:policy/<name>` — so this needs no separate
+   name→ARN lookup call), which is what makes a retried build with the
+   same `instance_serial_number`-derived name safe instead of crashing on
+   `EntityAlreadyExists`. It runs *before* `create_role()` inside
+   `ensure_iam_role_created()`, not after, for the same reason. Tagged
+   with `instance_serial_number` like every other per-build resource, and
+   torn down by `kill-instance.<name>.sh` via `aws iam delete-policy`
+   *after* the existing `delete-role` step (deleting a role clears its
+   `PermissionsBoundary` reference as part of that same call, so the
+   policy can only be deleted afterward) — and by
+   `aux_data.cleanup_partial_build()`/`rollback_partial_build()` on the
+   abort/rollback path, so a build that fails between creating the
+   boundary and finishing doesn't orphan a tagged managed policy no other
+   cleanup path reaches.
+
+   Accepted, not fixed: the boundary still leaves whatever
+   S3/SQS/SNS/autoscaling access the chosen tier itself grants intact
+   (`sns:Publish` toll-fraud abuse, `s3:PutObjectAcl`-based exfiltration)
+   — this is inherent to choosing Generic/Extended tier at all, not a
+   RockySurf-specific gap, and not something a boundary layered on top
+   should try to silently patch over.
+
+The systemd unit runs as the instance's own `ec2_user`, not root — this
+reduces host-level blast radius (no root shell, can't rewrite another
+user's files) but is **not** a mitigation against IMDS credential theft
+specifically: any local process, privileged or not, can reach IMDS with
+no special capability. The IMDSv2 requirement above is what actually
+closes that path; don't read `User={{ ec2_user }}` as doing more than it
+does. The Node.js tarball download has no checksum/GPG verification, same
+as this file's existing AWS CLI/SSM Agent/CloudWatch Agent installs — a
+gap worth fixing repo-wide in one pass if it's ever fixed, not singled out
+here.
+
+`kill-instance.<name>.sh` cannot tear down anything RockySurf itself
+provisions using its inherited credentials — only what Ec2InstanceMaker
+tagged and tracks. `make_instance.py`'s `report_and_notify()` and
+`mcp_server.py`'s `destroy_instance` preview both say so explicitly; this
+can't be automated away, only surfaced.
+
+`mcp_server.py`'s `build_instance` tool gates `enable_rockysurf`
+separately from `EC2INSTANCEMAKER_ALLOW_MUTATING` — see that file's
+section below for why a bare boolean was rejected in favor of an
+instance-name-scoped env var.
+
 **`manage_instance.py`** starts/stops/reboots/terminates a previously-built
 instance or family, or reports on what's out there: `-N <instance_name>
 -A start|stop|reboot|terminate [-c]` (`-c` skips the confirmation prompt),
@@ -767,6 +897,40 @@ it buys:
    these policy documents were reasoned about rather than verified
    against a live account — which is exactly why
    `verify_mcp_credentials.py` exists.
+
+**`enable_rockysurf` gets a fifth, dedicated layer beyond the four
+above**, because it is a materially different risk from every other
+`build_instance` parameter: it inherits the built instance's IAM
+credentials automatically (see the RockySurf section above) and stands up
+a second, unscoped, AI-facing control plane, rather than merely creating
+or destroying an ordinary reversible EC2 resource. A bare boolean env var
+in the same style as `EC2INSTANCEMAKER_ALLOW_MUTATING` was considered and
+rejected: an operator who sets it once to build one RockySurf-enabled
+instance and forgets it leaves every *subsequent* `build_instance` call
+for the rest of that server process silently able to enable RockySurf
+too — including one driven by a model that has since been fed an injected
+instruction via a crafted tag or `vars_files/*.yml` field. Instead,
+`_rockysurf_via_mcp_allowed()` requires `EC2INSTANCEMAKER_ALLOW_ROCKYSURF_MCP`
+to equal the **exact `instance_name`** being built, checked at call time
+inside `build_instance()` itself (unlike `_mutating_tools_enabled()`,
+which gates tool *registration* at import time — this couldn't be an
+import-time gate, since it depends on a per-call argument, not a
+process-wide toggle). One lapse in operator memory now authorizes one
+build, not RockySurf forever for the life of the server.
+
+Be precise about what this does and doesn't buy, matching item 3 above:
+the env var is genuinely launch-time and the model cannot read or set it,
+so it *is* a real boundary in the way `confirm`/`confirmation_token`
+never are — but the exact-name match by itself is still just visibility
+once that env var is set for a given name: an already-injected model can
+still satisfy `enable_rockysurf=true` + matching `instance_name` +
+`confirm=True` in one call, the same way it can satisfy any other
+two-phase flow in this file once the underlying capability is armed.
+`destroy_instance`'s confirmation preview also checks the build record
+for `enable_rockysurf: true` and adds an explicit warning that
+kill-instance.sh cannot see or delete anything RockySurf provisioned
+independently — best-effort only (a missing or unreadable vars_file is
+silently skipped, never fatal to the destroy flow itself).
 
 Accepted risk, not fixed: `build_instance`'s `confirm=False` error message
 includes `count`/`instance_type`/`request_type` so the blast radius is

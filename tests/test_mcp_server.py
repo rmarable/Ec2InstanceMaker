@@ -158,6 +158,7 @@ def _build_report(**overrides):
         "kill_script": "./kill-instance.dev01.sh",
         "build_ami_script": "./build-ami.dev01.sh",
         "sns_topic_arn": "arn:aws:sns:us-east-1:123456789012:Ec2_Instance_SNS_Alerts_dev01",
+        "rockysurf_enabled": False,
     }
     defaults.update(overrides)
     return BuildReport(**defaults)
@@ -226,6 +227,38 @@ class TestBuildInstance:
             mcp_server.build_instance(az="us-east-2a", instance_name="dev01", instance_owner="-rf", instance_owner_email="tester@example.com", confirm=True)
 
 
+class TestBuildInstanceRockySurfGate:
+    def test_enable_rockysurf_without_env_var_raises(self, monkeypatch):
+        monkeypatch.delenv("EC2INSTANCEMAKER_ALLOW_ROCKYSURF_MCP", raising=False)
+        run_build_mock = MagicMock()
+        with patch("mcp_server.run_build", run_build_mock), pytest.raises(ToolError, match="EC2INSTANCEMAKER_ALLOW_ROCKYSURF_MCP"):
+            mcp_server.build_instance(az="us-east-2a", instance_name="dev01", instance_owner="tester", instance_owner_email="tester@example.com", confirm=True, enable_rockysurf="true")
+        run_build_mock.assert_not_called()
+
+    def test_enable_rockysurf_with_env_var_for_a_different_instance_name_raises(self, monkeypatch):
+        monkeypatch.setenv("EC2INSTANCEMAKER_ALLOW_ROCKYSURF_MCP", "some-other-instance")
+        run_build_mock = MagicMock()
+        with patch("mcp_server.run_build", run_build_mock), pytest.raises(ToolError, match="EC2INSTANCEMAKER_ALLOW_ROCKYSURF_MCP"):
+            mcp_server.build_instance(az="us-east-2a", instance_name="dev01", instance_owner="tester", instance_owner_email="tester@example.com", confirm=True, enable_rockysurf="true")
+        run_build_mock.assert_not_called()
+
+    def test_enable_rockysurf_with_matching_env_var_passes_through(self, monkeypatch):
+        monkeypatch.setenv("EC2INSTANCEMAKER_ALLOW_ROCKYSURF_MCP", "dev01")
+        run_build_mock = MagicMock(return_value=_build_report())
+        with patch("mcp_server.run_build", run_build_mock):
+            mcp_server.build_instance(az="us-east-2a", instance_name="dev01", instance_owner="tester", instance_owner_email="tester@example.com", confirm=True, enable_rockysurf="true")
+        argv, _ = run_build_mock.call_args.args
+        assert argv[argv.index("--enable_rockysurf") + 1] == "true"
+
+    def test_default_enable_rockysurf_false_ignores_env_var_state(self, monkeypatch):
+        monkeypatch.delenv("EC2INSTANCEMAKER_ALLOW_ROCKYSURF_MCP", raising=False)
+        run_build_mock = MagicMock(return_value=_build_report())
+        with patch("mcp_server.run_build", run_build_mock):
+            mcp_server.build_instance(az="us-east-2a", instance_name="dev01", instance_owner="tester", instance_owner_email="tester@example.com", confirm=True)
+        argv, _ = run_build_mock.call_args.args
+        assert argv[argv.index("--enable_rockysurf") + 1] == "false"
+
+
 class TestDestroyInstance:
     def test_confirm_false_raises_without_calling_kill_script(self):
         terminate_mock = MagicMock()
@@ -243,6 +276,16 @@ class TestDestroyInstance:
             result = mcp_server.destroy_instance("dev01", confirm=True, confirmation_token=preview["confirmation_token"])
         terminate_mock.assert_called_once_with("dev01", True, mcp_server._mcp_quit)
         assert result == {"instance_name": "dev01", "kill_script_returncode": 0}
+
+    def test_preview_warns_when_build_record_has_rockysurf_enabled(self):
+        with patch("os.path.exists", return_value=True), patch("builtins.open", mock_open(read_data="enable_rockysurf: 'true'\n")):
+            preview = mcp_server.destroy_instance("dev01", confirm=True)
+        assert any("RockySurf" in item for item in preview["will_delete"])
+
+    def test_preview_has_no_rockysurf_warning_when_build_record_missing(self):
+        with patch("os.path.exists", return_value=False):
+            preview = mcp_server.destroy_instance("dev01", confirm=True)
+        assert not any("RockySurf" in item for item in preview["will_delete"])
 
     def test_path_traversal_instance_name_rejected_before_kill_script(self):
         terminate_mock = MagicMock()
@@ -439,7 +482,7 @@ def _patch_aws_and_terraform_boundary(monkeypatch):
     monkeypatch.setattr(make_instance, "resolve_security_group", MagicMock(return_value=("ec2instancemaker_sg_mcpdev01-000000010926", "sg-0123456789abcdef0", "false")))
     monkeypatch.setattr(make_instance, "resolve_ami", MagicMock(return_value="ami-0123456789abcdef0"))
     monkeypatch.setattr(make_instance, "setup_keypair", MagicMock())
-    monkeypatch.setattr(make_instance, "setup_iam", MagicMock(return_value=("Ec2InstanceMaker-role-mcpdev01", "Ec2InstanceMaker-policy-mcpdev01", "Ec2InstanceMaker-profile-mcpdev01", "false")))
+    monkeypatch.setattr(make_instance, "setup_iam", MagicMock(return_value=("Ec2InstanceMaker-role-mcpdev01", "Ec2InstanceMaker-policy-mcpdev01", "Ec2InstanceMaker-profile-mcpdev01", "false", "")))
     monkeypatch.setattr(make_instance, "get_terraform_version", MagicMock(return_value="v1.5.7"))
     apply_terraform_mock = MagicMock()
     monkeypatch.setattr(make_instance, "apply_terraform", apply_terraform_mock)

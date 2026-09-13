@@ -224,6 +224,7 @@ def build_instance(
     instance_type: str = "t2.micro",
     prod_level: _ProdLevel = "dev",
     enable_cloudwatch_logs: BoolStr = "true",
+    enable_rockysurf: BoolStr = "false",
     log_retention_days: int = 30,
     placement_group_strategy: _PlacementGroupStrategy = "cluster",
     preserve_ami: BoolStr = "true",
@@ -258,6 +259,19 @@ def build_instance(
     security group and IAM role, not a pre-existing one to attach --
     pass a real iam_role to reuse an existing IAM role instead.
 
+    enable_rockysurf=true installs RockySurf (github.com/amroja-biz/
+    rockysurf) -- a second, AI-facing cloud-provisioning control plane --
+    on the built instance, where it automatically inherits that instance's
+    IAM role credentials via IMDS. This requires the server to have been
+    *launched* with EC2INSTANCEMAKER_ALLOW_ROCKYSURF_MCP set to this exact
+    instance_name (not a boolean -- scoped to one build, not "RockySurf
+    forever" for the life of this server process); confirm=True alone is
+    not sufficient, the same way it is not sufficient for any other tool
+    here. destroy_instance/kill-instance.<name>.sh can only tear down what
+    Ec2InstanceMaker itself tagged and tracks -- anything RockySurf
+    provisions independently, using the instance's own credentials, is
+    invisible to teardown and will not be deleted.
+
     See make_instance.py --help / README.md for the remaining
     parameters."""
     validate_instance_name_format(instance_name, _mcp_quit)
@@ -272,6 +286,14 @@ def build_instance(
             + ", request_type="
             + request_type
             + ") -- this creates real, billable AWS resources."
+        )
+    if enable_rockysurf == "true" and not _rockysurf_via_mcp_allowed(instance_name):
+        raise ToolError(
+            "enable_rockysurf=true requires this server to have been launched with "
+            + 'EC2INSTANCEMAKER_ALLOW_ROCKYSURF_MCP="'
+            + instance_name
+            + '" (must match this exact instance_name; confirm=True is not sufficient on its own). '
+            + "See build_instance's docstring and README.md's RockySurf section for why."
         )
 
     argv = [
@@ -331,6 +353,8 @@ def build_instance(
         prod_level,
         "--enable_cloudwatch_logs",
         enable_cloudwatch_logs,
+        "--enable_rockysurf",
+        enable_rockysurf,
         "--log_retention_days",
         str(log_retention_days),
         "--placement_group_strategy",
@@ -480,20 +504,37 @@ def destroy_instance(instance_name: str, confirm: bool, confirmation_token: str 
     if not confirm:
         raise ToolError('Set confirm=True to actually destroy "' + instance_name + '" -- this permanently deletes real AWS resources and cannot be undone.')
     if confirmation_token is None:
+        will_delete = [
+            "the EC2 instance(s) and their EBS volumes",
+            "the EC2 keypair and its local .pem file",
+            "the security group, unless this build reused a pre-existing one",
+            "the IAM role, policy and instance profile, unless --preserve_iam_role was set",
+            "the SNS topic and its email subscription",
+            "the CloudWatch Logs group, unless --preserve_cloudwatch_logs was set",
+            "the local Terraform state, vars_file and generated scripts",
+        ]
+        # Best-effort enrichment, never fatal to the destroy flow: if this
+        # build had enable_rockysurf=true, warn that kill-instance.sh
+        # cannot see or delete anything RockySurf itself provisioned using
+        # the instance's own inherited IAM credentials.
+        try:
+            vars_file_path = os.path.join("vars_files", instance_name + ".yml")
+            with open(vars_file_path) as fh:
+                build_record = yaml.safe_load(fh)
+            if build_record and build_record.get("enable_rockysurf") == "true":
+                will_delete.append(
+                    "NOTHING below this line: this build ran RockySurf, which can create/manage cloud resources "
+                    "using this instance's own IAM credentials -- anything it provisioned independently is "
+                    "invisible to kill-instance.sh and will NOT be deleted"
+                )
+        except (OSError, yaml.YAMLError):
+            pass
         return {
             "status": "confirmation_required",
             "action": "destroy",
             "instance_name": instance_name,
             "irreversible": True,
-            "will_delete": [
-                "the EC2 instance(s) and their EBS volumes",
-                "the EC2 keypair and its local .pem file",
-                "the security group, unless this build reused a pre-existing one",
-                "the IAM role, policy and instance profile, unless --preserve_iam_role was set",
-                "the SNS topic and its email subscription",
-                "the CloudWatch Logs group, unless --preserve_cloudwatch_logs was set",
-                "the local Terraform state, vars_file and generated scripts",
-            ],
+            "will_delete": will_delete,
             "kill_script": "./kill-instance." + instance_name + ".sh",
             "confirmation_token": _issue_confirmation_token("destroy:" + instance_name),
             "next_step": (
@@ -504,6 +545,31 @@ def destroy_instance(instance_name: str, confirm: bool, confirmation_token: str 
     _consume_confirmation_token(confirmation_token, "destroy:" + instance_name)
     returncode = terminate_via_kill_script(instance_name, True, _mcp_quit)
     return {"instance_name": instance_name, "kill_script_returncode": returncode}
+
+
+# RockySurf via build_instance is off unless the server was *launched*
+# with EC2INSTANCEMAKER_ALLOW_ROCKYSURF_MCP set to the exact instance_name
+# being built -- deliberately not a bare boolean like
+# EC2INSTANCEMAKER_ALLOW_MUTATING above. RockySurf installs a second,
+# AI-facing cloud-provisioning control plane on the built instance that
+# automatically inherits that instance's IAM role credentials via IMDS
+# (see README.md's RockySurf section) -- a materially different risk than
+# any other build_instance flag, since a boolean gate left set for the
+# life of a long-running server would silently re-authorize this for
+# every future build_instance call, including one driven by a model
+# that's been fed an injected instruction (see the untrusted-data warning
+# above). Scoping the env var to one instance_name means a forgotten gate
+# authorizes one build, not "RockySurf forever" for this server process.
+#
+# Like confirm/confirmation_token elsewhere in this file, this does NOT
+# defend against an already-injected model satisfying it in one shot --
+# only the launch-time scoping (which the model cannot reach or revise
+# mid-conversation) is a real boundary; the exact-name match just narrows
+# how much a single lapse in operator memory authorizes.
+
+
+def _rockysurf_via_mcp_allowed(instance_name: str) -> bool:
+    return os.environ.get("EC2INSTANCEMAKER_ALLOW_ROCKYSURF_MCP", "").strip() == instance_name
 
 
 # Mutating tools are OFF by default.

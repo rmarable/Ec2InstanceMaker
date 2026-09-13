@@ -983,16 +983,18 @@ class TestDecryptWindowsAdminPasswords:
 
 class TestDeriveIamNames:
     def test_default_prefix(self):
-        role, policy, profile = instance_builder.derive_iam_names("Ec2InstanceMaker", "12345_us-east-1")
+        role, policy, profile, boundary = instance_builder.derive_iam_names("Ec2InstanceMaker", "12345_us-east-1")
         assert role == "Ec2InstanceMaker-role-12345_us-east-1"
         assert policy == "Ec2InstanceMaker-policy-12345_us-east-1"
         assert profile == "Ec2InstanceMaker-profile-12345_us-east-1"
+        assert boundary == "Ec2InstanceMaker-rockysurf-boundary-12345_us-east-1"
 
     def test_custom_prefix(self):
-        role, policy, profile = instance_builder.derive_iam_names("MyOrg", "12345_us-east-1")
+        role, policy, profile, boundary = instance_builder.derive_iam_names("MyOrg", "12345_us-east-1")
         assert role == "MyOrg-role-12345_us-east-1"
         assert policy == "MyOrg-policy-12345_us-east-1"
         assert profile == "MyOrg-profile-12345_us-east-1"
+        assert boundary == "MyOrg-rockysurf-boundary-12345_us-east-1"
 
     def test_default_and_custom_prefix_use_the_same_formula(self):
         # Regression-preserving test: the original inline code special-cased
@@ -1001,14 +1003,21 @@ class TestDeriveIamNames:
         # "prefix + suffix" formula used for every other prefix -- this
         # confirms collapsing them into one formula changed nothing.
         default_names = instance_builder.derive_iam_names("Ec2InstanceMaker", "999")
-        assert default_names == ("Ec2InstanceMaker-role-999", "Ec2InstanceMaker-policy-999", "Ec2InstanceMaker-profile-999")
+        assert default_names == (
+            "Ec2InstanceMaker-role-999",
+            "Ec2InstanceMaker-policy-999",
+            "Ec2InstanceMaker-profile-999",
+            "Ec2InstanceMaker-rockysurf-boundary-999",
+        )
 
 
 class TestEnsureIamRoleCreated:
     def test_existing_role_found_does_not_create(self, tmp_path):
         iam = MagicMock()
         quit_fn = MagicMock(side_effect=SystemExit(1))
-        instance_builder.ensure_iam_role_created(iam, "role1", "policy1", str(tmp_path / "stage.json"), str(tmp_path / "final.json"), "false", quit_fn)
+        instance_builder.ensure_iam_role_created(
+            iam, "role1", "policy1", str(tmp_path / "stage.json"), str(tmp_path / "final.json"), "false", quit_fn, "false", "boundary1", "123456789012", "12345_us-east-1"
+        )
         iam.create_role.assert_not_called()
         quit_fn.assert_not_called()
 
@@ -1020,12 +1029,13 @@ class TestEnsureIamRoleCreated:
         iam.get_role.side_effect = _client_error("NoSuchEntity")
         quit_fn = MagicMock(side_effect=SystemExit(1))
 
-        instance_builder.ensure_iam_role_created(iam, "role1", "policy1", str(stage), str(final), "false", quit_fn)
+        instance_builder.ensure_iam_role_created(iam, "role1", "policy1", str(stage), str(final), "false", quit_fn, "false", "boundary1", "123456789012", "12345_us-east-1")
 
         assert final.read_text() == '{"Statement": []}'
         assert not stage.exists()  # staged file consumed/removed
         iam.create_role.assert_called_once()
         assert iam.create_role.call_args.kwargs["RoleName"] == "role1"
+        assert "PermissionsBoundary" not in iam.create_role.call_args.kwargs
         iam.put_role_policy.assert_called_once()
         assert iam.put_role_policy.call_args.kwargs["PolicyName"] == "policy1"
         quit_fn.assert_not_called()
@@ -1035,10 +1045,48 @@ class TestEnsureIamRoleCreated:
         iam.get_role.side_effect = _client_error("AccessDenied")
         quit_fn = MagicMock(side_effect=SystemExit(1))
         with pytest.raises(SystemExit):
-            instance_builder.ensure_iam_role_created(iam, "role1", "policy1", str(tmp_path / "stage.json"), str(tmp_path / "final.json"), "false", quit_fn)
+            instance_builder.ensure_iam_role_created(
+                iam, "role1", "policy1", str(tmp_path / "stage.json"), str(tmp_path / "final.json"), "false", quit_fn, "false", "boundary1", "123456789012", "12345_us-east-1"
+            )
         iam.create_role.assert_not_called()
         quit_fn.assert_called_once()
         assert "AccessDenied" in quit_fn.call_args.args[0]
+
+    def test_enable_rockysurf_creates_boundary_before_role_and_attaches_it(self, tmp_path):
+        stage = tmp_path / "stage.json"
+        stage.write_text('{"Statement": []}')
+        final = tmp_path / "final.json"
+        iam = MagicMock()
+        iam.get_role.side_effect = _client_error("NoSuchEntity")
+        iam.get_policy.side_effect = _client_error("NoSuchEntity")
+        iam.create_policy.return_value = {"Policy": {"Arn": "arn:aws:iam::123456789012:policy/boundary1"}}
+        quit_fn = MagicMock(side_effect=SystemExit(1))
+
+        instance_builder.ensure_iam_role_created(iam, "role1", "policy1", str(stage), str(final), "false", quit_fn, "true", "boundary1", "123456789012", "12345_us-east-1")
+
+        iam.create_policy.assert_called_once()
+        assert iam.create_policy.call_args.kwargs["PolicyName"] == "boundary1"
+        iam.create_role.assert_called_once()
+        assert iam.create_role.call_args.kwargs["PermissionsBoundary"] == "arn:aws:iam::123456789012:policy/boundary1"
+        # The boundary must be created before create_role() -- a
+        # permissions boundary is attached at role-creation time, not
+        # after the fact.
+        assert iam.method_calls.index(next(c for c in iam.method_calls if c[0] == "create_policy")) < iam.method_calls.index(next(c for c in iam.method_calls if c[0] == "create_role"))
+
+    def test_enable_rockysurf_reuses_existing_boundary_on_retry(self, tmp_path):
+        stage = tmp_path / "stage.json"
+        stage.write_text('{"Statement": []}')
+        final = tmp_path / "final.json"
+        iam = MagicMock()
+        iam.get_role.side_effect = _client_error("NoSuchEntity")
+        # Boundary already exists from a prior partial attempt.
+        iam.get_policy.return_value = {"Policy": {"Arn": "arn:aws:iam::123456789012:policy/boundary1"}}
+        quit_fn = MagicMock(side_effect=SystemExit(1))
+
+        instance_builder.ensure_iam_role_created(iam, "role1", "policy1", str(stage), str(final), "false", quit_fn, "true", "boundary1", "123456789012", "12345_us-east-1")
+
+        iam.create_policy.assert_not_called()
+        assert iam.create_role.call_args.kwargs["PermissionsBoundary"] == "arn:aws:iam::123456789012:policy/boundary1"
 
 
 class TestEnsureIamRoleExists:
@@ -1105,13 +1153,15 @@ class TestSetupIam:
                 fh.write('{"Statement": []}')
 
         quit_fn = MagicMock(side_effect=SystemExit(1))
-        role, policy, profile, preserve = instance_builder.setup_iam(
+        role, policy, profile, preserve, boundary = instance_builder.setup_iam(
             iam,
             "UNDEFINED",
             "Ec2InstanceMaker",
             "GenericEc2InstancePolicy.json",
             str(tmp_path) + "/",
             "12345_us-east-1",
+            "123456789012",
+            "false",
             "false",
             quit_fn,
             fake_modify_policy,
@@ -1121,22 +1171,80 @@ class TestSetupIam:
         assert policy == "Ec2InstanceMaker-policy-12345_us-east-1"
         assert profile == "Ec2InstanceMaker-profile-12345_us-east-1"
         assert preserve == "false"
+        assert boundary == ""
         iam.create_role.assert_called_once()
         iam.create_instance_profile.assert_called_once()
         assert not stage_file.exists()
+
+    def test_enable_rockysurf_new_role_path_returns_boundary_name(self, tmp_path):
+        iam = MagicMock()
+        iam.get_role.side_effect = _client_error("NoSuchEntity")
+        iam.get_instance_profile.side_effect = _client_error("NoSuchEntity")
+        iam.get_policy.side_effect = _client_error("NoSuchEntity")
+        iam.create_policy.return_value = {"Policy": {"Arn": "arn:aws:iam::123456789012:policy/Ec2InstanceMaker-rockysurf-boundary-12345_us-east-1"}}
+
+        def fake_modify_policy(src, stage, prefix, serial):
+            with open(stage, "w") as fh:
+                fh.write('{"Statement": []}')
+
+        quit_fn = MagicMock(side_effect=SystemExit(1))
+        role, policy, profile, preserve, boundary = instance_builder.setup_iam(
+            iam,
+            "UNDEFINED",
+            "Ec2InstanceMaker",
+            "GenericEc2InstancePolicy.json",
+            str(tmp_path) + "/",
+            "12345_us-east-1",
+            "123456789012",
+            "true",
+            "false",
+            quit_fn,
+            fake_modify_policy,
+        )
+
+        assert boundary == "Ec2InstanceMaker-rockysurf-boundary-12345_us-east-1"
+        assert iam.create_role.call_args.kwargs["PermissionsBoundary"] == "arn:aws:iam::123456789012:policy/Ec2InstanceMaker-rockysurf-boundary-12345_us-east-1"
+
+    def test_enable_rockysurf_with_preexisting_iam_role_is_hard_refused(self, tmp_path):
+        # A pre-existing --iam_role is never mutated by this build, so the
+        # RockySurf boundary can only ever be attached on the create-new-role
+        # path -- this combination must fail loudly, not warn and proceed
+        # with zero mitigation attached.
+        iam = MagicMock()
+        quit_fn = MagicMock(side_effect=SystemExit(1))
+        with pytest.raises(SystemExit):
+            instance_builder.setup_iam(
+                iam,
+                "my-preexisting-role",
+                "Ec2InstanceMaker",
+                "GenericEc2InstancePolicy.json",
+                str(tmp_path) + "/",
+                "12345_us-east-1",
+                "123456789012",
+                "true",
+                "false",
+                quit_fn,
+                MagicMock(),
+            )
+        quit_fn.assert_called_once()
+        assert "--iam_role" in quit_fn.call_args.args[0]
+        iam.get_role.assert_not_called()
+        iam.create_role.assert_not_called()
 
     def test_preexisting_role_path_returns_correct_names_and_preserve_true(self, tmp_path):
         iam = MagicMock()  # get_role and get_instance_profile both "succeed" (found)
         quit_fn = MagicMock(side_effect=SystemExit(1))
         modify_policy = MagicMock()
 
-        role, policy, profile, preserve = instance_builder.setup_iam(
+        role, policy, profile, preserve, boundary = instance_builder.setup_iam(
             iam,
             "my-preexisting-role",
             "Ec2InstanceMaker",
             "GenericEc2InstancePolicy.json",
             str(tmp_path) + "/",
             "12345_us-east-1",
+            "123456789012",
+            "false",
             "false",
             quit_fn,
             modify_policy,
@@ -1146,6 +1254,7 @@ class TestSetupIam:
         assert policy == "UNDEFINED"
         assert profile == "my-preexisting-role_instance_profile"
         assert preserve == "true"
+        assert boundary == ""
 
     def test_unrecognized_iam_json_policy_quits_before_touching_the_filesystem(self, tmp_path):
         # Defense-in-depth: --iam_json_policy's argparse choices=[...] is
@@ -1164,6 +1273,8 @@ class TestSetupIam:
                 "../../etc/passwd",
                 str(tmp_path) + "/",
                 "12345_us-east-1",
+                "123456789012",
+                "false",
                 "false",
                 quit_fn,
                 modify_policy,
@@ -1179,7 +1290,9 @@ class TestSetupIam:
         iam.get_role.side_effect = _client_error("NoSuchEntity")
         quit_fn = MagicMock(side_effect=SystemExit(1))
         with pytest.raises(SystemExit):
-            instance_builder.setup_iam(iam, "nonexistent-role", "Ec2InstanceMaker", "GenericEc2InstancePolicy.json", "/fake/", "12345_us-east-1", "false", quit_fn, MagicMock())
+            instance_builder.setup_iam(
+                iam, "nonexistent-role", "Ec2InstanceMaker", "GenericEc2InstancePolicy.json", "/fake/", "12345_us-east-1", "123456789012", "false", "false", quit_fn, MagicMock()
+            )
         iam.get_instance_profile.assert_not_called()
 
 
@@ -1786,7 +1899,7 @@ class TestIamNameLengths:
         # Tie the bound to the real name derivation rather than a constant.
         instance_name = "a" * 27
         instance_builder.validate_iam_name_lengths("Ec2InstanceMaker", instance_name, _quitting_mock())
-        role_name, _, _ = instance_builder.derive_iam_names("Ec2InstanceMaker", instance_name + "-12345678901234")
+        role_name, _, _, _ = instance_builder.derive_iam_names("Ec2InstanceMaker", instance_name + "-12345678901234")
         assert len(role_name) == 64
 
 

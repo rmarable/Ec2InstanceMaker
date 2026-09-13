@@ -62,7 +62,7 @@ def _patch_aws_and_terraform_boundary(monkeypatch, aws_clients=None, setup_iam_r
     etc.) is left real -- none of it touches AWS or a subprocess.
     """
     aws_clients = aws_clients or _mock_aws_clients()
-    setup_iam_return = setup_iam_return or ("Ec2InstanceMaker-role-testint01", "Ec2InstanceMaker-policy-testint01", "Ec2InstanceMaker-profile-testint01", "false")
+    setup_iam_return = setup_iam_return or ("Ec2InstanceMaker-role-testint01", "Ec2InstanceMaker-policy-testint01", "Ec2InstanceMaker-profile-testint01", "false", "")
 
     monkeypatch.setattr(make_instance, "ctrlC_Abort", MagicMock())
     monkeypatch.setattr(

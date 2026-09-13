@@ -37,6 +37,7 @@ from mypy_boto3_ec2.literals import InstanceTypeType
 from mypy_boto3_ec2.service_resource import EC2ServiceResource, SecurityGroup
 from mypy_boto3_ec2.type_defs import FilterTypeDef, TagTypeDef
 from mypy_boto3_iam.client import IAMClient
+from mypy_boto3_iam.type_defs import CreateRoleRequestTypeDef
 from mypy_boto3_logs.client import CloudWatchLogsClient
 from mypy_boto3_sns.client import SNSClient
 from mypy_boto3_sts.client import STSClient
@@ -662,12 +663,57 @@ def decrypt_windows_admin_passwords(instance_data_dir: str, ec2_keypair: str, in
 # formula, not a behavior change.
 
 
-def derive_iam_names(iam_name_prefix: str, instance_serial_number: str) -> tuple[str, str, str]:
+def derive_iam_names(iam_name_prefix: str, instance_serial_number: str) -> tuple[str, str, str, str]:
     return (
         iam_name_prefix + "-role-" + instance_serial_number,
         iam_name_prefix + "-policy-" + instance_serial_number,
         iam_name_prefix + "-profile-" + instance_serial_number,
+        iam_name_prefix + "-rockysurf-boundary-" + instance_serial_number,
     )
+
+
+# Function: ensure_rockysurf_boundary_policy()
+# Purpose: create the RockySurf IAM permissions boundary (a managed policy,
+# templates/RockySurfBoundaryPolicy.json) if it doesn't already exist, and
+# return its ARN. Only called when enable_rockysurf == 'true' on the
+# create-a-new-role path -- never for an operator-supplied --iam_role (see
+# setup_iam()'s hard refusal of that combination). Managed-policy ARNs for
+# a customer policy with the default path are deterministic
+# (arn:aws:iam::<account>:policy/<name>), so this can check-then-create the
+# same way ensure_iam_role_exists()/ensure_iam_instance_profile() do,
+# without needing a separate name->ARN lookup call -- this is also what
+# makes a retried build (same instance_serial_number-derived name) safe:
+# without this check, a second create_policy() call would raise
+# EntityAlreadyExists instead of being treated as "already done".
+
+
+def ensure_rockysurf_boundary_policy(iam: IAMClient, boundary_policy_name: str, aws_account_id: str, instance_serial_number: str, debug_mode: BoolStr, refer_to_docs_and_quit: QuitFn) -> str:
+    boundary_policy_arn = "arn:aws:iam::" + aws_account_id + ":policy/" + boundary_policy_name
+    try:
+        iam.get_policy(PolicyArn=boundary_policy_arn)
+        if debug_mode == "true":
+            print("")
+        print("Found RockySurf IAM permissions boundary policy: " + boundary_policy_name)
+        return boundary_policy_arn
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "NoSuchEntity":
+            with open("templates/RockySurfBoundaryPolicy.json") as policy_input:
+                policy_document = policy_input.read()
+            response = iam.create_policy(
+                PolicyName=boundary_policy_name,
+                PolicyDocument=policy_document,
+                Description="RockySurf IAM permissions boundary (Ec2InstanceMaker)",
+                Tags=[
+                    {"Key": "ManagedBy", "Value": "Ec2InstanceMaker"},
+                    {"Key": "InstanceSerialNumber", "Value": instance_serial_number},
+                ],
+            )
+            if debug_mode == "true":
+                print("")
+            print("Created RockySurf IAM permissions boundary policy: " + boundary_policy_name)
+            return response["Policy"]["Arn"]
+        else:
+            refer_to_docs_and_quit("AWS API error while checking RockySurf boundary policy " + boundary_policy_name + ": " + str(e))
 
 
 # Function: ensure_iam_role_created()
@@ -676,7 +722,17 @@ def derive_iam_names(iam_name_prefix: str, instance_serial_number: str) -> tuple
 
 
 def ensure_iam_role_created(
-    iam: IAMClient, role_name: str, policy_name: str, instance_json_policy_stage: str, instance_json_policy_template: str, debug_mode: BoolStr, refer_to_docs_and_quit: QuitFn
+    iam: IAMClient,
+    role_name: str,
+    policy_name: str,
+    instance_json_policy_stage: str,
+    instance_json_policy_template: str,
+    debug_mode: BoolStr,
+    refer_to_docs_and_quit: QuitFn,
+    enable_rockysurf: BoolStr,
+    boundary_policy_name: str,
+    aws_account_id: str,
+    instance_serial_number: str,
 ) -> None:
     try:
         iam.get_role(RoleName=role_name)
@@ -690,11 +746,23 @@ def ensure_iam_role_created(
             with open(instance_json_policy_template, "w") as dest:
                 dest.write(filedata)
             os.remove(instance_json_policy_stage)
-            iam.create_role(
-                RoleName=role_name,
-                AssumeRolePolicyDocument='{ "Version": "2012-10-17", "Statement": [ { "Effect": "Allow", "Principal": { "Service": [ "ec2.amazonaws.com" ] }, "Action": "sts:AssumeRole" } ] }',
-                Description="Generic Ec2InstanceMaker role",
-            )
+
+            # The boundary must exist *before* create_role() -- a
+            # permissions boundary is passed by ARN at role-creation time,
+            # not attached after the fact -- so this has to run first, not
+            # last, in this function.
+            boundary_policy_arn = ""
+            if enable_rockysurf == "true":
+                boundary_policy_arn = ensure_rockysurf_boundary_policy(iam, boundary_policy_name, aws_account_id, instance_serial_number, debug_mode, refer_to_docs_and_quit)
+
+            create_role_kwargs: CreateRoleRequestTypeDef = {
+                "RoleName": role_name,
+                "AssumeRolePolicyDocument": '{ "Version": "2012-10-17", "Statement": [ { "Effect": "Allow", "Principal": { "Service": [ "ec2.amazonaws.com" ] }, "Action": "sts:AssumeRole" } ] }',
+                "Description": "Generic Ec2InstanceMaker role",
+            }
+            if boundary_policy_arn:
+                create_role_kwargs["PermissionsBoundary"] = boundary_policy_arn
+            iam.create_role(**create_role_kwargs)
             with open(instance_json_policy_template) as policy_input:
                 iam.put_role_policy(RoleName=role_name, PolicyName=policy_name, PolicyDocument=policy_input.read())
             if debug_mode == "true":
@@ -750,7 +818,14 @@ def ensure_iam_instance_profile(iam: IAMClient, profile_name: str, role_name: st
 # (iam_role == "UNDEFINED"), or verifying an operator-supplied pre-existing
 # role (which won't be deleted on teardown -- see preserve_iam_role).
 # Returns (ec2_iam_instance_role, ec2_iam_instance_policy,
-# ec2_iam_instance_profile, preserve_iam_role).
+# ec2_iam_instance_profile, preserve_iam_role, rockysurf_boundary_policy).
+#
+# enable_rockysurf=true is hard-refused together with an operator-supplied
+# --iam_role, not merely warned about: the RockySurf permissions boundary
+# below can only ever be attached at create_role() time, so a pre-existing
+# role would run RockySurf with zero mitigation -- exactly the scenario
+# RockySurf's own SECURITY.md warns about. An adversarial review flagged a
+# warning-only combination here as disproportionate to that risk.
 
 
 def setup_iam(
@@ -760,10 +835,20 @@ def setup_iam(
     iam_json_policy: str,
     instance_data_dir: str,
     instance_serial_number: str,
+    aws_account_id: str,
+    enable_rockysurf: BoolStr,
     debug_mode: BoolStr,
     refer_to_docs_and_quit: QuitFn,
     modify_iam_policy_document: Callable[[str, str, str, str], None],
-) -> tuple[str, str, str, BoolStr]:
+) -> tuple[str, str, str, BoolStr, str]:
+    if enable_rockysurf == "true" and iam_role != "UNDEFINED":
+        refer_to_docs_and_quit(
+            "--enable_rockysurf=true cannot be combined with a pre-existing --iam_role ("
+            + iam_role
+            + "): the RockySurf IAM permissions boundary can only be attached when this build creates a new role. "
+            + "Either drop --iam_role so a new, boundary-protected role is created, or leave --enable_rockysurf=false."
+        )
+    rockysurf_boundary_policy = ""
     if iam_role == "UNDEFINED":
         # iam_json_policy is currently only ever one of these three
         # filenames -- enforced today by argparse's choices=[...] on
@@ -777,13 +862,27 @@ def setup_iam(
         # the calling convention changed out from under it.
         if iam_json_policy not in ("MinimalEc2InstancePolicy.json", "GenericEc2InstancePolicy.json", "ExtendedEc2InstancePolicy.json"):
             refer_to_docs_and_quit('"' + iam_json_policy + '" is not a recognized IAM policy document!')
-        role_name, policy_name, profile_name = derive_iam_names(iam_name_prefix, instance_serial_number)
+        role_name, policy_name, profile_name, boundary_policy_name = derive_iam_names(iam_name_prefix, instance_serial_number)
         instance_json_policy_src = "templates/" + iam_json_policy
         instance_json_policy_stage = instance_data_dir + "stage-" + iam_json_policy
         instance_json_policy_template = instance_data_dir + iam_json_policy
         preserve_iam_role: BoolStr = "false"
         modify_iam_policy_document(instance_json_policy_src, instance_json_policy_stage, iam_name_prefix, instance_serial_number)
-        ensure_iam_role_created(iam, role_name, policy_name, instance_json_policy_stage, instance_json_policy_template, debug_mode, refer_to_docs_and_quit)
+        ensure_iam_role_created(
+            iam,
+            role_name,
+            policy_name,
+            instance_json_policy_stage,
+            instance_json_policy_template,
+            debug_mode,
+            refer_to_docs_and_quit,
+            enable_rockysurf,
+            boundary_policy_name,
+            aws_account_id,
+            instance_serial_number,
+        )
+        if enable_rockysurf == "true":
+            rockysurf_boundary_policy = boundary_policy_name
     else:
         role_name = iam_role
         policy_name = "UNDEFINED"
@@ -791,7 +890,7 @@ def setup_iam(
         preserve_iam_role = "true"
         ensure_iam_role_exists(iam, role_name, debug_mode, refer_to_docs_and_quit)
     ensure_iam_instance_profile(iam, profile_name, role_name, debug_mode, refer_to_docs_and_quit)
-    return role_name, policy_name, profile_name, preserve_iam_role
+    return role_name, policy_name, profile_name, preserve_iam_role, rockysurf_boundary_policy
 
 
 # Class: InstanceParameters
@@ -838,6 +937,7 @@ class InstanceParameters:
     ec2_iam_instance_policy: str
     ec2_iam_instance_profile: str
     ec2_iam_instance_role: str
+    rockysurf_boundary_policy: str
     enable_placement_group: BoolStr
     hyperthreading: BoolStr
     iam_name_prefix: str
@@ -851,6 +951,7 @@ class InstanceParameters:
     instance_serial_number_file: str
     cloudwatch_log_group: str
     enable_cloudwatch_logs: BoolStr
+    enable_rockysurf: BoolStr
     log_retention_days: int
     placement_group_strategy: str
     preserve_ami: BoolStr

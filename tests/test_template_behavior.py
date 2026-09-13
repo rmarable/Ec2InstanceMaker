@@ -33,6 +33,9 @@ BASE_CONTEXT = {
     "enable_cloudwatch_logs": "true",
     "cloudwatch_log_group": "/ec2instancemaker/dev01",
     "preserve_cloudwatch_logs": "false",
+    "enable_rockysurf": "false",
+    "rockysurf_boundary_policy": "",
+    "aws_account_id": "123456789012",
     "debug_mode": "false",
     "ebs_encryption": "false",
     "ebs_optimized": "true",
@@ -856,3 +859,69 @@ class TestWindowsPasswordTempFileCleanup:
 
     def test_atexit_is_imported(self):
         assert "import atexit" in self._rendered()
+
+
+class TestRockySurf:
+    """--enable_rockysurf: Node.js install + systemd unit in cloud-init,
+    IMDSv2 enforcement on the launched instance, and the boundary-policy
+    teardown step in the kill script -- each gated independently, and each
+    a no-op when the flag is false.
+    """
+
+    ENABLED = {
+        "enable_rockysurf": "true",
+        "rockysurf_boundary_policy": "Ec2InstanceMaker-rockysurf-boundary-12345678901234_us-east-1",
+    }
+
+    def test_disabled_by_default_renders_nothing(self):
+        rendered = render({})
+        assert "rockysurf" not in rendered["instance_userdata.j2"]
+        assert "metadata_options" not in rendered["DEFAULT_EC2_TEMPLATE.j2"]
+        assert "rockysurf" not in rendered["kill_instance.j2"].lower()
+
+    def test_enabled_installs_nodejs_and_the_systemd_unit(self):
+        rendered = render(self.ENABLED)["instance_userdata.j2"]
+        assert "nodejs.org/dist/v24.21.0/node-v24.21.0-linux-x64.tar.xz" in rendered
+        assert "/etc/systemd/system/rockysurf.service" in rendered
+        assert "ExecStart=/usr/local/bin/npx -y rockysurf@0.1.5 --port 3033" in rendered
+        assert "systemctl enable --now rockysurf" in rendered
+        # Loopback-only, as documented -- never bind to 0.0.0.0 or pass a
+        # host flag that would widen it.
+        assert "--host" not in rendered
+
+    def test_enabled_picks_the_arm64_tarball_on_graviton(self):
+        rendered = render({**self.ENABLED, "architecture": "arm64"})["instance_userdata.j2"]
+        assert "node-v24.21.0-linux-arm64.tar.xz" in rendered
+        assert "linux-x64.tar.xz" not in rendered
+
+    def test_enabled_hardens_the_systemd_unit_against_a_restart_loop(self):
+        rendered = render(self.ENABLED)["instance_userdata.j2"]
+        assert "StartLimitIntervalSec=300" in rendered
+        assert "StartLimitBurst=5" in rendered
+
+    def test_enabled_requires_imdsv2_on_the_launched_instance(self):
+        rendered = render(self.ENABLED)["DEFAULT_EC2_TEMPLATE.j2"]
+        assert "metadata_options {" in rendered
+        assert 'http_tokens                 = "required"' in rendered
+        assert 'http_put_response_hop_limit = "1"' in rendered
+
+    def test_disabled_omits_imdsv2_block(self):
+        rendered = render({"enable_rockysurf": "false"})["DEFAULT_EC2_TEMPLATE.j2"]
+        assert "metadata_options" not in rendered
+
+    def test_kill_script_deletes_the_boundary_policy_after_the_role(self):
+        rendered = render({**self.ENABLED, "preserve_iam_role": "false"})["kill_instance.j2"]
+        expected = "aws iam delete-policy --policy-arn arn:aws:iam::123456789012:policy/" + self.ENABLED["rockysurf_boundary_policy"]
+        assert expected in rendered
+        assert rendered.index("aws iam delete-role --role-name") < rendered.index(expected)
+
+    def test_kill_script_skips_boundary_deletion_when_iam_role_is_preserved(self):
+        # A preserved (operator-supplied) role was never bounded by this
+        # build in the first place -- setup_iam() hard-refuses that
+        # combination, so there is never a boundary policy to delete here.
+        rendered = render({**self.ENABLED, "preserve_iam_role": "true"})["kill_instance.j2"]
+        assert "delete-policy" not in rendered
+
+    def test_kill_script_skips_boundary_deletion_when_disabled(self):
+        rendered = render({"enable_rockysurf": "false", "preserve_iam_role": "false"})["kill_instance.j2"]
+        assert "delete-policy" not in rendered

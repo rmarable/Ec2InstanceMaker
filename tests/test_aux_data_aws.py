@@ -240,6 +240,7 @@ class TestCtrlCAbortIamNaming:
             "iam_instance_policy": "Ec2InstanceMaker-policy-99999999999999_us-east-1",
             "iam_instance_profile": "Ec2InstanceMaker-profile-99999999999999_us-east-1",
             "preserve_iam_role": "false",
+            "rockysurf_boundary_policy_arn": "",
             "ec2_keypair": "99999999999999_us-east-1_us-east-1",
             "sns_client": MagicMock(),
             "sns_topic_arn": "arn:aws:sns:us-east-1:123456789012:fake-topic",
@@ -325,6 +326,7 @@ class TestCtrlCAbortCleanupReporting:
             "iam_instance_policy": "policy",
             "iam_instance_profile": "profile",
             "preserve_iam_role": "true",
+            "rockysurf_boundary_policy_arn": "",
             "ec2_keypair": "kp",
             "sns_client": MagicMock(),
             "sns_topic_arn": "arn:aws:sns:us-east-1:123456789012:fake",
@@ -388,3 +390,68 @@ class TestCtrlCAbortCleanupReporting:
         ec2client.delete_key_pair.assert_called_once()
         kwargs["sns_client"].delete_topic.assert_called_once()
         kwargs["logs_client"].delete_log_group.assert_called_once()
+
+
+class TestCleanupPartialBuildRockySurfBoundary:
+    """cleanup_partial_build()'s handling of the RockySurf IAM permissions
+    boundary -- a standalone managed policy, distinct from the role's own
+    inline policy, that only gets created when enable_rockysurf=true on the
+    create-new-role path. Deleting a role clears its PermissionsBoundary
+    reference as part of that same call, so the boundary policy can only be
+    deleted afterward -- this must hold even in the abort/rollback path,
+    not just the normal kill-instance.sh teardown.
+    """
+
+    def _kwargs(self, **overrides):
+        kwargs = {
+            "ec2client": MagicMock(),
+            "iam": MagicMock(),
+            "sns_client": MagicMock(),
+            "logs_client": MagicMock(),
+            "security_group_name": "fake-sg",
+            "vpc_security_group_ids": "sg-fakefakefake",
+            "preserve_security_group": "true",
+            "ec2_keypair": "kp",
+            "secret_key_file": "/nonexistent/kp.pem",
+            "iam_instance_role": "role1",
+            "iam_instance_policy": "policy1",
+            "iam_instance_profile": "profile1",
+            "preserve_iam_role": "false",
+            "rockysurf_boundary_policy_arn": "arn:aws:iam::123456789012:policy/boundary1",
+            "sns_topic_arn": "",
+            "cloudwatch_log_group": "",
+            "enable_cloudwatch_logs": "false",
+            "preserve_cloudwatch_logs": "false",
+        }
+        kwargs.update(overrides)
+        return kwargs
+
+    def test_boundary_policy_is_deleted_after_the_role(self):
+        kwargs = self._kwargs()
+        aux_data.cleanup_partial_build(**kwargs)
+        iam = kwargs["iam"]
+        iam.delete_policy.assert_called_once_with(PolicyArn="arn:aws:iam::123456789012:policy/boundary1")
+        role_call_index = [c[0] for c in iam.method_calls].index("delete_role")
+        policy_call_index = [c[0] for c in iam.method_calls].index("delete_policy")
+        assert role_call_index < policy_call_index
+
+    def test_empty_boundary_arn_deletes_nothing(self):
+        kwargs = self._kwargs(rockysurf_boundary_policy_arn="")
+        aux_data.cleanup_partial_build(**kwargs)
+        kwargs["iam"].delete_policy.assert_not_called()
+
+    def test_preserved_role_never_attempts_boundary_deletion_either(self):
+        # preserve_iam_role=true means this build never touched the role at
+        # all -- it also never created a boundary, so rockysurf_boundary_policy_arn
+        # should be "" in that case, but guard the cleanup logic itself too.
+        kwargs = self._kwargs(preserve_iam_role="true", rockysurf_boundary_policy_arn="")
+        aux_data.cleanup_partial_build(**kwargs)
+        kwargs["iam"].delete_policy.assert_not_called()
+        kwargs["iam"].delete_role.assert_not_called()
+
+    def test_already_gone_boundary_policy_is_not_reported_as_a_failure(self, capsys):
+        kwargs = self._kwargs()
+        kwargs["iam"].delete_policy.side_effect = _client_error("NoSuchEntity")
+        failures = aux_data.cleanup_partial_build(**kwargs)
+        assert not any("boundary" in f.lower() for f in failures)
+        assert "Nothing to delete" in capsys.readouterr().out
