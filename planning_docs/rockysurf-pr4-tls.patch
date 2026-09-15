@@ -1,0 +1,738 @@
+diff --git a/packages/core/package.json b/packages/core/package.json
+index 67586b3..d639edd 100644
+--- a/packages/core/package.json
++++ b/packages/core/package.json
+@@ -48,6 +48,7 @@
+     "better-sqlite3": "^13.0.3",
+     "drizzle-orm": "^0.45.2",
+     "hono": "^4.13.5",
++    "selfsigned": "^5.5.0",
+     "ssh2": "^1.17.0",
+     "yaml": "^2.9.0",
+     "zod": "^4.4.3"
+diff --git a/packages/core/src/config/config.test.ts b/packages/core/src/config/config.test.ts
+index b3940d9..340c956 100644
+--- a/packages/core/src/config/config.test.ts
++++ b/packages/core/src/config/config.test.ts
+@@ -106,11 +106,19 @@ describe('defaults materialize', () => {
+     // holding cloud credentials and SSH private keys on the network.
+     expect(config.server.host).toBe('127.0.0.1')
+     expect(config.server.publicUrl).toBeUndefined()
++    // Off by default, same reasoning as loopback-only above: a config nobody wrote must not
++    // start generating certificates either.
++    expect(config.server.tls.selfSigned).toBe(false)
+     expect(config.auth.mode).toBe('local')
+     expect(config.limits).toMatchObject({ maxServers: 5, createRatePerHour: 4 })
+     expect(config.limits.spendCap).toBeUndefined()
+   })
+
++  it('server.tls.selfSigned can be turned on explicitly', () => {
++    const config = parseConfig('server:\n  tls:\n    selfSigned: true\n', 'test.yaml', {})
++    expect(config.server.tls.selfSigned).toBe(true)
++  })
++
+   it('every provider is present and disabled by default', () => {
+     const config = parseConfig('', 'test.yaml', {})
+     expect(config.providers.aws).toMatchObject({ enabled: false, region: 'us-east-1' })
+diff --git a/packages/core/src/config/schema.ts b/packages/core/src/config/schema.ts
+index b3755ff..c72ebb2 100644
+--- a/packages/core/src/config/schema.ts
++++ b/packages/core/src/config/schema.ts
+@@ -83,6 +83,26 @@ const serverSchema = section(
+       .min(1)
+       .default('~/.rockysurf')
+       .transform((v) => toAbsolutePath(v)),
++    tls: section(
++      z.strictObject({
++        /**
++         * Generate and serve a self-signed certificate instead of plain HTTP.
++         *
++         * OFF BY DEFAULT, same reasoning as `host` above: loopback plus one password is the
++         * shipped posture, and this is for the operator who has already made the deliberate
++         * choice to widen `host` beyond it. Not a substitute for a real certificate behind a
++         * reverse proxy — a self-signed cert still shows a browser warning — but a better
++         * default than plaintext for whoever hits `host: 0.0.0.0` before they know to put a
++         * proxy in front, which the existing warning does not stop anyone from doing.
++         *
++         * The certificate is generated once, under `server.dataDir`, and reused across
++         * restarts — regenerating it every boot would re-invalidate a browser's "I trust this"
++         * exception each time, training the operator to click through the warning without
++         * reading it.
++         */
++        selfSigned: z.boolean().default(false),
++      }),
++    ),
+   }),
+ )
+
+diff --git a/packages/core/src/server.test.ts b/packages/core/src/server.test.ts
+index a3ba7d7..79c25e0 100644
+--- a/packages/core/src/server.test.ts
++++ b/packages/core/src/server.test.ts
+@@ -1,5 +1,6 @@
+ import { spawnSync } from 'node:child_process'
+ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
++import https from 'node:https'
+ import type { AddressInfo } from 'node:net'
+ import { tmpdir } from 'node:os'
+ import { join } from 'node:path'
+@@ -10,6 +11,7 @@ import { secretKeyPath } from './secrets/index.js'
+ import { makeFakeProvider } from './providers/fake.js'
+ import { ProviderRegistry } from './providers/registry.js'
+ import { boot, type BootedApp, type BootOptions } from './server.js'
++import { selfSignedCertPaths } from './tls/self-signed.js'
+
+ /**
+  * The boot path against a real temporary config and a real on-disk database — the one place
+@@ -258,6 +260,49 @@ describe('boot', () => {
+     })
+   })
+
++  /**
++   * `server.tls.selfSigned` end to end, against a real socket and a real TLS handshake — the
++   * same reasoning as the plaintext listener tests above: a test that only checked the parsed
++   * config would still pass if the wiring into `serve()` were deleted.
++   */
++  describe('server.tls.selfSigned', () => {
++    it('serves real HTTPS once turned on, instead of plaintext HTTP', async () => {
++      writeConfig('  tls:\n    selfSigned: true\n')
++      booted = await boot({ argv: [], cwd: dir, env: {}, port: 0, announce: () => {} })
++      const server = booted.server!
++      const address =
++        server.address() ?? (await new Promise((resolve) => server.once('listening', () => resolve(server.address()))))
++      const { port } = address as AddressInfo
++
++      const body = await new Promise<string>((resolve, reject) => {
++        https.get({ hostname: '127.0.0.1', port, path: '/health', rejectUnauthorized: false }, (res) => {
++          let data = ''
++          res.on('data', (chunk) => (data += chunk))
++          res.on('end', () => resolve(data))
++          res.on('error', reject)
++        }).on('error', reject)
++      })
++      expect(body).toContain('ok')
++
++      // The certificate is under dataDir, not thrown away when the process exits — a restart
++      // must not re-invalidate a browser's existing trust exception for it.
++      const { keyPath, certPath } = selfSignedCertPaths(join(dir, 'data'))
++      expect(existsSync(keyPath)).toBe(true)
++      expect(existsSync(certPath)).toBe(true)
++    })
++
++    it('stays plaintext HTTP when left off, the default', async () => {
++      booted = await boot({ argv: [], cwd: dir, env: {}, port: 0, announce: () => {} })
++      const server = booted.server!
++      const address =
++        server.address() ?? (await new Promise((resolve) => server.once('listening', () => resolve(server.address()))))
++      const { port } = address as AddressInfo
++
++      const res = await fetch(`http://127.0.0.1:${port}/health`)
++      expect(res.status).toBe(200)
++    })
++  })
++
+   it('close() is safe to call twice', async () => {
+     booted = await bootHere()
+     await booted.close()
+diff --git a/packages/core/src/server.ts b/packages/core/src/server.ts
+index 18dab60..3eb2f32 100644
+--- a/packages/core/src/server.ts
++++ b/packages/core/src/server.ts
+@@ -1,5 +1,6 @@
+ import { serve, type ServerType } from '@hono/node-server'
+ import { existsSync } from 'node:fs'
++import { createServer as createHttpsServer } from 'node:https'
+ import { join } from 'node:path'
+ import { fileURLToPath } from 'node:url'
+ import { createApp, type AppEnv, type CreatedApp } from './app.js'
+@@ -18,6 +19,7 @@ import {
+ import { defaultDatabasePath, openDatabase, type OpenedDatabase } from './db/client.js'
+ import { createSecretsStore, loadMasterKey, type SecretsStore } from './secrets/index.js'
+ import { createServerSecretsLoader } from './bootstrap/server-secrets.js'
++import { ensureSelfSignedCert } from './tls/self-signed.js'
+ import type { ProviderRegistry } from './providers/registry.js'
+ import { createEventsService, type EventsService } from './services/events.js'
+ import type { Jobs } from './jobs/index.js'
+@@ -316,7 +318,12 @@ export async function boot(options: BootOptions = {}): Promise<BootedApp> {
+   if (options.listen !== false) {
+     // `hostname` is the whole point of rockysurf-pii7: without it node-server binds every
+     // interface, which for a box holding cloud credentials is a decision nobody made.
+-    server = serve({ fetch: created.app.fetch, port, hostname: host })
++    const tls = config.server.tls.selfSigned
++      ? await ensureSelfSignedCert(config.server.dataDir, host, config.server.publicUrl)
++      : undefined
++    server = tls
++      ? serve({ fetch: created.app.fetch, port, hostname: host, createServer: createHttpsServer, serverOptions: tls })
++      : serve({ fetch: created.app.fetch, port, hostname: host })
+     // One pass of every job immediately, THEN the timers. The reconciler running once at
+     // startup is an ADR-0001 requirement rather than an optimisation: it is what turns "core
+     // was off for a week" into a list of disagreements an operator can act on, instead of a
+@@ -374,8 +381,9 @@ function resolvePublicDir(): string | undefined {
+ /** Entry point. Kept separate from `boot()` so importing this module starts nothing. */
+ export async function main(): Promise<void> {
+   const booted = await boot()
++  const scheme = booted.config.server.tls.selfSigned ? 'https' : 'http'
+   console.error(
+-    `rockysurf listening on http://127.0.0.1:${booted.port}` +
++    `rockysurf listening on ${scheme}://127.0.0.1:${booted.port}` +
+       ` (auth: ${booted.config.auth.mode}, data: ${booted.config.server.dataDir})`,
+   )
+   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+diff --git a/packages/core/src/tls/self-signed.test.ts b/packages/core/src/tls/self-signed.test.ts
+new file mode 100644
+index 0000000..1625501
+--- /dev/null
++++ b/packages/core/src/tls/self-signed.test.ts
+@@ -0,0 +1,83 @@
++import { X509Certificate } from 'node:crypto'
++import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
++import { tmpdir } from 'node:os'
++import { join } from 'node:path'
++import { afterEach, beforeEach, describe, expect, it } from 'vitest'
++import { ensureSelfSignedCert, selfSignedCertNames, selfSignedCertPaths } from './self-signed.js'
++
++let dir: string
++
++beforeEach(() => {
++  dir = mkdtempSync(join(tmpdir(), 'rockysurf-tls-'))
++})
++
++afterEach(() => {
++  rmSync(dir, { recursive: true, force: true })
++})
++
++describe('selfSignedCertNames', () => {
++  it('always includes localhost and both loopback addresses', () => {
++    expect(selfSignedCertNames('127.0.0.1')).toEqual(expect.arrayContaining(['localhost', '127.0.0.1', '::1']))
++  })
++
++  it('prefers the publicUrl hostname when one is configured', () => {
++    const names = selfSignedCertNames('0.0.0.0', 'https://rocky.example.com:8443')
++    expect(names).toContain('rocky.example.com')
++  })
++
++  it('falls back to the bind host when it is a real, specific address', () => {
++    const names = selfSignedCertNames('192.168.1.50')
++    expect(names).toContain('192.168.1.50')
++  })
++
++  it('does not name every-interface addresses — nobody navigates a browser to 0.0.0.0', () => {
++    expect(selfSignedCertNames('0.0.0.0')).not.toContain('0.0.0.0')
++    expect(selfSignedCertNames('::')).not.toContain('::')
++  })
++
++  it('ignores an unparseable publicUrl rather than throwing', () => {
++    expect(() => selfSignedCertNames('192.168.1.50', 'not a url')).not.toThrow()
++  })
++})
++
++describe('ensureSelfSignedCert', () => {
++  it('generates a certificate and private key under dataDir/tls', async () => {
++    const credentials = await ensureSelfSignedCert(dir, '192.168.1.50')
++    expect(credentials.key).toContain('PRIVATE KEY')
++    expect(credentials.cert).toContain('CERTIFICATE')
++
++    const { keyPath, certPath } = selfSignedCertPaths(dir)
++    expect(readFileSync(keyPath, 'utf8')).toBe(credentials.key)
++    expect(readFileSync(certPath, 'utf8')).toBe(credentials.cert)
++  })
++
++  it('the private key is written owner-only, the same mode a secret key gets elsewhere in this codebase', async () => {
++    await ensureSelfSignedCert(dir, '192.168.1.50')
++    const { keyPath } = selfSignedCertPaths(dir)
++    const mode = statSync(keyPath).mode & 0o777
++    expect(mode).toBe(0o600)
++  })
++
++  it('the generated certificate actually carries the names it was asked for', async () => {
++    const credentials = await ensureSelfSignedCert(dir, '192.168.1.50', 'https://rocky.example.com')
++    const cert = new X509Certificate(credentials.cert)
++    expect(cert.subjectAltName).toContain('DNS:rocky.example.com')
++    expect(cert.subjectAltName).toContain('DNS:localhost')
++    expect(cert.subjectAltName).toContain('IP Address:127.0.0.1')
++  })
++
++  it('reuses the cached certificate on a second call instead of generating a new one', async () => {
++    const first = await ensureSelfSignedCert(dir, '192.168.1.50')
++    const second = await ensureSelfSignedCert(dir, '192.168.1.50')
++    expect(second).toEqual(first)
++  })
++
++  it('reuses the cached certificate even if the bind host changes on a later boot', async () => {
++    // Regenerating on every host change would mean widening `server.host` twice (once to add
++    // a new address, once more later) invalidates a browser's trust exception each time. The
++    // cache is deliberately keyed on dataDir alone, not on the host that requested it.
++    const first = await ensureSelfSignedCert(dir, '192.168.1.50')
++    const second = await ensureSelfSignedCert(dir, '10.0.0.9')
++    expect(second).toEqual(first)
++  })
++})
+diff --git a/packages/core/src/tls/self-signed.ts b/packages/core/src/tls/self-signed.ts
+new file mode 100644
+index 0000000..e9810e2
+--- /dev/null
++++ b/packages/core/src/tls/self-signed.ts
+@@ -0,0 +1,102 @@
++import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
++import { isIP } from 'node:net'
++import { join } from 'node:path'
++import { generate } from 'selfsigned'
++
++/**
++ * A self-signed certificate for `server.tls.selfSigned`, generated once and reused.
++ *
++ * GENERATED UNDER `server.dataDir`, NOT `os.tmpdir()`: it has to survive a restart, or every
++ * boot re-invalidates whatever "yes, I trust this" exception the operator's browser holds for
++ * it — training them to click through a certificate warning without reading it, which is the
++ * opposite of what a certificate warning is for.
++ *
++ * NOT A REPLACEMENT FOR A REAL CERTIFICATE. A self-signed one still shows a browser warning;
++ * the point is only to make plaintext HTTP not the path of least resistance for an operator who
++ * has widened `server.host` beyond loopback and has not put a reverse proxy in front yet.
++ */
++
++const TLS_DIR_NAME = 'tls'
++const KEY_FILENAME = 'self-signed-key.pem'
++const CERT_FILENAME = 'self-signed-cert.pem'
++
++export interface SelfSignedCertPaths {
++  keyPath: string
++  certPath: string
++}
++
++export function selfSignedCertPaths(dataDir: string): SelfSignedCertPaths {
++  const dir = join(dataDir, TLS_DIR_NAME)
++  return { keyPath: join(dir, KEY_FILENAME), certPath: join(dir, CERT_FILENAME) }
++}
++
++export interface TlsCredentials {
++  key: string
++  cert: string
++}
++
++/**
++ * The name(s) the certificate should actually match.
++ *
++ * `server.publicUrl`, when set, is what an operator will type into a browser — it takes
++ * priority. Otherwise fall back to `host` itself, UNLESS it is `0.0.0.0`/`::` (every interface):
++ * neither is a name a browser ever navigates to, so a cert naming it would satisfy nothing.
++ * `localhost`/`127.0.0.1`/`::1` are always included, since testing from the same box is the
++ * common case and should not need `publicUrl` set to avoid a second warning on top of the
++ * self-signed one.
++ */
++export function selfSignedCertNames(host: string, publicUrl?: string): string[] {
++  const names = new Set(['localhost', '127.0.0.1', '::1'])
++  if (publicUrl) {
++    try {
++      names.add(new URL(publicUrl).hostname)
++    } catch {
++      // An invalid publicUrl is a config-validation problem elsewhere; this just skips it.
++    }
++  } else if (host !== '0.0.0.0' && host !== '::') {
++    names.add(host)
++  }
++  return [...names]
++}
++
++function toAltNames(names: readonly string[]): Array<{ type: 2 | 7; value?: string; ip?: string }> {
++  return names.map((name) => (isIP(name) ? { type: 7 as const, ip: name } : { type: 2 as const, value: name }))
++}
++
++async function generateCert(names: readonly string[]): Promise<TlsCredentials> {
++  const primary = names[0] ?? 'localhost'
++  const pems = await generate([{ name: 'commonName', value: primary }], {
++    algorithm: 'sha256',
++    extensions: [
++      { name: 'basicConstraints', cA: false },
++      { name: 'keyUsage', digitalSignature: true, keyEncipherment: true },
++      { name: 'subjectAltName', altNames: toAltNames(names) },
++    ],
++  })
++  return { key: pems.private, cert: pems.cert }
++}
++
++/**
++ * Load the cached certificate under `dataDir`, generating one on first use.
++ *
++ * `dataDir` is already created with owner-only permissions before anything reaches this
++ * (`boot/data-dir.ts`); the `tls` subdirectory and the key file inherit that same discipline —
++ * a TLS private key gets exactly the file mode a secret key already gets in this codebase
++ * (`secrets/master-key.ts`), not a looser one because this one signs traffic instead of
++ * encrypting a database.
++ */
++export async function ensureSelfSignedCert(dataDir: string, host: string, publicUrl?: string): Promise<TlsCredentials> {
++  const { keyPath, certPath } = selfSignedCertPaths(dataDir)
++  if (existsSync(keyPath) && existsSync(certPath)) {
++    return { key: readFileSync(keyPath, 'utf8'), cert: readFileSync(certPath, 'utf8') }
++  }
++
++  const credentials = await generateCert(selfSignedCertNames(host, publicUrl))
++
++  mkdirSync(join(dataDir, TLS_DIR_NAME), { recursive: true, mode: 0o700 })
++  writeFileSync(keyPath, credentials.key, { mode: 0o600 })
++  chmodSync(keyPath, 0o600) // writeFileSync's mode is masked by the umask; set it explicitly
++  writeFileSync(certPath, credentials.cert, { mode: 0o644 })
++
++  return credentials
++}
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index fa13f0f..74b2836 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -37,6 +37,9 @@ importers:
+       hono:
+         specifier: ^4.13.5
+         version: 4.13.5
++      selfsigned:
++        specifier: ^5.5.0
++        version: 5.5.0
+       ssh2:
+         specifier: ^1.17.0
+         version: 1.17.0
+@@ -703,9 +706,60 @@ packages:
+     os: [linux]
+     libc: [glibc]
+
++  '@noble/hashes@1.4.0':
++    resolution: {integrity: sha512-V1JJ1WTRUqHHrOSh597hURcMqVKVGL/ea3kv0gSnEdsEZ0/+VyPghM1lMNGc00z7CIQorSvbKpuJkxvuHbvdbg==}
++    engines: {node: '>= 16'}
++
+   '@oxc-project/types@0.143.0':
+     resolution: {integrity: sha512-u6JZdLBTLotrNC9Vd6vPssINdzcCzleKAH6EJKImQb7GtYvX5keN2dxkoK44stCc4tffE6QQRtZTXVSzsLUlWA==}
+
++  '@peculiar/asn1-cms@2.9.4':
++    resolution: {integrity: sha512-cben7oxmQsUGZqotus7yt0srYdncOT6RNWcTQ77T2RFOXejYVYkXadrfePdRcrVpO9K95IRLKKglG2k38jKXuw==}
++    engines: {node: '>=14'}
++
++  '@peculiar/asn1-csr@2.9.4':
++    resolution: {integrity: sha512-xd4YN4vpRjkDAQWVfZZkeu12IEND7DOpkqaHSIHxZl1uggUNa9Ju0QxY2jHvDAS9pP0zhRBytg8ifsnGo3V0jw==}
++    engines: {node: '>=14'}
++
++  '@peculiar/asn1-ecc@2.9.4':
++    resolution: {integrity: sha512-JJXefFshRAuVAjWQo/39bkg1ywc1VaiO44S8RRC+Ykvf/u2KDmYffoDb0ZBPCR5uJy4AGKQhl8mX+Q8ShcWaXQ==}
++    engines: {node: '>=14'}
++
++  '@peculiar/asn1-pfx@2.9.4':
++    resolution: {integrity: sha512-khuGzHTzNzk4GDlIBEILyIs6Lce0yn0ZBdoI9v93kmNncfZRhD+AQ5ODFqdhvoE8cMJF/JMTQ8yA+t1D14kqCw==}
++    engines: {node: '>=14'}
++
++  '@peculiar/asn1-pkcs8@2.9.4':
++    resolution: {integrity: sha512-duRdotlUx9eDZe6QrQpQKl61RbWykCHBCkKayP8V8XdEFwlKHZ8qGGDMyS6Pye7OX7nLFttTTpRkJeet78ckwQ==}
++    engines: {node: '>=14'}
++
++  '@peculiar/asn1-pkcs9@2.9.4':
++    resolution: {integrity: sha512-kaL4cNxBpdQE2dKlyZBqz4ygCrwffO+8wfoxTEqM1Z8RadvCeELBRzcv0dzM8aY9azHMwODO5nxU65zXmhToOQ==}
++    engines: {node: '>=14'}
++
++  '@peculiar/asn1-rsa@2.9.4':
++    resolution: {integrity: sha512-pZ96eD1PptovcWQ/GSmuNFXd/7EQJNlKfDaNCyE2rx3W0v6QFelkzquVqRSRyyDXXCYD69ZXJDzZ8GhIiQzKoA==}
++    engines: {node: '>=14'}
++
++  '@peculiar/asn1-schema@2.9.4':
++    resolution: {integrity: sha512-GjzePcT9Iw8NzeOPf73iNS9xM+TBhd/FilAfP+RQGkTMQJTVWtytN3JHJACCjf/ABNau5S7mS3g+DcuxmRgYEg==}
++    engines: {node: '>=14'}
++
++  '@peculiar/asn1-x509-attr@2.9.4':
++    resolution: {integrity: sha512-ehQXbpQaQYycgu8OrvigwSPTFfVRcu0ECNYCWw+yzBp02Lw5paRqzzhUpfOgO2K38+WfFZuEz/0RPtam5g0OMg==}
++    engines: {node: '>=14'}
++
++  '@peculiar/asn1-x509@2.9.4':
++    resolution: {integrity: sha512-CxhBo/RdEbMMob7T31ZdQjGuoyRFLVwrDzTn25bihzBasRg9kRm/0IxIPvhgQtcK/9dNcO1XQL2fuPugwELL0Q==}
++    engines: {node: '>=14'}
++
++  '@peculiar/utils@2.0.3':
++    resolution: {integrity: sha512-+oL3HPFRIZ1St2K50lWCXiioIgSoxzz7R1J3uF6neO2yl1sgmpgY6XXJH4BdpoDkMWznQTeYF6oWNDZLCdQ4eQ==}
++
++  '@peculiar/x509@1.14.3':
++    resolution: {integrity: sha512-C2Xj8FZ0uHWeCXXqX5B4/gVFQmtSkiuOolzAgutjTfseNOHT3pUjljDZsTSxXFGgio54bCzVFqmEOUrIVk8RDA==}
++    engines: {node: '>=20.0.0'}
++
+   '@playwright/test@1.62.1':
+     resolution: {integrity: sha512-DTcUc8qii+cpHvtOwggMtBRMjKZHXYWdw8syRYu2vtzuq4Wxphqq4NfCs5Zt44L6mA8rfDfj+PHnxFc/FeK6mQ==}
+     engines: {node: '>=20'}
+@@ -1116,6 +1170,10 @@ packages:
+   asn1@0.2.6:
+     resolution: {integrity: sha512-ix/FxPn0MDjeyJ7i/yoHGFt/EX6LyNbxSEhPPXODPL+KB0VPk86UYfL0lMdy+KCnv+fmvIzySwaK5COwqVbWTQ==}
+
++  asn1js@3.0.10:
++    resolution: {integrity: sha512-S2s3aOytiKdFRdulw2qPE51MzjzVOisppcVv7jVFR+Kw0kxwvFrDcYA0h7Ndqbmj0HkMIXYWaoj7fli8kgx1eg==}
++    engines: {node: '>=12.0.0'}
++
+   assertion-error@2.0.1:
+     resolution: {integrity: sha512-Izi8RQcffqCeNVgFigKli1ssklIbpHnCYc6AknXGYoB6grJqyeby7jv12JUQgmTAnIDnbck1uxksT4dzN3PWBA==}
+     engines: {node: '>=12'}
+@@ -1160,6 +1218,10 @@ packages:
+     resolution: {integrity: sha512-/Nf7TyzTx6S3yRJObOAV7956r8cr2+Oj8AC5dt8wSP3BQAoeX58NoHyCU8P8zGkNXStjTSi6fzO6F0pBdcYbEg==}
+     engines: {node: '>= 0.8'}
+
++  bytestreamjs@2.0.1:
++    resolution: {integrity: sha512-U1Z/ob71V/bXfVABvNr/Kumf5VyeQRBEm6Txb0PQ6S7V5GpBM3w4Cbqz/xPDicR5tN0uvDifng8C+5qECeGwyQ==}
++    engines: {node: '>=6.0.0'}
++
+   cac@6.7.14:
+     resolution: {integrity: sha512-b6Ilus+c3RrdDk+JhLKUAQfzzgLEPy6wcXqS7f/xe1EETvsDP6GORG7SFuOs6cID5YkqchW/LXZbX5bc8j7ZcQ==}
+     engines: {node: '>=8'}
+@@ -1810,6 +1872,10 @@ packages:
+     resolution: {integrity: sha512-wQ0b/W4Fr01qtpHlqSqspcj3EhBvimsdh0KlHhH8HRZnMsEa0ea2fTULOXOS9ccQr3om+GcGRk4e+isrZWV8qQ==}
+     engines: {node: '>=16.20.0'}
+
++  pkijs@3.4.0:
++    resolution: {integrity: sha512-emEcLuomt2j03vxD54giVB4SxTjnsqkU692xZOZXHDVoYyypEm+b3jpiTcc+Cf+myooc+/Ly0z01jqeNHVgJGw==}
++    engines: {node: '>=16.0.0'}
++
+   playwright-core@1.62.1:
+     resolution: {integrity: sha512-wPYSwEBJY9GHraISXqyqtx0na0LpO3XEX7jNDhntbex7tzUS7kLnZsOlFruFJB4Hi/rhDMjXGqHewDZ68nYZVw==}
+     engines: {node: '>=20'}
+@@ -1836,6 +1902,13 @@ packages:
+     resolution: {integrity: sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg==}
+     engines: {node: '>=6'}
+
++  pvtsutils@1.3.6:
++    resolution: {integrity: sha512-PLgQXQ6H2FWCaeRak8vvk1GW462lMxB5s3Jm673N82zI4vqtVUPuZdffdZbPDFRoU8kAhItWFtPCWiPpp4/EDg==}
++
++  pvutils@1.2.0:
++    resolution: {integrity: sha512-BbubeCEyTuQjVMakvJQ/Sxbc93F2pwmbsxONT/ZRrwU7Ua38d8unYTwXpTVLAKJ4BDuH9IGztCjQcd/N/39Dvg==}
++    engines: {node: '>=16.0.0'}
++
+   qs@6.16.0:
+     resolution: {integrity: sha512-h6fhOIaRrID2CbEY2fqs+7t+UXZo+MLAnU5gRIq85uFtdiUPCdsApMlHhXogKVM4HM2DVbIjGNTTYH2OcmP1vA==}
+     engines: {node: '>=0.6'}
+@@ -1877,6 +1950,9 @@ packages:
+     resolution: {integrity: sha512-PWaYA1L/q9u2u7xYQi+Y3L3Yfnie7XyLeaJICV1MGD6LprsBxcAqGjYyr0eY3p+QdsA+x/Irkt4Qif8D63+Sbw==}
+     engines: {node: '>=0.10.0'}
+
++  reflect-metadata@0.2.2:
++    resolution: {integrity: sha512-urBwgfrvVP/eAyXx4hluJivBKzuEbSQs9rKWCrCkbSxNv8mxPcUZKeuoF3Uy4mJl3Lwprp6yy5/39VWigZ4K6Q==}
++
+   require-from-string@2.0.2:
+     resolution: {integrity: sha512-Xf0nWe6RseziFMu+Ap9biiUbmplq6S9/p+7w7YXP/JBHhrUDDUhwa+vANyubuqfZWTveU//DYVGsDG7RKL/vEw==}
+     engines: {node: '>=0.10.0'}
+@@ -1911,6 +1987,10 @@ packages:
+   scheduler@0.27.0:
+     resolution: {integrity: sha512-eNv+WrVbKu1f3vbYJT/xtiF5syA5HPIMtf9IgY/nKg0sWqzAUEvqY/xm7OcZc/qafLx/iO9FgOmeSAp4v5ti/Q==}
+
++  selfsigned@5.5.0:
++    resolution: {integrity: sha512-ftnu3TW4+3eBfLRFnDEkzGxSF/10BJBkaLJuBHZX0kiPS7bRdlpZGu6YGt4KngMkdTwJE6MbjavFpqHvqVt+Ew==}
++    engines: {node: '>=18'}
++
+   send@1.2.1:
+     resolution: {integrity: sha512-1gnZf7DFcoIcajTjTwjwuDjzuz4PPcY2StKPlsGAQ1+YH20IRVrBaXSWmdjowTJ6u8Rc01PoYOGHXfP1mYcZNQ==}
+     engines: {node: '>= 18'}
+@@ -2031,6 +2111,9 @@ packages:
+     resolution: {integrity: sha512-bLVMLPtstlZ4iMQHpFHTR7GAGj2jxi8Dg0s2h2MafAE4uSWF98FC/3MomU51iQAMf8/qDUbKWf5GxuvvVcXEhw==}
+     engines: {node: '>=20'}
+
++  tslib@1.14.1:
++    resolution: {integrity: sha512-Xni35NKzjgMrwevysHTCArtLDpPvye8zV/0E4EyYn43P7/7qvQwPh9BGkHewbMulVntbigmcT7rdX3BNo9wRJg==}
++
+   tslib@2.8.1:
+     resolution: {integrity: sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==}
+
+@@ -2039,6 +2122,10 @@ packages:
+     engines: {node: '>=18.0.0'}
+     hasBin: true
+
++  tsyringe@4.10.0:
++    resolution: {integrity: sha512-axr3IdNuVIxnaK5XGEUFTu3YmAQ6lllgrvqfEoR16g/HGnYY/6We4oWENtAnzK6/LpJ2ur9PAb80RBt7/U4ugw==}
++    engines: {node: '>= 6.0.0'}
++
+   tweetnacl@0.14.5:
+     resolution: {integrity: sha512-KXXFFdAbFXY4geFIwoyNK+f5Z1b7swfXABfL7HXCmoIWMKU3dmS26672A4EeQtDzLKy7SXmfBu51JolvEKwtGA==}
+
+@@ -2656,8 +2743,104 @@ snapshots:
+   '@napi-rs/lzma-linux-x64-gnu@1.5.1':
+     optional: true
+
++  '@noble/hashes@1.4.0': {}
++
+   '@oxc-project/types@0.143.0': {}
+
++  '@peculiar/asn1-cms@2.9.4':
++    dependencies:
++      '@peculiar/asn1-schema': 2.9.4
++      '@peculiar/asn1-x509': 2.9.4
++      '@peculiar/asn1-x509-attr': 2.9.4
++      asn1js: 3.0.10
++      tslib: 2.8.1
++
++  '@peculiar/asn1-csr@2.9.4':
++    dependencies:
++      '@peculiar/asn1-schema': 2.9.4
++      '@peculiar/asn1-x509': 2.9.4
++      asn1js: 3.0.10
++      tslib: 2.8.1
++
++  '@peculiar/asn1-ecc@2.9.4':
++    dependencies:
++      '@peculiar/asn1-schema': 2.9.4
++      '@peculiar/asn1-x509': 2.9.4
++      asn1js: 3.0.10
++      tslib: 2.8.1
++
++  '@peculiar/asn1-pfx@2.9.4':
++    dependencies:
++      '@peculiar/asn1-cms': 2.9.4
++      '@peculiar/asn1-pkcs8': 2.9.4
++      '@peculiar/asn1-rsa': 2.9.4
++      '@peculiar/asn1-schema': 2.9.4
++      asn1js: 3.0.10
++      tslib: 2.8.1
++
++  '@peculiar/asn1-pkcs8@2.9.4':
++    dependencies:
++      '@peculiar/asn1-schema': 2.9.4
++      '@peculiar/asn1-x509': 2.9.4
++      asn1js: 3.0.10
++      tslib: 2.8.1
++
++  '@peculiar/asn1-pkcs9@2.9.4':
++    dependencies:
++      '@peculiar/asn1-cms': 2.9.4
++      '@peculiar/asn1-pfx': 2.9.4
++      '@peculiar/asn1-pkcs8': 2.9.4
++      '@peculiar/asn1-schema': 2.9.4
++      '@peculiar/asn1-x509': 2.9.4
++      '@peculiar/asn1-x509-attr': 2.9.4
++      asn1js: 3.0.10
++      tslib: 2.8.1
++
++  '@peculiar/asn1-rsa@2.9.4':
++    dependencies:
++      '@peculiar/asn1-schema': 2.9.4
++      '@peculiar/asn1-x509': 2.9.4
++      asn1js: 3.0.10
++      tslib: 2.8.1
++
++  '@peculiar/asn1-schema@2.9.4':
++    dependencies:
++      '@peculiar/utils': 2.0.3
++      asn1js: 3.0.10
++      tslib: 2.8.1
++
++  '@peculiar/asn1-x509-attr@2.9.4':
++    dependencies:
++      '@peculiar/asn1-schema': 2.9.4
++      '@peculiar/asn1-x509': 2.9.4
++      asn1js: 3.0.10
++      tslib: 2.8.1
++
++  '@peculiar/asn1-x509@2.9.4':
++    dependencies:
++      '@peculiar/asn1-schema': 2.9.4
++      '@peculiar/utils': 2.0.3
++      asn1js: 3.0.10
++      tslib: 2.8.1
++
++  '@peculiar/utils@2.0.3':
++    dependencies:
++      tslib: 2.8.1
++
++  '@peculiar/x509@1.14.3':
++    dependencies:
++      '@peculiar/asn1-cms': 2.9.4
++      '@peculiar/asn1-csr': 2.9.4
++      '@peculiar/asn1-ecc': 2.9.4
++      '@peculiar/asn1-pkcs9': 2.9.4
++      '@peculiar/asn1-rsa': 2.9.4
++      '@peculiar/asn1-schema': 2.9.4
++      '@peculiar/asn1-x509': 2.9.4
++      pvtsutils: 1.3.6
++      reflect-metadata: 0.2.2
++      tslib: 2.8.1
++      tsyringe: 4.10.0
++
+   '@playwright/test@1.62.1':
+     dependencies:
+       playwright: 1.62.1
+@@ -2974,6 +3157,12 @@ snapshots:
+     dependencies:
+       safer-buffer: 2.1.2
+
++  asn1js@3.0.10:
++    dependencies:
++      pvtsutils: 1.3.6
++      pvutils: 1.2.0
++      tslib: 2.8.1
++
+   assertion-error@2.0.1: {}
+
+   aws-sdk-client-mock@4.1.0:
+@@ -3023,6 +3212,8 @@ snapshots:
+
+   bytes@3.1.2: {}
+
++  bytestreamjs@2.0.1: {}
++
+   cac@6.7.14: {}
+
+   call-bind-apply-helpers@1.0.2:
+@@ -3574,6 +3765,15 @@ snapshots:
+
+   pkce-challenge@5.0.1: {}
+
++  pkijs@3.4.0:
++    dependencies:
++      '@noble/hashes': 1.4.0
++      asn1js: 3.0.10
++      bytestreamjs: 2.0.1
++      pvtsutils: 1.3.6
++      pvutils: 1.2.0
++      tslib: 2.8.1
++
+   playwright-core@1.62.1: {}
+
+   playwright@1.62.1:
+@@ -3601,6 +3801,12 @@ snapshots:
+
+   punycode@2.3.1: {}
+
++  pvtsutils@1.3.6:
++    dependencies:
++      tslib: 2.8.1
++
++  pvutils@1.2.0: {}
++
+   qs@6.16.0:
+     dependencies:
+       es-define-property: 1.0.1
+@@ -3638,6 +3844,8 @@ snapshots:
+
+   react@19.2.8: {}
+
++  reflect-metadata@0.2.2: {}
++
+   require-from-string@2.0.2: {}
+
+   resolve-pkg-maps@1.0.0: {}
+@@ -3714,6 +3922,11 @@ snapshots:
+
+   scheduler@0.27.0: {}
+
++  selfsigned@5.5.0:
++    dependencies:
++      '@peculiar/x509': 1.14.3
++      pkijs: 3.4.0
++
+   send@1.2.1(supports-color@7.2.0):
+     dependencies:
+       debug: 4.4.3(supports-color@7.2.0)
+@@ -3852,6 +4065,8 @@ snapshots:
+     dependencies:
+       punycode: 2.3.1
+
++  tslib@1.14.1: {}
++
+   tslib@2.8.1: {}
+
+   tsx@4.23.12:
+@@ -3860,6 +4075,10 @@ snapshots:
+     optionalDependencies:
+       fsevents: 2.3.3
+
++  tsyringe@4.10.0:
++    dependencies:
++      tslib: 1.14.1
++
+   tweetnacl@0.14.5: {}
+
+   type-detect@4.0.8: {}

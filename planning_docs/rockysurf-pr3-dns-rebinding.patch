@@ -1,0 +1,296 @@
+diff --git a/packages/core/package.json b/packages/core/package.json
+index 67586b3..dcf248a 100644
+--- a/packages/core/package.json
++++ b/packages/core/package.json
+@@ -49,6 +49,7 @@
+     "drizzle-orm": "^0.45.2",
+     "hono": "^4.13.5",
+     "ssh2": "^1.17.0",
++    "undici": "^8.10.0",
+     "yaml": "^2.9.0",
+     "zod": "^4.4.3"
+   },
+diff --git a/packages/core/src/packs/safe-fetch.test.ts b/packages/core/src/packs/safe-fetch.test.ts
+index e0ec8bb..0c57890 100644
+--- a/packages/core/src/packs/safe-fetch.test.ts
++++ b/packages/core/src/packs/safe-fetch.test.ts
+@@ -209,3 +209,88 @@ describe('fetchPublicText', () => {
+     if (!result.ok) expect(result.reason).toContain('import limit')
+   })
+ })
++
++describe('connect-time address pinning', () => {
++  it('attaches a dispatcher pinned to the resolved address', async () => {
++    let capturedDispatcher: unknown
++    const fetchImpl = vi.fn(async (_url: string | Request | URL, init?: RequestInit) => {
++      capturedDispatcher = init?.dispatcher
++      return textResponse('pinned')
++    })
++    const result = await fetchPublicText('https://example.com/x', { resolve: publicAddr('93.184.216.34'), fetchImpl })
++    expect(result).toEqual({ ok: true, text: 'pinned' })
++    expect(capturedDispatcher).toBeDefined()
++  })
++
++  it('closes the dispatcher after the fetch completes', async () => {
++    let closeSpy: ReturnType<typeof vi.spyOn> | undefined
++    const fetchImpl = vi.fn(async (_url: string | Request | URL, init?: RequestInit) => {
++      closeSpy = vi.spyOn(init!.dispatcher as { close: () => Promise<void> }, 'close')
++      return textResponse('pinned')
++    })
++    await fetchPublicText('https://example.com/x', { resolve: publicAddr('93.184.216.34'), fetchImpl })
++    expect(closeSpy).toHaveBeenCalled()
++  })
++
++  it('does not attach a dispatcher for a literal public IP (nothing was resolved to pin)', async () => {
++    let capturedDispatcher: unknown = 'unset'
++    const fetchImpl = vi.fn(async (_url: string | Request | URL, init?: RequestInit) => {
++      capturedDispatcher = init?.dispatcher
++      return textResponse('literal')
++    })
++    const resolve: Resolver = async () => {
++      throw new Error('resolve should not be called for a literal IP')
++    }
++    const result = await fetchPublicText('http://93.184.216.34/x', { resolve, fetchImpl })
++    expect(result).toEqual({ ok: true, text: 'literal' })
++    expect(capturedDispatcher).toBeUndefined()
++  })
++
++  it('does not attach a dispatcher for an allowHosts-exempt name (never screened)', async () => {
++    let capturedDispatcher: unknown = 'unset'
++    const fetchImpl = vi.fn(async (_url: string | Request | URL, init?: RequestInit) => {
++      capturedDispatcher = init?.dispatcher
++      return textResponse('vouched')
++    })
++    const resolve: Resolver = async () => {
++      throw new Error('resolve should not be called for an allowHosts name')
++    }
++    const result = await fetchPublicText('http://git.internal.corp/x', {
++      resolve,
++      fetchImpl,
++      allowHosts: new Set(['git.internal.corp']),
++    })
++    expect(result).toEqual({ ok: true, text: 'vouched' })
++    expect(capturedDispatcher).toBeUndefined()
++  })
++
++  it('re-pins independently on each redirect hop', async () => {
++    const answers: Record<string, string> = { 'example.com': '93.184.216.34', 'cdn.example.net': '203.0.113.5' }
++    const resolve: Resolver = async (host) => [{ address: answers[host]! }]
++    const dispatchers: unknown[] = []
++    const fetchImpl = vi
++      .fn()
++      .mockImplementationOnce(async (_url: string | Request | URL, init?: RequestInit) => {
++        dispatchers.push(init?.dispatcher)
++        return redirectTo('https://cdn.example.net/pack.yaml')
++      })
++      .mockImplementationOnce(async (_url: string | Request | URL, init?: RequestInit) => {
++        dispatchers.push(init?.dispatcher)
++        return textResponse('pack: moved')
++      })
++    const result = await fetchPublicText('https://example.com/pack.yaml', { resolve, fetchImpl })
++    expect(result).toEqual({ ok: true, text: 'pack: moved' })
++    expect(dispatchers).toHaveLength(2)
++    expect(dispatchers[0]).toBeDefined()
++    expect(dispatchers[1]).toBeDefined()
++    expect(dispatchers[0]).not.toBe(dispatchers[1])
++  })
++
++  it('never attaches a dispatcher when the address is refused before any fetch', async () => {
++    const fetchImpl = vi.fn()
++    const resolve: Resolver = publicAddr('169.254.169.254')
++    const result = await fetchPublicText('http://metadata.internal/x', { resolve, fetchImpl })
++    expect(result.ok).toBe(false)
++    expect(fetchImpl).not.toHaveBeenCalled()
++  })
++})
+diff --git a/packages/core/src/packs/safe-fetch.ts b/packages/core/src/packs/safe-fetch.ts
+index cfd85be..44927ed 100644
+--- a/packages/core/src/packs/safe-fetch.ts
++++ b/packages/core/src/packs/safe-fetch.ts
+@@ -1,5 +1,6 @@
+ import { lookup } from 'node:dns/promises'
+ import { isIP } from 'node:net'
++import { Agent } from 'undici'
+
+ /**
+  * A fetch for operator-supplied URLs that refuses to talk to anything internal.
+@@ -12,11 +13,14 @@ import { isIP } from 'node:net'
+  * hop by hop under the same rule, and the body is capped so a "pack file" cannot be a
+  * multi-gigabyte tarpit.
+  *
+- * Residual risk, stated rather than hidden: the vetted lookup happens before the socket
+- * connect, so a DNS server rebinding between the two resolutions could still steer the
+- * connection inward. Closing that fully needs a connect-time lookup override (an undici
+- * Agent), which is a dependency this endpoint — admin-only, behind a session — does not
+- * currently justify. Revisit if the endpoint ever loosens.
++ * The vetted lookup happens before the socket connect, so a DNS server rebinding between the
++ * two resolutions could in principle steer the connection inward — the address that answers a
++ * second query need not be the one just checked. Closed by pinning the connect itself to the
++ * address that was actually vetted: `screenUrl` returns it, and the caller builds a one-shot
++ * undici `Agent` whose `connect.lookup` always answers with that exact address, so nothing a
++ * DNS server does after screening changes where the socket actually goes. Not needed for a
++ * literal-IP URL (nothing is resolved at connect time) or an `allowHosts` name (never screened
++ * to begin with — pinning it to an address nobody vetted would be its own bug).
+  */
+
+ const MAX_REDIRECTS = 5
+@@ -161,8 +165,15 @@ export function isBlockedAddress(address: string): boolean {
+
+ const defaultResolver: Resolver = (hostname) => lookup(hostname, { all: true, verbatim: true })
+
++/**
++ * The outcome of screening one hop's URL. `pinnedAddress` is set only when this hop's host was
++ * actually resolved here — a literal IP or an `allowHosts` name has nothing to pin, and connects
++ * exactly as it always has.
++ */
++export type ScreenResult = { ok: true; pinnedAddress?: string } | Refusal
++
+ /** Rejects unless the URL is http(s) AND every address its host stands for is public. */
+-async function screenUrl(url: URL, resolve: Resolver, allowHosts?: ReadonlySet<string>): Promise<Refusal | undefined> {
++async function screenUrl(url: URL, resolve: Resolver, allowHosts?: ReadonlySet<string>): Promise<ScreenResult> {
+   if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+     return { ok: false, reason: 'Only http and https URLs can be imported' }
+   }
+@@ -171,10 +182,10 @@ async function screenUrl(url: URL, resolve: Resolver, allowHosts?: ReadonlySet<s
+   // the literal-IP branch so that a configured host is exempt however it resolves — but a bare
+   // IP can only be exempt if the operator wrote that IP into their config, which is a thing
+   // they are entitled to do and a thing nobody can do on their behalf.
+-  if (allowHosts?.has(host.toLowerCase())) return undefined
++  if (allowHosts?.has(host.toLowerCase())) return { ok: true }
+   if (isIP(host.startsWith('[') ? host.slice(1, -1) : host)) {
+     if (isBlockedAddress(host)) return { ok: false, reason: `Refusing to fetch ${url.href}: ${host} is not a public address` }
+-    return undefined
++    return { ok: true }
+   }
+   let addresses: ResolvedAddress[]
+   try {
+@@ -182,13 +193,55 @@ async function screenUrl(url: URL, resolve: Resolver, allowHosts?: ReadonlySet<s
+   } catch {
+     return { ok: false, reason: `Could not resolve ${host}` }
+   }
+-  if (addresses.length === 0) return { ok: false, reason: `Could not resolve ${host}` }
++  const first = addresses[0]
++  if (!first) return { ok: false, reason: `Could not resolve ${host}` }
+   // ANY blocked address fails the whole name — the attacker does not get to pick which
+   // record the socket ends up using.
+   if (addresses.some((a) => isBlockedAddress(a.address))) {
+     return { ok: false, reason: `Refusing to fetch ${url.href}: ${host} resolves to a non-public address` }
+   }
+-  return undefined
++  return { ok: true, pinnedAddress: first.address }
++}
++
++/**
++ * Node's own `net.LookupFunction` shape (`node:net` declares it but does not export it, so it's
++ * reproduced structurally here rather than imported) — a single callback that Node's connect
++ * path invokes either `{ all: true }` (Happy Eyeballs, the common case for a dual-stack host) or
++ * with one address, depending on how it was asked to resolve.
++ */
++type NetLookupFunction = (
++  hostname: string,
++  options: { all?: boolean },
++  callback: (err: NodeJS.ErrnoException | null, address: string | { address: string; family: number }[], family?: number) => void,
++) => void
++
++/**
++ * A `lookup` override that ignores the hostname it's asked about and always answers with the one
++ * address that was already vetted by `screenUrl` — the actual fix for the resolve-vs-connect gap
++ * described above.
++ */
++function pinnedLookup(address: string): NetLookupFunction {
++  const family = isIP(address) === 6 ? 6 : 4
++  return (_hostname, options, callback) => {
++    if (options.all) {
++      callback(null, [{ address, family }])
++    } else {
++      callback(null, address, family)
++    }
++  }
++}
++
++/**
++ * One-shot dispatcher that only ever connects to the vetted address, for exactly one hop's
++ * fetch. Cast at the return: `Agent` here and the global `dispatcher` field's `Dispatcher` type
++ * are the same runtime shape from undici, declared twice — once by the `undici` package itself,
++ * once inside `@types/node`'s bundled `undici-types` — so they are structurally close but not
++ * nominally identical. Constructing the dispatcher is fully type-checked against undici's own
++ * types above; only this hand-off to the ambient fetch types needs the assertion.
++ */
++function pinnedDispatcher(address: string): NonNullable<RequestInit['dispatcher']> {
++  const agent = new Agent({ connect: { lookup: pinnedLookup(address) } })
++  return agent as unknown as NonNullable<RequestInit['dispatcher']>
+ }
+
+ async function readCapped(response: Response, maxBytes: number): Promise<Buffer | undefined> {
+@@ -229,13 +282,20 @@ export async function fetchPublicBytes(rawUrl: string, deps: SafeFetchDeps = {})
+   }
+
+   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+-    const refusal = await screenUrl(url, resolve, deps.allowHosts)
+-    if (refusal) return refusal
+-
+-    const response = await fetchImpl(url, {
+-      redirect: 'manual',
+-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+-    }).catch(() => undefined)
++    const screened = await screenUrl(url, resolve, deps.allowHosts)
++    if (!screened.ok) return screened
++
++    const dispatcher = screened.pinnedAddress ? pinnedDispatcher(screened.pinnedAddress) : undefined
++    let response: Response | undefined
++    try {
++      response = await fetchImpl(url, {
++        redirect: 'manual',
++        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
++        ...(dispatcher ? { dispatcher } : {}),
++      }).catch(() => undefined)
++    } finally {
++      await dispatcher?.close().catch(() => {})
++    }
+     if (!response) return { ok: false, reason: `Could not fetch ${url.href}` }
+
+     if (response.status >= 300 && response.status < 400) {
+@@ -307,14 +367,21 @@ export async function probePublicUrl(rawUrl: string, options: SafeProbeOptions =
+   const origin = url.origin
+
+   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+-    const refusal = await screenUrl(url, resolve, options.allowHosts)
+-    if (refusal) return refusal
+-
+-    const response = await fetchImpl(url, {
+-      redirect: 'manual',
+-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+-      ...(options.headers && url.origin === origin ? { headers: options.headers } : {}),
+-    }).catch(() => undefined)
++    const screened = await screenUrl(url, resolve, options.allowHosts)
++    if (!screened.ok) return screened
++
++    const dispatcher = screened.pinnedAddress ? pinnedDispatcher(screened.pinnedAddress) : undefined
++    let response: Response | undefined
++    try {
++      response = await fetchImpl(url, {
++        redirect: 'manual',
++        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
++        ...(options.headers && url.origin === origin ? { headers: options.headers } : {}),
++        ...(dispatcher ? { dispatcher } : {}),
++      }).catch(() => undefined)
++    } finally {
++      await dispatcher?.close().catch(() => {})
++    }
+     if (!response) return { ok: false, reason: `Could not reach ${url.href}` }
+
+     await response.body?.cancel().catch(() => {})
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index fa13f0f..1e05162 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -40,6 +40,9 @@ importers:
+       ssh2:
+         specifier: ^1.17.0
+         version: 1.17.0
++      undici:
++        specifier: ^8.10.0
++        version: 8.10.0
+       yaml:
+         specifier: ^2.9.0
+         version: 2.9.0
