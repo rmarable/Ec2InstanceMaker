@@ -710,6 +710,19 @@ separately from `EC2INSTANCEMAKER_ALLOW_MUTATING` — see that file's
 section below for why a bare boolean was rejected in favor of an
 instance-name-scoped env var.
 
+The gaps above that live in RockySurf itself, not in how this repo
+integrates it, were also filed upstream against `amroja-biz/rockysurf`:
+ambient-credential inheritance + the undocumented headless bootstrap path
+([PR #506](https://github.com/amroja-biz/rockysurf/pull/506)), the
+DNS-rebinding gap in its outbound-fetch guard
+([PR #507](https://github.com/amroja-biz/rockysurf/pull/507)), optional
+built-in TLS ([PR #508](https://github.com/amroja-biz/rockysurf/pull/508)),
+and per-token MCP scope enforcement, filed as an issue rather than a PR
+since a real fix changes their core authorization layer
+([issue #509](https://github.com/amroja-biz/rockysurf/issues/509)).
+Drafts, source citations, and the real patches sent are in
+`planning_docs/rockysurf-*.md`/`.patch`.
+
 **`manage_instance.py`** starts/stops/reboots/terminates a previously-built
 instance or family, or reports on what's out there: `-N <instance_name>
 -A start|stop|reboot|terminate [-c]` (`-c` skips the confirmation prompt),
