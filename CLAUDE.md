@@ -809,7 +809,12 @@ tools, three read-only and five read-write:
   CLI's interactive CTRL-C window entirely, since there's no human at a
   terminal to type into it; `confirm=True` is the real safety gate here
   instead, checked before `run_build()` is ever called. Returns
-  `dataclasses.asdict()` of the `BuildReport` `run_build()` produces.
+  `dataclasses.asdict()` of the `BuildReport` `run_build()` produces —
+  when `enable_rockysurf=true`, this includes `rockysurf_access_commands`
+  (one real, ready-to-run `aws ssm start-session ...` tunnel command per
+  instance, with the actual instance ID already filled in): an MCP client
+  has no console to read `report_and_notify()`'s printed version from, so
+  `rockysurf_enabled=True` alone would tell it nothing it could act on.
   Creates real, billable AWS resources and can take several minutes
   (Terraform apply + SSM provisioning) — see `make_instance.py` above for
   what `run_build()`/`ctrlc_abort_seconds` actually do.

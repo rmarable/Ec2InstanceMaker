@@ -511,6 +511,26 @@ class TestBuildInstanceEndToEnd:
         rendered_dir = tmp_path / "instance_data" / "mcpdev01"
         assert (rendered_dir / "mcpdev01.tf").is_file()
 
+    def test_rockysurf_enabled_returns_a_real_tunnel_command_not_just_the_flag(self, tmp_path, monkeypatch):
+        """An MCP client has no console to read report_and_notify()'s
+        printed tunnel command from -- it only ever sees the dict this tool
+        returns. rockysurf_enabled=True alone tells a model nothing it can
+        act on; it needs the real, ready-to-run command back too.
+        """
+        monkeypatch.chdir(tmp_path)
+        os.symlink(os.path.join(REPO_ROOT, "templates"), tmp_path / "templates")
+        os.symlink(os.path.join(REPO_ROOT, "custom_user_scripts"), tmp_path / "custom_user_scripts")
+        _patch_aws_and_terraform_boundary(monkeypatch)
+        monkeypatch.setattr(make_instance, "fetch_windows_instance_details", MagicMock(return_value=("i-0123456789abcdef0", "mcpdev01-0", "203.0.113.10")))
+        monkeypatch.setenv("EC2INSTANCEMAKER_ALLOW_ROCKYSURF_MCP", "mcpdev01")
+
+        result = mcp_server.build_instance(az="us-east-2a", instance_name="mcpdev01", instance_owner="tester", instance_owner_email="tester@example.com", confirm=True, enable_rockysurf="true")
+
+        assert result["rockysurf_enabled"] is True
+        assert result["rockysurf_access_commands"] == [
+            'aws ssm start-session --target i-0123456789abcdef0 --region us-east-2 --document-name AWS-StartPortForwardingSession --parameters \'{"portNumber":["3033"],"localPortNumber":["3033"]}\''
+        ]
+
 
 class TestMutatingToolsAreOffByDefault:
     """Whether a session can create or destroy AWS resources is a decision

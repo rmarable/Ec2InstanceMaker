@@ -757,20 +757,23 @@ all.
 
 RockySurf's own first-run setup is an interactive web wizard (there's no
 headless/non-interactive bootstrap) -- you complete it yourself, in your
-own browser, after tunneling in. Two ways to reach it, same as this
-toolkit's other SSH/SSM options:
+own browser, after tunneling in. The build prints a ready-to-paste SSM
+port-forwarding command once it finishes, with the real instance ID
+already filled in -- same access method as `access_instance.py` uses
+elsewhere in this toolkit, no inbound port needed at all:
 
 ```
-# SSM (no inbound port needed at all):
-$ aws ssm start-session --target <instance-id> \
-    --document-name AWS-StartPortForwardingSession \
-    --parameters '{"portNumber":["3033"],"localPortNumber":["3033"]}'
+RockySurf is starting on the new instance (loopback-only, port 3033).
+Reach it with a port-forwarding tunnel:
 
-# SSH (uses the existing security-group rule, already scoped by --ssh_allowed_ips):
-$ ssh -L 3033:localhost:3033 <ec2_user>@<public-ip>
+  aws ssm start-session --target i-0123456789abcdef0 --region us-east-2 --document-name AWS-StartPortForwardingSession --parameters '{"portNumber":["3033"],"localPortNumber":["3033"]}'
+
+Navigate to => http://localhost:3033
 ```
 
-Then browse to `http://localhost:3033`.
+Building a family (`--count` > 1) with RockySurf enabled prints one such
+command per instance, each with its own local port (`3033`, `3034`, ...)
+so more than one tunnel can be open at the same time.
 
 A note on the systemd unit: it runs as the instance's own `ec2_user`
 (`ec2-user`/`rocky`/`ubuntu`, depending on `base_os`), not root. This

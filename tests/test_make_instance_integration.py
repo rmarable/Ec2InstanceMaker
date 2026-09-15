@@ -360,3 +360,55 @@ class TestBuildReportCarriesNoSecrets:
         serialized = repr(dataclasses.asdict(report))
         assert "SUPERSECRETPASSWORDTABLE" not in serialized
         assert report.windows_password_retrieval_command == "./access_instance.py -N testint01"
+
+
+class TestRockySurfAccessGuidance:
+    """report_and_notify() used to tell the operator to 'run the access
+    command above' for RockySurf's tunnel -- but that command
+    (access_instance.py) opens an interactive shell, not a port-forwarding
+    tunnel, and never actually reaches RockySurf's loopback-only port. This
+    checks the real fix: a ready-to-paste 'aws ssm start-session ...'
+    command with the actual instance ID(s) filled in.
+    """
+
+    def test_single_instance_prints_one_ready_to_paste_ssm_command(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.chdir(tmp_path)
+        _symlink_repo_assets(tmp_path)
+        _patch_aws_and_terraform_boundary(monkeypatch)
+        monkeypatch.setattr(make_instance, "fetch_windows_instance_details", MagicMock(return_value=("i-0123456789abcdef0", "testint01-0", "203.0.113.10")))
+
+        report = make_instance.run_build([*_happy_path_argv(), "--enable_rockysurf=true"], aux_data.refer_to_docs_and_quit)
+
+        expected_command = (
+            'aws ssm start-session --target i-0123456789abcdef0 --region us-east-2 --document-name AWS-StartPortForwardingSession --parameters \'{"portNumber":["3033"],"localPortNumber":["3033"]}\''
+        )
+        out = capsys.readouterr().out
+        assert expected_command in out
+        assert "access_instance.py" not in out.split("RockySurf is starting")[1]
+
+        # mcp_server.py's build_instance tool has no console to read the
+        # printed command from -- a programmatic caller needs it in the
+        # structured report instead.
+        assert report.rockysurf_access_commands == [expected_command]
+
+    def test_family_build_gives_each_member_its_own_local_port(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.chdir(tmp_path)
+        _symlink_repo_assets(tmp_path)
+        _patch_aws_and_terraform_boundary(monkeypatch)
+        monkeypatch.setattr(
+            make_instance,
+            "fetch_windows_instance_details",
+            MagicMock(return_value=("i-aaaaaaaaaaaaaaaaa,i-bbbbbbbbbbbbbbbbb,i-ccccccccccccccccc", "testfam01-0,testfam01-1,testfam01-2", "203.0.113.10,203.0.113.11,203.0.113.12")),
+        )
+
+        report = make_instance.run_build([*_happy_path_argv("testfam01"), "--enable_rockysurf=true", "--count", "3"], aux_data.refer_to_docs_and_quit)
+
+        expected_commands = [
+            'aws ssm start-session --target i-aaaaaaaaaaaaaaaaa --region us-east-2 --document-name AWS-StartPortForwardingSession --parameters \'{"portNumber":["3033"],"localPortNumber":["3033"]}\'',
+            'aws ssm start-session --target i-bbbbbbbbbbbbbbbbb --region us-east-2 --document-name AWS-StartPortForwardingSession --parameters \'{"portNumber":["3033"],"localPortNumber":["3034"]}\'',
+            'aws ssm start-session --target i-ccccccccccccccccc --region us-east-2 --document-name AWS-StartPortForwardingSession --parameters \'{"portNumber":["3033"],"localPortNumber":["3035"]}\'',
+        ]
+        out = capsys.readouterr().out
+        for command in expected_commands:
+            assert command in out
+        assert report.rockysurf_access_commands == expected_commands

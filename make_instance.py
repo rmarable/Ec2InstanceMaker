@@ -522,6 +522,12 @@ class BuildReport:
     build_ami_script: str
     sns_topic_arn: str
     rockysurf_enabled: bool
+    # A programmatic caller (mcp_server.py's build_instance tool) has no
+    # console to read the printed tunnel command from -- one real,
+    # ready-to-run "aws ssm start-session ..." command per instance, same
+    # ones report_and_notify() prints, so an MCP client can actually reach
+    # RockySurf instead of just learning rockysurf_enabled is True.
+    rockysurf_access_commands: list[str] | None = None
 
 
 # Function: resolve_network_and_compute()
@@ -1056,10 +1062,47 @@ def report_and_notify(
         print(access_command)
 
     rockysurf_enabled = not network.is_windows and settings.enable_rockysurf == "true"
+    rockysurf_access_commands: list[str] | None = None
     if rockysurf_enabled:
+        # access_instance.py opens an interactive shell (sudo su - <ec2_user>),
+        # not a port-forwarding tunnel -- it never actually reaches RockySurf's
+        # loopback-only port. Printing a real, ready-to-paste SSM tunnel command
+        # here needs the actual instance ID(s), which only exist after
+        # apply_terraform() has run (this phase runs after that one). Reused
+        # despite its name: these Terraform outputs aren't Windows-specific,
+        # see fetch_windows_instance_details()'s own docstring.
+        instance_ids_csv, _instance_names_csv, _ip_addresses_csv = fetch_windows_instance_details(settings.instance_data_dir, refer_to_docs_and_quit)
+        instance_ids = instance_ids_csv.split(",")
+        rockysurf_access_commands = [
+            "aws ssm start-session --target "
+            + instance_id
+            + " --region "
+            + settings.region
+            + ' --document-name AWS-StartPortForwardingSession --parameters \'{"portNumber":["3033"],"localPortNumber":["'
+            + str(3033 + index)
+            + "\"]}'"
+            for index, instance_id in enumerate(instance_ids)
+        ]
+
         print("")
-        print("RockySurf is starting on the new instance (loopback-only, port 3033).")
-        print("Run the access command above for SSH/SSM tunnel instructions to reach it at http://localhost:3033.")
+        if settings.count == 1:
+            print("RockySurf is starting on the new instance (loopback-only, port 3033).")
+            print("Reach it with a port-forwarding tunnel:")
+            print("")
+            print("  " + rockysurf_access_commands[0])
+            print("")
+            print("Navigate to => http://localhost:3033")
+        else:
+            print("RockySurf is starting on " + str(settings.count) + " new instances (loopback-only, port 3033 on each).")
+            print("Reach each one with its own port-forwarding tunnel -- a distinct local port per instance so more")
+            print("than one tunnel can be open at once:")
+            print("")
+            for index, (instance_id, command) in enumerate(zip(instance_ids, rockysurf_access_commands, strict=True)):
+                local_port = 3033 + index
+                print("  " + settings.instance_name + "-" + str(index) + " (" + instance_id + "), local port " + str(local_port) + ":")
+                print("  " + command)
+                print("")
+            print("Navigate to => http://localhost:<local port> for each.")
         print("")
         print("*** RockySurf itself can create/manage cloud resources using this instance's own IAM")
         print("*** credentials. ./kill-instance." + settings.instance_name + ".sh only deletes what Ec2InstanceMaker")
@@ -1120,6 +1163,7 @@ def report_and_notify(
         build_ami_script=build_ami_script,
         sns_topic_arn=iam_sns.sns_topic_arn,
         rockysurf_enabled=rockysurf_enabled,
+        rockysurf_access_commands=rockysurf_access_commands,
     )
 
 
