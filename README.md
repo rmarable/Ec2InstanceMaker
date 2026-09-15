@@ -6,6 +6,35 @@ teaching tool for those who want to dive deep into cloud computing and
 security paradigms, learn more about infrastructure automation, and explore
 the AWS ecosystem.
 
+## Table of Contents
+
+* [License Information](#license-information)
+* [Disclaimer](#disclaimer)
+* [About Ec2InstanceMaker](#about-ec2instancemaker)
+* [Ec2InstanceMaker Features](#ec2instancemaker-features)
+* [Installation Instructions for the Impatient](#installation-instructions-for-the-impatient)
+* [Note to DevOps Teams](#note-to-devops-teams)
+* [Using Ec2InstanceMaker](#using-ec2instancemaker)
+  * [Naming and input rules](#naming-and-input-rules)
+  * [Recovering from a failed build](#recovering-from-a-failed-build)
+  * [A note on what these policies actually grant](#a-note-on-what-these-policies-actually-grant)
+  * [Using make_instance.py](#using-make_instancepy)
+  * [Building Instances](#building-instances)
+  * [Accessing Instances](#accessing-instances)
+  * [RockySurf](#rockysurf)
+  * [Managing Instances](#managing-instances)
+  * [Terminating Instances](#terminating-instances)
+* [Instance Customization](#instance-customization)
+* [EC2 Placement Groups](#ec2-placement-groups)
+* [Working with Custom AMIs](#working-with-custom-amis)
+* [Building New AMIs Using the build-ami Script](#building-new-amis-using-the-build-ami-script)
+* [MCP Server](#mcp-server)
+  * [Securing the MCP server](#securing-the-mcp-server)
+  * [Optional: running the MCP server under a scoped IAM role](#optional-running-the-mcp-server-under-a-scoped-iam-role)
+* [Troubleshooting](#troubleshooting)
+  * [Common runtime failures](#common-runtime-failures)
+  * [Missing prerequisites](#missing-prerequisites)
+
 ## License Information
 
 Please refer to the LICENSE document included with this source-available software for the specific terms and conditions that govern its use.
