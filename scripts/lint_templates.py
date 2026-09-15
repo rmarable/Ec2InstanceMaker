@@ -32,6 +32,18 @@ import yaml
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO_ROOT)
 
+# Each scenario's instance_data_dir gets rendered as a literal string into
+# access_instance.<name>.py (e.g. instance_data_dir = '<this path>'). A
+# system tmp dir (the tempfile module's default) makes that literal start
+# with /tmp, /var/tmp, etc., and bandit's B108 (hardcoded_tmp_directory)
+# flags it as if the *template* hardcoded an insecure tmp path -- it can't
+# tell that this is only the test harness's own scratch root, not real
+# instance_data_dir (which is always a real build's ./instance_data/<name>,
+# never under a system tmp dir). Rooting scratch dirs here instead of the
+# system default keeps that literal out of bandit's tmp-path patterns.
+SCRATCH_ROOT = os.path.join(REPO_ROOT, ".lint-template-scratch")
+os.makedirs(SCRATCH_ROOT, exist_ok=True)
+
 from instance_builder import InstanceParameters  # noqa: E402
 from template_engine import TEMPLATE_MAP, _build_render_context, render_instance_templates  # noqa: E402
 
@@ -1235,7 +1247,7 @@ def _process_scenario(scenario_name: str, instance_parameters: dict[str, Any], c
     if scratch_root is not None:
         _run(scratch_root)
     else:
-        with tempfile.TemporaryDirectory() as root:
+        with tempfile.TemporaryDirectory(dir=SCRATCH_ROOT) as root:
             _run(root)
 
     return failures
@@ -1268,7 +1280,7 @@ def main() -> int:
     # function (not wrapped in the throwaway-directory path
     # _process_scenario otherwise uses) so every other scenario can copy
     # its post-init .terraform/ instead of re-running init 14 more times.
-    with tempfile.TemporaryDirectory() as first_scratch_root:
+    with tempfile.TemporaryDirectory(dir=SCRATCH_ROOT) as first_scratch_root:
         all_failures.extend(_process_scenario(first_name, first_params, cached_init_dir=None, scratch_root=first_scratch_root))
         first_instance_data_dir = os.path.join(first_scratch_root, "instance_data", first_params["instance_name"])
 
