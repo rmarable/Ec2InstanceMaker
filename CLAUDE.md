@@ -143,6 +143,16 @@ CI installs it the same way (`.github/workflows/lint.yml`).
   wall-clock time here, so threads are enough without multiprocessing's
   extra complexity. Combined, this cut a real `pre-commit run --all-files`
   from several minutes to ~90s.
+  Each scenario's `instance_data_dir` gets rendered as a literal string
+  into `access_instance.<name>.py`, so the scratch directory it's built
+  from can't live under the system tmp dir: bandit's B108
+  (`hardcoded_tmp_directory`) can't tell that literal from a real build's
+  `instance_data_dir` (always `./instance_data/<name>`, never a system tmp
+  path) and flags it as if the *template* hardcoded an insecure path.
+  Scratch dirs are rooted under the gitignored `.lint-template-scratch/`
+  instead of `tempfile`'s default for exactly this reason — don't switch
+  them back to the system default, and don't "fix" this with a `# nosec`
+  suppression in the template, since real builds never trigger it at all.
 - `terraform fmt -check` also runs inside `scripts/lint_templates.py`, and is
   blocking: `DEFAULT_EC2_TEMPLATE.j2` and `provider_aws.j2` are hand-aligned
   to HCL2 canonical formatting (no legacy `"${...}"` wrapping around a whole
